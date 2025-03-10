@@ -1,0 +1,45 @@
+{
+  "id": "ardisfoxxs-lewd-pf2e",
+  "title": "ArdisFoxx's Lewd PF2e",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "12"
+  },
+  "authors": [
+    {
+      "name": "ArdisFoxx",
+      "email": "Ardisfoxxart@gmail.com",
+      "url": "https://ardisfoxxart.carrd.co/",
+      "discord": "ardisfoxxart",
+      "flags": {}
+    }
+  ],
+  "url": "https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e",
+  "manifest": "https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/download/v1.0.0/module.json",
+  "download": "https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/download/v1.0.0/ardisfoxxs-lewd-pf2e.zip",
+  "packs": [
+    {
+      "name": "aflp-lewd-items",
+      "label": "AFLP Lewd Items",
+      "path": "packs/aflp-lewd-items",
+      "type": "Item",
+      "system": "pf2e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    },
+    {
+      "name": "aflp-lewd-macros",
+      "label": "AFLP Lewd Macros",
+      "path": "packs/aflp-lewd-macros",
+      "type": "Macro",
+      "system": "pf2e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    }
+  ]
+}
