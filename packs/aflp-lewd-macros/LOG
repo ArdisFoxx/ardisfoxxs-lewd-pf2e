@@ -1,3 +1,15 @@
-2025/03/10-22:35:30.672775 ffff79fbf040 Recovering log #4
-2025/03/10-22:35:30.677281 ffff79fbf040 Delete type=3 #2
-2025/03/10-22:35:30.677305 ffff79fbf040 Delete type=0 #4
+2025/03/10-23:33:25.920256 ffff7878f040 Recovering log #10
+2025/03/10-23:33:25.924759 ffff7878f040 Delete type=3 #8
+2025/03/10-23:33:25.924784 ffff7878f040 Delete type=0 #10
+2025/03/11-00:01:48.311254 ffff7768b040 Level-0 table #15: started
+2025/03/11-00:01:48.313840 ffff7768b040 Level-0 table #15: 21364 bytes OK
+2025/03/11-00:01:48.315490 ffff7768b040 Delete type=0 #13
+2025/03/11-00:01:48.321089 ffff7768b040 Manual compaction at level-0 from '!folders!sj5a700wUK32eNgB' @ 72057594037927935 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at (end)
+2025/03/11-00:01:48.324901 ffff7768b040 Manual compaction at level-1 from '!folders!sj5a700wUK32eNgB' @ 72057594037927935 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at '!macros!TJDjEI7Fyd71vKDa' @ 6 : 1
+2025/03/11-00:01:48.324912 ffff7768b040 Compacting 1@1 + 1@2 files
+2025/03/11-00:01:48.327188 ffff7768b040 Generated table #16@1: 2 keys, 10832 bytes
+2025/03/11-00:01:48.327203 ffff7768b040 Compacted 1@1 + 1@2 files => 10832 bytes
+2025/03/11-00:01:48.328687 ffff7768b040 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/03/11-00:01:48.328747 ffff7768b040 Delete type=2 #15
+2025/03/11-00:01:48.328793 ffff7768b040 Delete type=2 #5
+2025/03/11-00:01:48.330818 ffff7768b040 Manual compaction at level-1 from '!macros!TJDjEI7Fyd71vKDa' @ 6 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at (end)

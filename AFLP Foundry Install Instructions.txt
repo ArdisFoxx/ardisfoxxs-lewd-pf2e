@@ -1,0 +1,9 @@
+In Foundry setup, navigate to the Modules tab.
+Click Install Module.
+Enter the below link in the Manifest URL at the bottom of the window, then click Install.
+
+https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/download/v1.0.0/module.json
+
+Launch your Foundry world.
+Activate the ArdisFoxx's Lewd PF2e module.
+Import the compendiums. (If you don't want to import everything, at a minumum, the Cumflation macro only works if the Cumflation effects are imported)
