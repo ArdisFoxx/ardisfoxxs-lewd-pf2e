@@ -12,9 +12,9 @@ DD_VIB_MULT: '2'
 ENABLED_INTERFACES:
 - Log Reader
 LOCK_NAME: Self-lock
-LOG_PATH: C:/Users/ardisfoxx/AppData/Local/Microsoft/Edge/User Data/chrome_debug.log
+LOG_PATH: C:/Users/ardisfoxx/AppData/Local/Google/Chrome/User Data/chrome_debug.log
 LOVENSE_HOST: 192.168.1.187:20010
-LOVENSE_STRENGTH_SCALE: '10'
+LOVENSE_STRENGTH_SCALE: '100'
 LOVENSE_USE_NEW_API: true
 MAUSTEC_HOST: ws://192.168.0.230:80
 OUTPUT_IDX: '1'
