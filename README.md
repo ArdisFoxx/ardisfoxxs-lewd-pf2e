@@ -24,7 +24,12 @@ Then, throughout your campaign, I recommend dropping in *opportunities* for play
 
 ```
 
-Now, a question for yall regarding sexy content in the game! Choose your default game mode:
+Now a question regarding sexy content in the game.. it's time to choose your "lewd game mode" to start with at the outset of the campaign!
+
+Please make one vote only, and the least lewd option that has any votes will be selected as the final pick. This ensures that no player will be uncomfortable.
+
+This is the baseline for the start of the game - making the game more or less lewd as we go will be a part of adjusting to the group dynamic, getting comfortable with each other, testing our boundaries and exploring the kind of game we want to run!
+
 **1. Typical Anime**
 *You're strictly about the adventure. Sometimes you'll see sexy people.*
 - Humanoids may be sexy and alluring. You won't see anything explicit. 
