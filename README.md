@@ -22,7 +22,7 @@ Then, throughout your campaign, I recommend dropping in *opportunities* for play
 ### Game Mode Template for Session 0:
 
 
-```
+<code>
 
 Now a question regarding sexy content in the game.. it's time to choose your "lewd game mode" to start with at the outset of the campaign!
 
@@ -70,4 +70,4 @@ This is the baseline for the start of the game - making the game more or less le
 - Sex may involve consensual non-consent. X Cards and safewords are enabled. This means NPCs or creatures may have non-consensual sex with your character during combat encounters, but you as a player are cool with it as part of the game dynamic and are consenting to it in advance, with the option to change your mind on that at any point and halt the game or skip the scene at any time.
 - New rules are added to the game, including new conditions such as Exposed, Horny, Mind Broken, Cumflated, and kinks such as Cumslut and Creature Fetish. Sexual actions such as Breed and Strip are added to some monsters. TPKs may be replaced with "Bad Ends" where, in the case where an encounter ends with the whole party being defeated, instead of death, the party is taken to the monster's lairs to become sex slaves. This usually involves a cut scene to narrate the passage of time, the PCs gaining a Creature Fetish, and then being released or having an opportunity to escape, re-equip and get revenge.
 
-```
+</code>
