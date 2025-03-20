@@ -17,7 +17,7 @@ Hooks.once("ready", async function () {
   });
 
   Hooks.on("createChatMessage", async function (msg, _status, userid) {
-    if (!msg?.isApplyDamage) return;
+    if (!msg.flags?.pf2e?.appliedDamage) return;
     //const split_type = "none";
     const dmg = msg?.rolls.total;
     const actor = game.actors.get(msg?.flags?.pf2e?.context?.actor);
