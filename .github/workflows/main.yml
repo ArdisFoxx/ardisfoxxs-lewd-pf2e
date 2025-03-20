@@ -130,6 +130,23 @@ jobs:
             AFLP Lovense Integration/
           # Don't forget to add a backslash at the end of the line for any
           # additional files or directories!
+          
+                # Create a "module.zip" archive containing all the module's required files.
+      # If you have other directories or files that will need to be added to
+      # your packaged module, add them here.
+      - name: Create Module Archive
+        run: |
+          # Note that `zip` will only emit warnings when a file or directory
+          # doesn't exist, it will not fail.
+          zip                                    \
+            `# Options`                          \
+            --recurse-paths                      \
+            `# The name of the output file`      \
+             ./AFLP Lovense Integration.zip                        \
+            `# The files that will be included.` \
+            AFLP_Lovense_Integration/
+          # Don't forget to add a backslash at the end of the line for any
+          # additional files or directories!
 
       # Update the GitHub release with the manifest and module archive files.
       - name: Update Release With Files
@@ -141,6 +158,6 @@ jobs:
           draft: ${{ github.event.release.unpublished }}
           prerelease: ${{ github.event.release.prerelease }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifacts: './module.json, ./module.zip'
+          artifacts: './module.json, ./AFLP_Lovense_Integration.zip, ./module.zip'
           tag: ${{ github.event.release.tag_name }}
           body: ${{ github.event.release.body }}
