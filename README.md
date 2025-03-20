@@ -15,12 +15,15 @@ https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/latest/download/modul
 
 
 ## Session 0 Content Guide:
-When using the content in this module in your own campaign, I recommend outlining most if not all of it with your group during Session 0. Ask your group what kind of campaign they would like it to be, and then ask them to vote for one of these four baseline "lewd game modes". Tally up the game modes that got at least one vote, and the game mode with the lowest number from 1-4 wins the selection process. This ensures that no one in your group will ever feel uncomfortable. 
+When incorporating this module into your campaign, discuss its content openly with your group during Session 0. Let players vote for one of the four baseline "lewd game modes." Let the mode with the lowest numerical value that received at least one vote become the mode your group uses — this ensures everyone stays comfortable.
 
-Then, throughout your campaign, I recommend dropping in *opportunities* for players to explore content that exceeds that initial game mode number, and advising the players "above the table" about it. Perhaps its a spell that more closely matches "lewd game mode level 4". Advise the players that the spell is "lewd level 4" and that its optional content if they want to add it. Continue to do this little by little while communicating with your group throughout the process and at the end of each session to check in and make sure everyone is still cool with the content you're using. The point of the game is to relax and have fun! Not to weird out your friends by making them uncomfortable. Remind your players regularly that you can continue to adjust the dial, adding, adjusting or removing parts of this content at any point throughout the campaign. It's important to adjust it "to taste" as you go, because people won't always know what kind of game they want to run until they are half-way through the session, or even half-way through the campaign.
+Throughout the campaign, introduce optional opportunities for players to explore content beyond their initial comfort level, clearly labeling it (e.g., "this spell is lewd level 4"). Regularly check in "above the table" to confirm everyone remains comfortable. Remember, the goal is fun and relaxation, not discomfort.
+Be flexible and adjust the "lewdness dial" as needed. Players' preferences can change as the game evolves, so keep communication open and adjust the content freely at any stage of the campaign.
+
+The point of the game is to relax and have fun! Not to weird out your friends by making them uncomfortable. 
 
 ### Game Mode Template for Session 0:
-
+Copy paste this and send it to your group!
 
 ```
 Now a question regarding sexy content in the game.. it's time to choose your "lewd game mode" to start with at the outset of the campaign!
