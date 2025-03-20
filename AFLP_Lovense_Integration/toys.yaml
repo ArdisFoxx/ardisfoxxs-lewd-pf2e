@@ -1,6 +1,6 @@
 hush:
   battery: 99
-  enabled: true
+  enabled: false
   id: 90ab965340b1
   interface: Lovense
   name: hush
