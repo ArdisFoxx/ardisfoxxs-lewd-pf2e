@@ -19,9 +19,10 @@ When using the content in this module in your own campaign, I recommend outlinin
 
 Then, throughout your campaign, I recommend dropping in *opportunities* for players to explore content that exceeds that initial game mode number, and advising the players "above the table" about it. Perhaps its a spell that more closely matches "lewd game mode level 4". Advise the players that the spell is "lewd level 4" and that its optional content if they want to add it. Continue to do this little by little while communicating with your group throughout the process and at the end of each session to check in and make sure everyone is still cool with the content you're using. The point of the game is to relax and have fun! Not to weird out your friends by making them uncomfortable. Remind your players regularly that you can continue to adjust the dial, adding, adjusting or removing parts of this content at any point throughout the campaign. It's important to adjust it "to taste" as you go, because people won't always know what kind of game they want to run until they are half-way through the session, or even half-way through the campaign.
 
-```
+### Game Mode Template for Session 0:
 
-Game Mode Template for Session 0:
+
+```
 
 Now, a question for yall regarding sexy content in the game! Choose your default game mode:
 **1. Typical Anime**
