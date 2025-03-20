@@ -84,7 +84,7 @@ The Lovense integration is composed of 3 parts:
 3. Run one of the Chrome or Edge shortcuts within the folder, to launch a web browser in logging mode.
 4. Run GameInterfaceForToys.exe. Note that Windows Smart Screen can produce a false positive detecting it as suspicious software, because the software hasn't seen any use so it has no repuation. This is a known issue with software packaged in Git. This software is perfectly safe and open source, and you can view the full code here https://github.com/MinLL/GameInterfaceForToys.
 5. Tap Settings.
-6. Click "Select another log file" and navigate to %localappdata%\Google\Chrome\User Data. Double click the chrome_debug.log file.
+6. Click "Select another log file" and navigate to `%localappdata%\Google\Chrome\User Data` for Chrome, or `%localappdata%\Microsoft\Edge\User Data` for Edge. Double click the chrome_debug.log file.
 7. Change the "In-game character name" to the name of your player character in Foundry.
 8. Change the Lovense Host IP address to the Local IP of your Lovense Game Mode. (To locate this IP, open the Lovense app on your phone, select the Discover tab, then select Game Mode).
 9. Click Save to exit the settings.
