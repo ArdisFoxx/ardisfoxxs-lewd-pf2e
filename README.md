@@ -83,7 +83,7 @@ The Lovense integration is composed of 3 parts:
 ### Player Setup of Lovense Integration:
 1. Players should download the [AFLP Lovense Integration](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/AFLP_Lovense_Integration.zip).
 2. Extract it anywhere on your computer.
-3. Run one of the Chrome or Edge shortcuts within the folder, to launch a web browser in logging mode.
+3. Run one of the Chrome or Edge shortcuts within the folder, to launch a web browser in logging mode. Login to your Foundry world with that browser. 
 4. Run GameInterfaceForToys.exe. Note that Windows Smart Screen can produce a false positive detecting it as suspicious software, because the software hasn't seen any use so it has no repuation. This is a known issue with software packaged in Git. This software is perfectly safe and open source, and you can view the full code here https://github.com/MinLL/GameInterfaceForToys.
 5. Tap Settings.
 6. Click "Select another log file" and navigate to `%localappdata%\Google\Chrome\User Data` for Chrome, or `%localappdata%\Microsoft\Edge\User Data` for Edge. Double click the chrome_debug.log file.
