@@ -19,6 +19,8 @@ When using the content in this module in your own campaign, I recommend outlinin
 
 Then, throughout your campaign, I recommend dropping in *opportunities* for players to explore content that exceeds that initial game mode number, and advising the players "above the table" about it. Perhaps its a spell that more closely matches "lewd game mode level 4". Advise the players that the spell is "lewd level 4" and that its optional content if they want to add it. Continue to do this little by little while communicating with your group throughout the process and at the end of each session to check in and make sure everyone is still cool with the content you're using. The point of the game is to relax and have fun! Not to weird out your friends by making them uncomfortable. Remind your players regularly that you can continue to adjust the dial, adding, adjusting or removing parts of this content at any point throughout the campaign. It's important to adjust it "to taste" as you go, because people won't always know what kind of game they want to run until they are half-way through the session, or even half-way through the campaign.
 
+```
+
 Game Mode Template for Session 0:
 
 Now, a question for yall regarding sexy content in the game! Choose your default game mode:
@@ -61,3 +63,5 @@ Now, a question for yall regarding sexy content in the game! Choose your default
 - Sexual spells and items might be used against you by NPCs. They may use very explicit ones such as Pink Tentacles or Flesh to Fleshlight. 
 - Sex may involve consensual non-consent. X Cards and safewords are enabled. This means NPCs or creatures may have non-consensual sex with your character during combat encounters, but you as a player are cool with it as part of the game dynamic and are consenting to it in advance, with the option to change your mind on that at any point and halt the game or skip the scene at any time.
 - New rules are added to the game, including new conditions such as Exposed, Horny, Mind Broken, Cumflated, and kinks such as Cumslut and Creature Fetish. Sexual actions such as Breed and Strip are added to some monsters. TPKs may be replaced with "Bad Ends" where, in the case where an encounter ends with the whole party being defeated, instead of death, the party is taken to the monster's lairs to become sex slaves. This usually involves a cut scene to narrate the passage of time, the PCs gaining a Creature Fetish, and then being released or having an opportunity to escape, re-equip and get revenge.
+
+```
