@@ -1,8 +1,7 @@
 # Ardisfoxx's Lewd PF2e (AFLP)
 NSFW rules, items, spells, conditions and monsters to support a lewd PF2e campaign! 
 
-*Note: this is a paid module, and I depend on this for my income. It only costs 10 bucks, and you get all future updates for free. I think that's quite reasonable, so if you haven't purchased it, please support the author by paying for it here.
-https://www.patreon.com/ardisfoxxart/shop/ardisfoxxs-lewd-pf2e-1272244*
+*Note: this is a paid module, and I depend on this for my income. It only costs $12.50, and you get all future updates for free. I think that's quite reasonable, so if you haven't purchased it, please support the author by paying for it here. https://www.patreon.com/ardisfoxxart/shop/ardisfoxxs-lewd-pf2e-1272244*
 
 *If you're looking for other ways to support development, Patreon only costs $3 a month, so please subscribe! I really do appreciate every Patron. xx*
 
