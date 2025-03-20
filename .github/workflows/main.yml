@@ -126,15 +126,14 @@ jobs:
             styles/                              \
             packs/                               \
             languages/                           \
-            lang/                                \
-            AFLP Lovense Integration/
+            lang/                                
           # Don't forget to add a backslash at the end of the line for any
           # additional files or directories!
           
-                # Create a "module.zip" archive containing all the module's required files.
+      # Create a "module.zip" archive containing all the module's required files.
       # If you have other directories or files that will need to be added to
       # your packaged module, add them here.
-      - name: Create Module Archive
+      - name: Create Lovense Integration Archive
         run: |
           # Note that `zip` will only emit warnings when a file or directory
           # doesn't exist, it will not fail.
@@ -142,7 +141,7 @@ jobs:
             `# Options`                          \
             --recurse-paths                      \
             `# The name of the output file`      \
-             ./AFLP_Lovense_Integration.zip                        \
+             ./AFLP_Lovense_Integration.zip      \
             `# The files that will be included.` \
             AFLP_Lovense_Integration/
           # Don't forget to add a backslash at the end of the line for any
