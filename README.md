@@ -74,7 +74,7 @@ This is the baseline for the start of the game - making the game more or less le
 
 ## Lovense Integration:
 The Lovense integration is composed of 3 parts:
-- This module makes events affecting actors to output to the browser console. They appear in a format of "[Date - Time] ActorName, Effect". `EG: [03/20/2025 - 11:30:36PM] Neela, Mind Broken`. This also checks when actors take damage, `EG: [03/20/2025 - 11:38:19PM] Neela, damage`.
+- This module makes events affecting actors to output to the browser console. They appear in a format of `[Date - Time] ActorName, Effect`. EG: `[03/20/2025 - 11:30:36PM] Neela, Mind Broken`. This also checks when actors take damage, EG: `[03/20/2025 - 11:38:19PM] Neela, damage`.
 - The module manifest comes with a shortcut for Edge and Chrome browser. If you have either of these browsers installed, when you run them using one of these shortcuts, it will launch them in logging/debug mode. In this mode, console events are saved to a log file. This file is saved in "C:\Users\[USERNAME]\AppData\Local\Microsoft\Edge\User Data\chrome_debug.log" for Edge browser, or "C:\Users\[USERNAME]\AppData\Local\Google\Chrome\User Data\chrome_debug.log" for Chrome.
 - The module manifest comes with a custom install of [Game Interface For Toys](https://github.com/MinLL/GameInterfaceForToys), pre-configured to detect AFLP events.
 
