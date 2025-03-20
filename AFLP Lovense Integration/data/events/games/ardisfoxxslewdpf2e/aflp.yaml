@@ -7,6 +7,24 @@
         max_duration: 2
         min_strength: 25
         max_strength: 45
+- Player Character Grabbed:
+    regex: .+{GIFT_ACTOR_NAME}, Grabbed+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 1
+        max_duration: 2
+        min_strength: 25
+        max_strength: 45
+- Player Character Prone:
+    regex: .+{GIFT_ACTOR_NAME}, Prone+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 1
+        max_duration: 2
+        min_strength: 25
+        max_strength: 45
 - Player Character Defeated:
     regex: .+{GIFT_ACTOR_NAME}, Unconscious+
     function: generic_random_vibrate
