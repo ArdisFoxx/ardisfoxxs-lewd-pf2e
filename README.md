@@ -1,4 +1,4 @@
-# Ardisfoxx's Lewd PF2e
+# Ardisfoxx's Lewd PF2e (AFLP)
 NSFW rules, items, spells, conditions and monsters to support a lewd PF2e campaign! 
 
 Note that this is a paid module, and I depend on this for my income. It only costs 10 bucks, and you get all future updates for free. I think that's quite reasonable, so if you haven't purchased it, please support the author by paying for it here. https://www.patreon.com/ardisfoxxart/shop/ardisfoxxs-lewd-pf2e-1272244
@@ -13,6 +13,27 @@ https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/latest/download/modul
 5. Activate the ArdisFoxx's Lewd PF2e module.
 6. Import the compendiums. (If you don't want to import everything, at a minumum, the Cumflation macro only works if the Cumflation effects are imported)
 
+## Lovense Integration:
+The Lovense integration is composed of 3 parts:
+- This module makes events affecting actors to output to the browser console. They appear in a format of "[Date - Time] ActorName, Effect". EG: [03/20/2025 - 11:30:36PM] Neela, Mind Broken. This also checks when actors take damage, EG: [03/20/2025 - 11:38:19PM] Neela, damage.
+- The module manifest comes with a shortcut for Edge and Chrome browser. If you have either of these browsers installed, when you run them using one of these shortcuts, it will launch them in logging/debug mode. In this mode, console events are saved to a log file. This file is saved in "C:\Users\[USERNAME]\AppData\Local\Microsoft\Edge\User Data\chrome_debug.log" for Edge browser, or "C:\Users\[USERNAME]\AppData\Local\Google\Chrome\User Data\chrome_debug.log" for Chrome.
+- The module manifest comes with a custom install of [Game Interface For Toys](https://github.com/MinLL/GameInterfaceForToys), pre-configured to detect AFLP events.
+
+### Player Setup of Lovense Integration:
+1. Players should download the [AFLP Lovense Integration](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/AFLP_Lovense_Integration.zip).
+2. Extract it anywhere on your computer.
+3. Run one of the Chrome or Edge shortcuts within the folder, to launch a web browser in logging mode.
+4. Run GameInterfaceForToys.exe. Note that Windows Smart Screen can produce a false positive detecting it as suspicious software, because the software hasn't seen any use so it has no repuation. This is a known issue with software packaged in Git. This software is perfectly safe and open source, and you can view the full code here https://github.com/MinLL/GameInterfaceForToys.
+5. Tap Settings.
+6. Click "Select another log file" and navigate to %localappdata%\Google\Chrome\User Data. Double click the chrome_debug.log file.
+7. Change the "In-game character name" to the name of your player character in Foundry.
+8. Change the Lovense Host IP address to the Local IP of your Lovense Game Mode. (To locate this IP, open the Lovense app on your phone, select the Discover tab, then select Game Mode).
+9. Click Save to exit the settings.
+10. Make sure your Lovense App is on and your toy is connected. Then Click Reload Toys.
+11. Click Configure Events.
+12. Scroll to the bottom and click Select All.
+13. Scroll down and click Save.
+14. You're ready to go! To test it, try applying the Exposed or Horny conditions to your character. You can edit the strength or duration of each type of vibration by editing the values in AFLP_Lovense_Integration\data\events\games\ardisfoxxslewdpf2e\aflp.yaml.
 
 ## Session 0 Content Guide:
 When incorporating this module into your campaign, discuss its content openly with your group during Session 0. Let players vote for one of the four baseline "lewd game modes." Let the mode with the lowest numerical value that received at least one vote become the mode your group uses — this ensures everyone stays comfortable.
