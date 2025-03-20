@@ -17,7 +17,7 @@ Hooks.once("ready", async function () {
   });
 
   Hooks.on("createChatMessage", async function (msg, _status, userid) {
-    if (!msg?.isDamageRoll) return;
+    if (!msg?.isApplyDamage) return;
     //const split_type = "none";
     const dmg = msg?.rolls.total;
     const actor = game.actors.get(msg?.flags?.pf2e?.context?.actor);
@@ -25,7 +25,9 @@ Hooks.once("ready", async function () {
     console.log(
       getFormattedDateTime(now),
       `${actor.name}, damage${
-        msg?.flags?.pf2e?.context?.outcome === "criticalSuccess"
+        msg?.flags?.pf2e?.context?.options?.includes(
+          "check:outcome:critical-success"
+        )
           ? " Critical"
           : ""
       }`
