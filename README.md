@@ -99,5 +99,5 @@ The Lovense integration is composed of 3 parts:
 - 3.0.0 - Cum System, PDF version of the rules for non-Foundry users, a guide on using the rules 
 - 3.3.0 - Items Update, Womb Tattoos, Body Writing, Cock Rings, Cursed Items
 - 3.5.0 - Spells Update; Cantrips and levelled spell additions
-- 3.7.0 - Monsters Update; Numberous additional monsters and monster abilities
+- 3.7.0 - Monsters Update; Many additional monsters and monster abilities
 - 4.0.0 - Player Character Feats and build options
