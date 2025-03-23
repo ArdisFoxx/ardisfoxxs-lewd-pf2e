@@ -94,3 +94,10 @@ The Lovense integration is composed of 3 parts:
 12. Scroll to the bottom and click Select All.
 13. Scroll down and click Save.
 14. You're ready to go! To test it, try applying the Exposed or Horny conditions to your character. You can edit the strength or duration of each type of vibration by editing the values in AFLP_Lovense_Integration\data\events\games\ardisfoxxslewdpf2e\aflp.yaml.
+
+### Release Roadmap
+3.0.0 - Cum System
+3.3.0 - Items Update, Womb Tattoos, Body Writing, Cock Rings, Cursed Items
+3.5.0 - Spells Update; Cantrips and levelled spell additions
+3.7.0 - Monsters Update; Numberous additional monsters and monster abilities
+4.0.0 - Player Character Feats and build options 
