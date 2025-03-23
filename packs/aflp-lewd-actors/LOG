@@ -1,15 +1,8 @@
-2025/03/23-18:34:16.083365 ffff7878f040 Recovering log #76
-2025/03/23-18:34:16.088092 ffff7878f040 Delete type=0 #76
-2025/03/23-18:34:16.088114 ffff7878f040 Delete type=3 #74
-2025/03/23-18:45:47.643544 ffff7768b040 Level-0 table #81: started
-2025/03/23-18:45:47.646837 ffff7768b040 Level-0 table #81: 105417 bytes OK
-2025/03/23-18:45:47.648403 ffff7768b040 Delete type=0 #79
-2025/03/23-18:45:47.650764 ffff7768b040 Manual compaction at level-0 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!actors.items!rK6eQBfA25iwnaHD.yntcM5gKBjUuNen1' @ 0 : 0; will stop at (end)
-2025/03/23-18:45:47.654306 ffff7768b040 Manual compaction at level-1 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!actors.items!rK6eQBfA25iwnaHD.yntcM5gKBjUuNen1' @ 0 : 0; will stop at '!actors.items!7qFwjWVbfuRtzZsT.zUG2CrdTj31bc5k5' @ 3139 : 0
-2025/03/23-18:45:47.654312 ffff7768b040 Compacting 1@1 + 1@2 files
-2025/03/23-18:45:47.662010 ffff7768b040 Generated table #82@1: 383 keys, 488272 bytes
-2025/03/23-18:45:47.662023 ffff7768b040 Compacted 1@1 + 1@2 files => 488272 bytes
-2025/03/23-18:45:47.663491 ffff7768b040 compacted to: files[ 0 0 1 0 0 0 0 ]
-2025/03/23-18:45:47.663637 ffff7768b040 Delete type=2 #73
-2025/03/23-18:45:47.663756 ffff7768b040 Delete type=2 #81
-2025/03/23-18:45:47.663992 ffff7768b040 Manual compaction at level-1 from '!actors.items!7qFwjWVbfuRtzZsT.zUG2CrdTj31bc5k5' @ 3139 : 0 .. '!actors.items!rK6eQBfA25iwnaHD.yntcM5gKBjUuNen1' @ 0 : 0; will stop at (end)
+2025/03/23-19:03:38.619758 ffff79fbf040 Recovering log #89
+2025/03/23-19:03:38.624626 ffff79fbf040 Delete type=3 #87
+2025/03/23-19:03:38.624656 ffff79fbf040 Delete type=0 #89
+2025/03/23-19:53:07.343822 ffff7768b040 Level-0 table #94: started
+2025/03/23-19:53:07.343840 ffff7768b040 Level-0 table #94: 0 bytes OK
+2025/03/23-19:53:07.345546 ffff7768b040 Delete type=0 #92
+2025/03/23-19:53:07.353124 ffff7768b040 Manual compaction at level-0 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!actors.items!rK6eQBfA25iwnaHD.yntcM5gKBjUuNen1' @ 0 : 0; will stop at (end)
+2025/03/23-19:53:07.355118 ffff7768b040 Manual compaction at level-1 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!actors.items!rK6eQBfA25iwnaHD.yntcM5gKBjUuNen1' @ 0 : 0; will stop at (end)
