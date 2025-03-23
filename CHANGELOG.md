@@ -6,4 +6,4 @@ Change log:
 * 2.0.0 - AFLP Lovense Integration Release
 * 2.0.1 - 2.0.6 - Updated monster token and portrait arts
 * 2.0.7 - Minor Improvements
-* 2.0.8 - Kink Retraining player action
+* 2.0.8 - Added Aphrodisiac Junkie kink, added Retraining (Kink) player action
