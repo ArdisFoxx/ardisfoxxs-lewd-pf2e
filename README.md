@@ -12,7 +12,7 @@ NSFW rules, items, spells, conditions and monsters to support a lewd PF2e campai
 https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/latest/download/module.json
 4. Launch your Foundry world.
 5. Activate the ArdisFoxx's Lewd PF2e module.
-6. Import the compendiums. (If you don't want to import everything, at a minumum, the Cumflation macro only works if the Cumflation effects are imported)
+6. Import the compendiums. (If you don't want to import everything, at a minumum, the Cumflation macro only works if the Effects and Conditions are imported)
 7. View the content guide below, then scroll to the bottom for the Lovense Integration setup.
 
 ## Session 0 Content Guide:
