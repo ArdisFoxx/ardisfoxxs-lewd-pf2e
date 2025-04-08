@@ -28,7 +28,7 @@ Hooks.once("ready", async function () {
     if (!msg.flags?.pf2e?.appliedDamage) return;
     if (userid !== game.user.id) return;
     //const split_type = "none";
-    const dmg = msg?.rolls.total;
+    const dmg = msg?.rolls?.total ?? msg?.flags?.pf2e?.appliedDamage?.updates?.reduce((accumulator, value) => accumulator + value, 0);
     const actor = game.actors.get(foundry.utils.parseUuid(msg?.flags?.pf2e?.origin?.actor)?.id ?? msg?.flags?.pf2e?.context?.actor);
     const now = new Date();
     logForEveryone(
