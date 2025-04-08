@@ -1,4 +1,11 @@
+import { setupSocket } from "./socket.js";
+
 Hooks.once("init", async function () {});
+
+Hooks.once("setup", function () {
+  if (!setupSocket())
+    console.error("Error: Unable to set up socket lib for Ardis Lewd Stuff");
+});
 
 Hooks.once("ready", async function () {
   Hooks.on("preCreateItem", async (item) => {
@@ -22,9 +29,8 @@ Hooks.once("ready", async function () {
     const dmg = msg?.rolls.total;
     const actor = game.actors.get(msg?.flags?.pf2e?.origin?.actor ?? msg?.flags?.pf2e?.context?.actor);
     const now = new Date();
-    console.log(
-      getFormattedDateTime(now),
-      `${actor.name}, damage${
+    logForEveryone(
+      `${getFormattedDateTime(now)} ${actor.name}, damage${
         msg?.flags?.pf2e?.context?.options?.includes(
           "check:outcome:critical-success"
         )
@@ -43,7 +49,7 @@ Hooks.once("ready", async function () {
       })`;
     }
     const now = new Date();
-    console.log(getFormattedDateTime(now), `${actor.name}, ${itemName}`);
+    logForEveryone(`${getFormattedDateTime(now)} ${actor.name}, ${itemName}`);
   }
 
   function getFormattedDateTime(now) {
@@ -183,3 +189,9 @@ Hooks.once("ready", async function () {
     return result;
   }
 });
+
+async function logForEveryone(msg) {
+  socketlib.modules
+    .get("ardisfoxxs-lewd-pf2e")
+    .executeForEveryone("logMessage", msg);
+}
