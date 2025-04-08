@@ -3,9 +3,9 @@ NSFW rules, items, spells, conditions and monsters to support a lewd PF2e campai
 
 *Note: this is a paid module, and I depend on this for my income. It only costs $12, and you get all future updates for free. I think that's quite reasonable, so if you haven't purchased it, please support the author by paying for it here. https://www.patreon.com/ardisfoxxart/shop/ardisfoxxs-lewd-pf2e-1272244*
 
-*If you're looking for other ways to support development, Patreon only costs $3 a month!*
+A complete guide on how to use these rules and the Foundry module are in the PDF that comes with your store purchase.
 
-A complete guide on how to use these rules and the Foundry module are in the PDF that came with your store purchase.
+*If you're looking for other ways to support development, Patreon only costs $3 a month!*
 
 ### AFLP Release Roadmap
 - 1.0.0 - Initial Release. Added new monsters, conditions, kinks and items. Added Cumflation macro.
