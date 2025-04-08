@@ -57,8 +57,8 @@
     function: generic_random_vibrate
     toy_class: vibrator
     params:
-        min_duration: 20
-        max_duration: 30
+        min_duration: 30
+        max_duration: 60
         min_strength: 85
         max_strength: 100
 - Player Character Cumflated:
@@ -70,3 +70,19 @@
         max_duration: 30
         min_strength: 85
         max_strength: 100
+- Sex Start:
+    regex: .+{GIFT_ACTOR_NAME}, Amorous Activity*
+    function: sex_start
+    group: default
+    case_sensitive: False
+    toy_class: vibrator
+- Sex Stage Start:
+    regex: .+{GIFT_ACTOR_NAME}, Arousal Points*
+    function: sex_stage_start
+    toy_class: vibrator
+- Sex End:
+    regex: .+{GIFT_ACTOR_NAME}, Afterglow*
+    function: sex_end
+    group: default
+    case_sensitive: False
+    toy_class: vibrator

@@ -1,3 +1,9 @@
+diamo:
+  battery: 86
+  enabled: true
+  id: 3410f413a2cc
+  interface: Lovense
+  name: diamo
 hush:
   battery: 99
   enabled: false
