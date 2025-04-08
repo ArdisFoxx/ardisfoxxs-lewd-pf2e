@@ -13,8 +13,9 @@ Hooks.once("ready", async function () {
     logEffect(item);
   });
 
-  Hooks.on("updateItem", async (item, changes) => {
+  Hooks.on("updateItem", async (item, changes, _diff, userid) => {
     if (item.type !== "condition" && item.type !== "effect") return;
+    if (userid !== game.user.id) return;
     if (
       isNaN(changes?.system?.badge?.value) &&
       isNaN(changes?.system?.value?.value)
@@ -25,9 +26,10 @@ Hooks.once("ready", async function () {
 
   Hooks.on("createChatMessage", async function (msg, _status, userid) {
     if (!msg.flags?.pf2e?.appliedDamage) return;
+    if (userid !== game.user.id) return;
     //const split_type = "none";
     const dmg = msg?.rolls.total;
-    const actor = game.actors.get(msg?.flags?.pf2e?.origin?.actor ?? msg?.flags?.pf2e?.context?.actor);
+    const actor = game.actors.get(foundry.utils.parseUuid(msg?.flags?.pf2e?.origin?.actor)?.id ?? msg?.flags?.pf2e?.context?.actor);
     const now = new Date();
     logForEveryone(
       `${getFormattedDateTime(now)} ${actor.name}, damage${
