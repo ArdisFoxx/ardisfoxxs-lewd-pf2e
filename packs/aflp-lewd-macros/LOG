@@ -1,8 +1,15 @@
-2025/04/27-09:18:08.672886 ffff79fbf040 Recovering log #186
-2025/04/27-09:18:08.677688 ffff79fbf040 Delete type=0 #186
-2025/04/27-09:18:08.677713 ffff79fbf040 Delete type=3 #184
-2025/04/30-02:44:46.134676 ffff7768b040 Level-0 table #191: started
-2025/04/30-02:44:46.135185 ffff7768b040 Level-0 table #191: 0 bytes OK
-2025/04/30-02:44:46.137424 ffff7768b040 Delete type=0 #189
-2025/04/30-02:44:46.137917 ffff7768b040 Manual compaction at level-0 from '!macros!OpuOZmjM3P9qQ3Jm' @ 72057594037927935 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at (end)
-2025/04/30-02:44:46.147264 ffff7768b040 Manual compaction at level-1 from '!macros!OpuOZmjM3P9qQ3Jm' @ 72057594037927935 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at (end)
+2025/04/30-02:56:38.687563 ffff7878f040 Recovering log #190
+2025/04/30-02:56:38.691961 ffff7878f040 Delete type=0 #190
+2025/04/30-02:56:38.691984 ffff7878f040 Delete type=3 #188
+2025/05/01-02:51:19.146644 ffff7768b040 Level-0 table #195: started
+2025/05/01-02:51:19.148884 ffff7768b040 Level-0 table #195: 13190 bytes OK
+2025/05/01-02:51:19.150527 ffff7768b040 Delete type=0 #193
+2025/05/01-02:51:19.151497 ffff7768b040 Manual compaction at level-0 from '!macros!OpuOZmjM3P9qQ3Jm' @ 72057594037927935 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at (end)
+2025/05/01-02:51:19.166983 ffff7768b040 Manual compaction at level-1 from '!macros!OpuOZmjM3P9qQ3Jm' @ 72057594037927935 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at '!macros!OpuOZmjM3P9qQ3Jm' @ 18 : 1
+2025/05/01-02:51:19.166989 ffff7768b040 Compacting 1@1 + 1@2 files
+2025/05/01-02:51:19.169260 ffff7768b040 Generated table #196@1: 2 keys, 14945 bytes
+2025/05/01-02:51:19.169273 ffff7768b040 Compacted 1@1 + 1@2 files => 14945 bytes
+2025/05/01-02:51:19.170692 ffff7768b040 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/05/01-02:51:19.170753 ffff7768b040 Delete type=2 #171
+2025/05/01-02:51:19.170802 ffff7768b040 Delete type=2 #195
+2025/05/01-02:51:19.171109 ffff7768b040 Manual compaction at level-1 from '!macros!OpuOZmjM3P9qQ3Jm' @ 18 : 1 .. '!macros!TJDjEI7Fyd71vKDa' @ 0 : 0; will stop at (end)
