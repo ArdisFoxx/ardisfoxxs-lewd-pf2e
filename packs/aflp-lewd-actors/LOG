@@ -1,15 +1,8 @@
-2025/05/25-12:49:43.051196 ffff78f9f040 Recovering log #299
-2025/05/25-12:49:43.055986 ffff78f9f040 Delete type=3 #297
-2025/05/25-12:49:43.056011 ffff78f9f040 Delete type=0 #299
-2025/05/25-13:25:07.868653 ffff7768b040 Level-0 table #305: started
-2025/05/25-13:25:07.882721 ffff7768b040 Level-0 table #305: 1328078 bytes OK
-2025/05/25-13:25:07.884389 ffff7768b040 Delete type=0 #303
-2025/05/25-13:25:07.887348 ffff7768b040 Manual compaction at level-0 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!folders!UiQAGgrdieJVZF1f' @ 0 : 0; will stop at (end)
-2025/05/25-13:25:07.890905 ffff7768b040 Manual compaction at level-1 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!folders!UiQAGgrdieJVZF1f' @ 0 : 0; will stop at '!folders!UiQAGgrdieJVZF1f' @ 4859 : 1
-2025/05/25-13:25:07.890912 ffff7768b040 Compacting 1@1 + 1@2 files
-2025/05/25-13:25:07.904735 ffff7768b040 Generated table #306@1: 716 keys, 916453 bytes
-2025/05/25-13:25:07.904747 ffff7768b040 Compacted 1@1 + 1@2 files => 916453 bytes
-2025/05/25-13:25:07.906411 ffff7768b040 compacted to: files[ 0 0 1 0 0 0 0 ]
-2025/05/25-13:25:07.906632 ffff7768b040 Delete type=2 #305
-2025/05/25-13:25:07.906920 ffff7768b040 Delete type=2 #301
-2025/05/25-13:25:07.907265 ffff7768b040 Manual compaction at level-1 from '!folders!UiQAGgrdieJVZF1f' @ 4859 : 1 .. '!folders!UiQAGgrdieJVZF1f' @ 0 : 0; will stop at (end)
+2025/05/29-07:52:55.006244 f45ff878f000 Recovering log #324
+2025/05/29-07:52:55.011793 f45ff878f000 Delete type=3 #322
+2025/05/29-07:52:55.011820 f45ff878f000 Delete type=0 #324
+2025/05/29-14:16:19.244435 f45ed39ff000 Level-0 table #329: started
+2025/05/29-14:16:19.244451 f45ed39ff000 Level-0 table #329: 0 bytes OK
+2025/05/29-14:16:19.246251 f45ed39ff000 Delete type=0 #327
+2025/05/29-14:16:19.248339 f45ed39ff000 Manual compaction at level-0 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!folders!UiQAGgrdieJVZF1f' @ 0 : 0; will stop at (end)
+2025/05/29-14:16:19.251707 f45ed39ff000 Manual compaction at level-1 from '!actors!2itStGZcisVWilyA' @ 72057594037927935 : 1 .. '!folders!UiQAGgrdieJVZF1f' @ 0 : 0; will stop at (end)
