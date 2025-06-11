@@ -14,4 +14,3 @@ A complete guide on how to use these rules and the Foundry module are in the PDF
 - 3.3.0 - Items Update; More items, womb tattoos, body writing, cock rings, cursed items
 - 3.5.0 - Spells Update; More cantrips and levelled spells
 - 3.7.0 - Monsters Update; More monsters and monster abilities
-- 4.0.0 - Player Character Feats and build options
