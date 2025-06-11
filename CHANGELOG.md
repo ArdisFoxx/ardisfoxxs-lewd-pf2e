@@ -8,3 +8,6 @@ Change log:
 * 2.0.7 - Minor Improvements
 * 2.0.8 - Added Aphrodisiac Junkie kink, added Retraining (Kink) player action
 * 2.0.9 - Rebalanced kinks with one debuff and one buff each. Fixed Harpy icons. Added automation to Horny condition. Added Submissive Kink and Shibari Trap spell.
+* 3.0.0 - Cum System, broad updates to all monsters, kinks and monster abilities
+* 3.3.0 - Item Update
+* 3.3.1 - Broad updates to all systems
