@@ -14,7 +14,7 @@ This is a paid rule set, and I depend on this for my income. It only costs $12, 
 https://www.patreon.com/ardisfoxxart
 )
 
-![AFLP](https://c10.patreonusercontent.com/4/patreon-media/p/campaign/7275020/da3500642e8e4bbf8a1e2d701df5dfcc/eyJxIjoxMDAsIndlYnAiOjB9/1.jpeg?token-hash=orHch0pLgm_atrVEa5kYZpmFlU2NqN4WRRFCwt6fHSk%3D&token-time=1750982400)
+![AFLP](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/assets/Lewd%20Tokens/AFLP_By_ArdisFoxx_Wallpaper.jpg?raw=true)
 ### *Lucian, Neela, Estalda, Marius and Vyce - [ArdisFoxx Art](https://www.patreon.com/ardisfoxxart)*
 
 # How to install the Foundry Module:
@@ -85,7 +85,11 @@ The below templates are a baseline for the start of your campaign. As your campa
 - New kinks that interact with monsters are added to the game including Cum Slut and Creature Fetish. Monsters with the Sexual trait and Sexual attacks and abilities are added to the game. TPKs may be replaced with "Bad Ends" where, in the case where an encounter ends with the whole party being defeated, instead of death, the party is taken to the monster's lairs to become sex slaves. This usually involves a cut scene to narrate the passage of time, the PCs gaining a Creature Fetish, and then being released or having an opportunity to escape, re-equip and get revenge.
 - Player Feats with the Sexual trait are added to the game, such as the advanced kinks Dommy Mommy/Daddy, Power Bottom and Size Queen.
 
+![CumVolume](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/assets/Lewd%20Tokens/CumVolume_Portrait_By_ArdisFoxx.jpg?raw=true)
+=
+
 # Using the Rules
+The following sections detail specific content for each Lewd Game Mode.
 ## Lewd 1. Typical Anime
 In a game using this mode, the changes to your typical Pathfinder 2e experience are minimal. 
 
@@ -103,17 +107,14 @@ The GM should add Items and Spells to merchants, treasure rewards and NPC spell 
 The GM might trap a treasure chest in a dungeon with the Bondage Trap spell, or an NPC caster might cast the Clothes to Oil, Horny Hex or Erogenous Overload spells on a PC. A captured PC might be equipped with bondage items or bimbofied clothing. 
 
 ### Kinks
-The GM should add Kinks to the game, including the Starting Kinks of Dominant, Exhibitionist and Submissive, and also Bondage Princess and Aphrodisiac Junkie. Kinks that relate to sex or cumflation should not be added.
+The GM should add Kinks to the game, including the Starting Kinks of Dominant, Exhibitionist and Submissive, and also Aphrodisiac Junkie and Bondage Princess. Kinks that relate to sex or cumflation should not be added.
+
+Kinks are a type of condition that give a character a debuff, making it easier for their Arousal to increase, while also giving them a buff or a new ability. Most Kinks are gained by abilities or spells that apply a Kink. Starting Kinks can be applied to characters for free at level 1.
+
+A Mind Broken character is more likely to gain new Kinks when engaging in Sexual activities that relate to the Kink. For example, even though the Dire Wolf Alpha doesn't apply bondage to a character, if a character is wearing bondage when it becomes Mind Broken by a Dire Wolf Alpha, the GM may ask the player to roll a DC11 flat check, with a failure resulting in the character gaining the Bondage Princess Kink. Kinks can be removed from characters as a downtime Activity through Retraining (Kink).
 
 =
 
-Kinks are a type of condition that give a character a debuff, making it easier for their Arousal to increase, while also giving them a buff or a new ability.
-
-Most Kinks are gained by abilities or spells that apply a Kink. Some are requirements for Advanced Kinks (gained by the Advanced Kink general feat) which offer significant buffs and new abilities, while Starting Kinks can be applied to characters for free at level 1. With the exception of Starting Kinks, if a player asks for their character to be given a Kink its encouraged that they gain it during play instead of being granted it for free. 
-
-A Mind Broken character is more likely to gain new Kinks when engaging in Sexual activities that relate to the Kink. For example, even though the Dire Wolf Alpha doesn't apply bondage to a character, if a character is wearing bondage when it becomes Mind Broken by a Dire Wolf Alpha, the GM may ask the player to roll a DC11 flat check, with a failure resulting in the character gaining the Bondage Princess Kink.
-
-Kinks can be removed from characters as a downtime Activity through Retraining (Kink).
 #### Starting Kinks
 item (
 # Dominant
@@ -126,7 +127,6 @@ You're a natural dominant. You gain a rush of pleasure whenever a submissive cre
 When you successfully use Coerce, Demoralize or Request on another creature, you become Horny.
 
 **Panty Dropper** :f: (sexual)
-
 You swing your weight around in conversations easily when sex is on the table.
 **Trigger** You make an Intimidation check
 -
@@ -144,14 +144,11 @@ You're a trained submissive. You gain a rush of pleasure whenever a dominant cre
 When a creature successfully uses Coerce, Demoralize or Request on you, you become Horny.
 
 **Slutty Diplomacy** :F: (sexual)
-
 You're skilled at flattering words and using your body to get your way, while convincing people that they're still in charge.
 **Trigger** You make a Diplomacy check
 -
 **Effect** You gain a +2 circumstance bonus on the check, and both you and the target of your check become Horny.
 )
-
-=
 
 item (
 # Switch
@@ -164,13 +161,13 @@ You can freely switch between dominant and submissive roles. You gain a rush of 
 When a creature successfully uses Coerce, Demoralize or Request on you, or when you successfully use these actions on another, you become Horny.
 
 **I'm Everybody's Type** :F: (sexual)
-
 You slip into dominant and submissive roles naturally while speaking to others. You frequently find they're too busy staring at your ass to focus on what you're saying, and their lewd gaze turns you on.
 **Trigger** You make a Deception check
 -
 **Effect** You gain a +2 circumstance bonus on the check, and both you and the target of your check become Horny.
 )
-#### Kinks
+
+#### General Kinks
 item (
 # Aphrodisiac Junkie
 ## Kink
@@ -179,9 +176,10 @@ item (
 Your brain has been totally pickled by lust. When you're affected by Aphrodisiacs, you'll bend over like a brain-dead fuck toy and beg to be taken. You become Mind Broken.
 
 **There Is No Goon** :F: (sexual)
-
 You've found a state of horny meditative zen from constant exposure to Aphrodisiacs. While affected by Aphrodisiacs you gain a +4 status bonus to saves against spells and effects with the Mental or Emotional trait.
 )
+
+=
 
 item (
 # Bondage Princess
@@ -192,10 +190,11 @@ You love being tied up, strapped in harnesses, bound with manacles, blindfolded,
 While affected by bondage, you are Horny.
 
 **Adventuring While Helpless** :F: (sexual)
-
 You're so experienced with bondage that it doesn't restrict you as much as it used to. Your hearing becomes sharper while you are Blinded, granting you Echolocation 60 feet (Echolocation allows you to use hearing as a precise sense at the listed range). You ignore the first 10 feet of any movement penalties from leg restraints, and you can use a manipulate action while in arm restraints if you succeed a DC 5 Flat Check. If you fail the check, you can use an action to succeed instead.
-*Bondage includes items that limit senses and control such as manacles, bolas, arm binders, harnesses, gags, collars, hobble dresses, leashes and blindfolds. GM discretion. Bondage spells and effects include Bad Dragon Gag, Bondage Trap, Pink Tentacles and Shibari Trap.*
+*Bondage includes items and spells with the Bondage trait, such as manacles, arm binders, harnesses, gags, collars, hobble dresses, leashes and blindfolds.*
 )
+
+![BondagePrincess](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/assets/Lewd%20Tokens/BondagePrincess_By_ArdisFoxx.jpg?raw=true)
 
 =
 
@@ -226,6 +225,7 @@ Kink retraining offers a structured way to alter a character’s deeply ingraine
 Much like standard retraining, you must commit to this activity without mixing it with other downtime pursuits. You can spend a week of downtime retraining to redefine your erotic expression and remove one kink.
 )
 
+![Afterglow](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/assets/Lewd%20Tokens/Afterglow_Portrait_By_ArdisFoxx.jpg?raw=true)
 =
 
 ## Lewd 3. Skyrim with Sex Mods
@@ -418,6 +418,8 @@ item (
 -
 Whether through training, magic or natural development, your Cum Volume increases. You gain Coomer 1.
 )
+
+![MindBroken](https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/blob/main/assets/Lewd%20Tokens/MindBroken_By_ArdisFoxx_Wallpaper.jpg?raw=true)
 
 ### Monsters and Defeat
 In Pathfinder the reasons for a monster to want to fight or kill the player characters are nearly as numerous and varied as the monsters themselves, and when it comes to their sexual desires, the same is true. Some monsters may be horny all the time and desire to fuck any adventurers they come across, only to leave their prey unconscious and unharmed when the monster has satisfied its urges. Other monsters may see sex with prey as another form of domination, relishing in their total conquest. Feral monsters may see sex and a mere precursor to the slaughter and consumption of the prey they consider food, while intelligent monsters may see adventurers as potential sex slaves to be taken back to their lairs. Civilized monsters may use bondage items on captured prey to enforce their domination on defeated foes, making their escape a difficult challenge.
