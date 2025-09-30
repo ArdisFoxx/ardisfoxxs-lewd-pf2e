@@ -12,5 +12,5 @@ A complete guide on how to use these rules and the Foundry module are in the PDF
 - 2.0.0 - AFLP Lovense Integration Release
 - 3.0.0 - Cum System, PDF version of the rules for non-Foundry users, a guide on using the rules
 - 3.3.0 - Items Update; More items, womb tattoos, body writing, cock rings, cursed items
-- 3.5.0 - Spells Update; More cantrips and levelled spells
-- 3.7.0 - Monsters Update; More monsters and monster abilities
+- 3.5.0 - Monsters Update; More monsters and monster abilities
+- 3.7.0 - Spells Update; More cantrips and levelled spells
