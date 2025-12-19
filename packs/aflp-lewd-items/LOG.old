@@ -1,15 +1,15 @@
-2025/12/13-16:44:25.825 a354 Recovering log #1159
-2025/12/13-16:44:25.829 a354 Delete type=0 #1159
-2025/12/13-16:44:25.829 a354 Delete type=3 #1157
-2025/12/13-20:33:30.856 ad68 Level-0 table #1165: started
-2025/12/13-20:33:30.858 ad68 Level-0 table #1165: 51693 bytes OK
-2025/12/13-20:33:30.860 ad68 Delete type=0 #1163
-2025/12/13-20:33:30.865 ad68 Manual compaction at level-0 from '!folders!9yThZuJGzJRtKCfg' @ 72057594037927935 : 1 .. '!items!zlNwNsW3LUBVtbRj' @ 0 : 0; will stop at (end)
-2025/12/13-20:33:30.865 ad68 Manual compaction at level-1 from '!folders!9yThZuJGzJRtKCfg' @ 72057594037927935 : 1 .. '!items!zlNwNsW3LUBVtbRj' @ 0 : 0; will stop at '!items!bRrDiw8DIxqYFgRA' @ 5408 : 1
-2025/12/13-20:33:30.865 ad68 Compacting 1@1 + 1@2 files
-2025/12/13-20:33:30.872 ad68 Generated table #1166@1: 317 keys, 401274 bytes
-2025/12/13-20:33:30.872 ad68 Compacted 1@1 + 1@2 files => 401274 bytes
-2025/12/13-20:33:30.873 ad68 compacted to: files[ 0 0 1 0 0 0 0 ]
-2025/12/13-20:33:30.873 ad68 Delete type=2 #1161
-2025/12/13-20:33:30.873 ad68 Delete type=2 #1165
-2025/12/13-20:33:30.873 ad68 Manual compaction at level-1 from '!items!bRrDiw8DIxqYFgRA' @ 5408 : 1 .. '!items!zlNwNsW3LUBVtbRj' @ 0 : 0; will stop at (end)
+2025/12/17-11:06:49.215 4e54 Recovering log #1179
+2025/12/17-11:06:49.219 4e54 Delete type=0 #1179
+2025/12/17-11:06:49.219 4e54 Delete type=3 #1177
+2025/12/18-19:53:19.451 2ec4 Level-0 table #1185: started
+2025/12/18-19:53:19.456 2ec4 Level-0 table #1185: 123172 bytes OK
+2025/12/18-19:53:19.460 2ec4 Delete type=0 #1183
+2025/12/18-19:53:19.493 2ec4 Manual compaction at level-0 from '!folders!4o3rFwTRJt0fnBTd' @ 72057594037927935 : 1 .. '!items!zlNwNsW3LUBVtbRj' @ 0 : 0; will stop at (end)
+2025/12/18-19:53:19.493 2ec4 Manual compaction at level-1 from '!folders!4o3rFwTRJt0fnBTd' @ 72057594037927935 : 1 .. '!items!zlNwNsW3LUBVtbRj' @ 0 : 0; will stop at '!items!wBsTNWnQOnsiqjoy' @ 5798 : 1
+2025/12/18-19:53:19.493 2ec4 Compacting 1@1 + 1@2 files
+2025/12/18-19:53:19.503 2ec4 Generated table #1186@1: 324 keys, 411840 bytes
+2025/12/18-19:53:19.503 2ec4 Compacted 1@1 + 1@2 files => 411840 bytes
+2025/12/18-19:53:19.505 2ec4 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/12/18-19:53:19.505 2ec4 Delete type=2 #1181
+2025/12/18-19:53:19.506 2ec4 Delete type=2 #1185
+2025/12/18-19:53:19.535 2ec4 Manual compaction at level-1 from '!items!wBsTNWnQOnsiqjoy' @ 5798 : 1 .. '!items!zlNwNsW3LUBVtbRj' @ 0 : 0; will stop at (end)

@@ -1,8 +1,24 @@
-2025/12/14-00:13:00.351 4e54 Recovering log #1094
-2025/12/14-00:13:00.355 4e54 Delete type=0 #1094
-2025/12/14-00:13:00.355 4e54 Delete type=3 #1092
-2025/12/14-00:23:45.197 2ec4 Level-0 table #1099: started
-2025/12/14-00:23:45.197 2ec4 Level-0 table #1099: 0 bytes OK
-2025/12/14-00:23:45.198 2ec4 Delete type=0 #1097
-2025/12/14-00:23:45.198 2ec4 Manual compaction at level-0 from '!actors!1MUZOwuF20tSKdoN' @ 72057594037927935 : 1 .. '!folders!yq3tIo1vDMxfZuvX' @ 0 : 0; will stop at (end)
-2025/12/14-00:23:45.198 2ec4 Manual compaction at level-1 from '!actors!1MUZOwuF20tSKdoN' @ 72057594037927935 : 1 .. '!folders!yq3tIo1vDMxfZuvX' @ 0 : 0; will stop at (end)
+2025/12/18-20:16:16.167 8578 Recovering log #1110
+2025/12/18-20:16:16.170 8578 Delete type=0 #1110
+2025/12/18-20:16:16.171 8578 Delete type=3 #1108
+2025/12/19-18:19:29.288 2ec4 Level-0 table #1116: started
+2025/12/19-18:19:29.311 2ec4 Level-0 table #1116: 2387069 bytes OK
+2025/12/19-18:19:29.312 2ec4 Delete type=0 #1114
+2025/12/19-18:20:41.752 2ec4 Compacting 1@1 + 1@2 files
+2025/12/19-18:20:41.778 2ec4 Generated table #1117@1: 1353 keys, 1707903 bytes
+2025/12/19-18:20:41.778 2ec4 Compacted 1@1 + 1@2 files => 1707903 bytes
+2025/12/19-18:20:41.780 2ec4 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/12/19-18:20:41.780 2ec4 Delete type=2 #1112
+2025/12/19-18:20:41.780 2ec4 Delete type=2 #1116
+2025/12/20-00:26:21.958 2ec4 Level-0 table #1119: started
+2025/12/20-00:26:21.966 2ec4 Level-0 table #1119: 769554 bytes OK
+2025/12/20-00:26:21.967 2ec4 Delete type=0 #1115
+2025/12/20-00:26:21.968 2ec4 Manual compaction at level-0 from '!actors!1MUZOwuF20tSKdoN' @ 72057594037927935 : 1 .. '!folders!yq3tIo1vDMxfZuvX' @ 0 : 0; will stop at (end)
+2025/12/20-00:26:21.981 2ec4 Manual compaction at level-1 from '!actors!1MUZOwuF20tSKdoN' @ 72057594037927935 : 1 .. '!folders!yq3tIo1vDMxfZuvX' @ 0 : 0; will stop at '!actors.items!rSm7XGoYC9Q1cgO8.vSO5yxiKrfS0Zn6I' @ 12747 : 1
+2025/12/20-00:26:21.981 2ec4 Compacting 1@1 + 1@2 files
+2025/12/20-00:26:22.001 2ec4 Generated table #1120@1: 1339 keys, 1680397 bytes
+2025/12/20-00:26:22.001 2ec4 Compacted 1@1 + 1@2 files => 1680397 bytes
+2025/12/20-00:26:22.002 2ec4 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/12/20-00:26:22.002 2ec4 Delete type=2 #1117
+2025/12/20-00:26:22.002 2ec4 Delete type=2 #1119
+2025/12/20-00:26:22.005 2ec4 Manual compaction at level-1 from '!actors.items!rSm7XGoYC9Q1cgO8.vSO5yxiKrfS0Zn6I' @ 12747 : 1 .. '!folders!yq3tIo1vDMxfZuvX' @ 0 : 0; will stop at (end)
