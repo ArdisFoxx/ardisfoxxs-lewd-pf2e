@@ -1,6 +1,10 @@
 import { setupSocket } from "./socket.js";
+import { initAFLP } from "./scripts/aflp/index.js";
 
-Hooks.once("init", async function () {});
+Hooks.once("init", async function () {
+  await initAFLP();
+});
+  
 
 Hooks.once("setup", function () {
   if (!setupSocket())

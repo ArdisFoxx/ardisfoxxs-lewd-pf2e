@@ -26,7 +26,7 @@
     ]
   },
   "esmodules": ["scripts/module.js"],
-  "scripts": ["scripts/lib/lib.js"],
+  "scripts": ["aflp/index.js"],
   "styles": ["styles/module.css"],
   "socket": true,
   "languages": [
