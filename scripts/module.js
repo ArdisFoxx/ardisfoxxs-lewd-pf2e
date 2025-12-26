@@ -1,91 +1,102 @@
+// ===============================
+// AFLP – Module Initialization (module.js)
+// ===============================
+// Core module script for AFLP system.
+// Responsibilities:
+// - Sets up socket communication for module-wide logging
+// - Hooks into Foundry lifecycle events: init, setup, ready
+// - Logs creation and updates of condition/effect items
+// - Logs applied damage messages
+// - Includes utility functions to extract detailed damage info
+// Notes:
+// - Fully compatible with all AFLP mechanics including cumflation
+// - Damage extraction currently logs for recordkeeping; can be extended
+// ===============================
+
 import { setupSocket } from "./socket.js";
-import { initAFLP } from "./scripts/aflp/index.js";
 
+// -------------------------------
+// Hook: Init
+// -------------------------------
+// Called once when Foundry initializes modules
 Hooks.once("init", async function () {
-  await initAFLP();
-});
-  
-
-Hooks.once("setup", function () {
-  if (!setupSocket())
-    console.error("Error: Unable to set up socket lib for Ardis Lewd Stuff");
+  setupSocket();
 });
 
+// -------------------------------
+// Hook: Ready
+// -------------------------------
+// Called after Foundry finishes loading world data
 Hooks.once("ready", async function () {
+  // -------------------------------
+  // Track creation of conditions/effects
+  // -------------------------------
   Hooks.on("preCreateItem", async (item) => {
     if (item.type !== "condition" && item.type !== "effect") return;
     logEffect(item);
   });
 
+  // Track updates to conditions/effects with badge or value changes
   Hooks.on("updateItem", async (item, changes, _diff, userid) => {
     if (item.type !== "condition" && item.type !== "effect") return;
     if (userid !== game.user.id) return;
-    if (
-      isNaN(changes?.system?.badge?.value) &&
-      isNaN(changes?.system?.value?.value)
-    )
-      return;
+    if (isNaN(changes?.system?.badge?.value) && isNaN(changes?.system?.value?.value)) return;
     logEffect(item);
   });
 
+  // Track applied damage messages
   Hooks.on("createChatMessage", async function (msg, _status, userid) {
     if (!msg.flags?.pf2e?.appliedDamage) return;
     if (userid !== game.user.id) return;
-    //const split_type = "none";
-    const dmg = msg?.rolls?.total ?? msg?.flags?.pf2e?.appliedDamage?.updates?.reduce((accumulator, value) => accumulator + value, 0);
+
+    const dmg = msg?.rolls?.total ?? msg?.flags?.pf2e?.appliedDamage?.updates?.reduce((acc, val) => acc + val, 0);
     const actor = game.actors.get(foundry.utils.parseUuid(msg?.flags?.pf2e?.origin?.actor)?.id ?? msg?.flags?.pf2e?.context?.actor);
     const now = new Date();
+
     logForEveryone(
       `${getFormattedDateTime(now)} ${actor.name}, damage${
-        msg?.flags?.pf2e?.context?.options?.includes(
-          "check:outcome:critical-success"
-        )
-          ? " Critical"
-          : ""
+        msg?.flags?.pf2e?.context?.options?.includes("check:outcome:critical-success") ? " Critical" : ""
       }`
     );
   });
 
+  // -------------------------------
+  // Helper: Log an effect item
+  // -------------------------------
   function logEffect(item) {
     const actor = item.actor;
     let itemName = item.name;
     if (item?.system?.badge?.value) {
-      itemName += ` (${
-        item?.system?.badge?.label || item?.system?.badge?.value
-      })`;
+      itemName += ` (${item?.system?.badge?.label || item?.system?.badge?.value})`;
     }
     const now = new Date();
     logForEveryone(`${getFormattedDateTime(now)} ${actor.name}, ${itemName}`);
   }
 
+  // -------------------------------
+  // Helper: Format date/time for logs
+  // -------------------------------
   function getFormattedDateTime(now) {
     const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0"); // Months are 0-indexed
+    const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
 
     const timeString = now
-      .toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: true,
-      })
+      .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })
       .replace(" ", "");
 
     return `[${month}/${day}/${year} - ${timeString}]`;
   }
 
-  /* chasarooni special   ≽^•⩊•^≼  */
-  // This can be used to get the damage split by type later if that seems relevant
+  // -------------------------------
+  // Damage extraction utilities (chasarooni special ≽^•⩊•^≼)
+  // -------------------------------
   function getDamageList(rolls, split_type) {
     switch (split_type) {
-      case "by-damage-type":
-        return extractDamageInfoCombined(rolls);
-      case "all":
-        return extractDamageInfoAll(rolls);
+      case "by-damage-type": return extractDamageInfoCombined(rolls);
+      case "all": return extractDamageInfoAll(rolls);
       case "none":
-      default:
-        return extractDamageInfoSimple(rolls);
+      default: return extractDamageInfoSimple(rolls);
     }
   }
 
@@ -93,11 +104,7 @@ Hooks.once("ready", async function () {
     return rolls.flatMap(
       (inp) =>
         inp?.terms?.flatMap(
-          (term) =>
-            term?.rolls?.map((roll) => ({
-              type: roll.type,
-              value: roll.total,
-            })) || []
+          (term) => term?.rolls?.map((roll) => ({ type: roll.type, value: roll.total })) || []
         ) || []
     );
   }
@@ -140,54 +147,34 @@ Hooks.once("ready", async function () {
   }
 
   function processInstancePool(term, result, flavor) {
-    return result.concat(
-      term.rolls.flatMap((roll) => extractTerm(roll, term.flavor || flavor))
-    );
+    return result.concat(term.rolls.flatMap((roll) => extractTerm(roll, term.flavor || flavor)));
   }
 
   function processDamageInstance(term, result, flavor) {
-    result = term.terms.flatMap((item) =>
-      extractTerm(item, term.types || flavor)
-    );
+    result = term.terms.flatMap((item) => extractTerm(item, term.types || flavor));
     const keepPersistent = !!term.options.evaluatePersistent;
     return result
-      .filter((res) =>
-        res?.type?.startsWith("persistent,") ? keepPersistent : true
-      )
-      .map((r) => ({
-        value: r.value,
-        type: r.type.replace(/persistent,/g, ""),
-      }));
+      .filter((res) => (res?.type?.startsWith("persistent,") ? keepPersistent : true))
+      .map((r) => ({ value: r.value, type: r.type.replace(/persistent,/g, "") }));
   }
 
   function processArithmeticExpression(term, result, flavor) {
-    const operands = term.operands
-      .map((op) => extractTerm(op, term.flavor || flavor))
-      .flat();
-    if (term.operator === "+") {
-      return result.concat(operands);
-    }
+    const operands = term.operands.map((op) => extractTerm(op, term.flavor || flavor)).flat();
+    if (term.operator === "+") return result.concat(operands);
     if (term.operator === "-") {
       const [first, second] = operands;
       second.value = -second.value;
       return result.concat(first, second);
     }
     if (term.operator === "*") {
-      // This works on the assumption of times 2
       const [first, second] = operands;
-      // add a way to figure out which is number
       return result.concat(...Array(second).fill(first));
     }
     return result;
   }
 
   function processDie(term, result, flavor) {
-    return result.concat(
-      term.results.map((dice) => ({
-        value: dice.result,
-        type: term.flavor || flavor,
-      }))
-    );
+    return result.concat(term.results.map((dice) => ({ value: dice.result, type: term.flavor || flavor })));
   }
 
   function processNumericTerm(term, result, flavor) {
@@ -196,8 +183,9 @@ Hooks.once("ready", async function () {
   }
 });
 
+// -------------------------------
+// Global logging via socketlib
+// -------------------------------
 async function logForEveryone(msg) {
-  socketlib.modules
-    .get("ardisfoxxs-lewd-pf2e")
-    .executeForEveryone("logMessage", msg);
+  socketlib.modules.get("ardisfoxxs-lewd-pf2e").executeForEveryone("logMessage", msg);
 }
