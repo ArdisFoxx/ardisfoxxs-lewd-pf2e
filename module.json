@@ -25,11 +25,11 @@
       }
     ]
   },
-"esmodules": ["scripts/module.js"],
 "scripts": [
   "scripts/aflp/index.js",
   "scripts/aflp/ui/prose.js"
 ],
+"esmodules": ["scripts/module.js"],
   "styles": ["styles/module.css"],
   "socket": true,
   "languages": [
