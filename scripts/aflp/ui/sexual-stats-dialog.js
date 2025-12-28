@@ -1,5 +1,5 @@
 // ============================================
-// AFLP Sexual Stats & Pregnancy UI
+// AFLP Sexual Stats & Pregnancy UI (World Actor Version)
 // ============================================
 
 if (!window.AFLP) throw new Error("AFLP schema not loaded");
@@ -8,27 +8,28 @@ if (!window.AFLP.UI) window.AFLP.UI = {};
 if (!window.AFLP.Macros) window.AFLP.Macros = {};
 
 // ===============================
-// AFLP Pregnancy Helper
+// AFLP Pregnancy Helper (world actor persistence)
 // ===============================
 window.AFLP_Pregnancy = {
 
-  getPregnancies: actor => actor.getFlag(AFLP.FLAG_SCOPE, "pregnancy") ?? {},
+  getPregnancies: actor => actor.getWorldActor?.()?.getFlag(AFLP.FLAG_SCOPE, "pregnancy") ?? actor.getFlag(AFLP.FLAG_SCOPE, "pregnancy") ?? {},
 
   addPregnancy: async (actor, { partner, method = "vaginal", gestationTotal = 30, offspring = 1, deliveryType = "live" }) => {
-    await AFLP.ensureCoreFlags(actor);
-    const pregnancies = (await actor.getFlag(AFLP.FLAG_SCOPE, "pregnancy")) ?? {};
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    await AFLP.ensureCoreFlags(worldActor);
+    const pregnancies = (await worldActor.getFlag(AFLP.FLAG_SCOPE, "pregnancy")) ?? {};
     const id = foundry.utils.randomID();
-	pregnancies[id] = {
-	  sourceUuid: partner?.uuid ?? "",
-	  sourceName: partner?.name || "Unknown",
-	  gestationTotal,
-	  gestationRemaining: gestationTotal,
-	  offspring,
-	  deliveryType,
-	  method,
-	  startedAt: game.time.worldTime
-	};
-    await actor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
+    pregnancies[id] = {
+      sourceUuid: partner?.uuid ?? "",
+      sourceName: partner?.name || "Unknown",
+      gestationTotal,
+      gestationRemaining: gestationTotal,
+      offspring,
+      deliveryType,
+      method,
+      startedAt: game.time.worldTime
+    };
+    await worldActor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
     return { id, ...pregnancies[id] };
   },
 
@@ -63,7 +64,8 @@ window.AFLP_Pregnancy = {
   },
 
   savePregnancies: async (actor, pregnancies) => {
-    await actor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    await worldActor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
   },
 
   rollLiveBirth: async () => {
@@ -89,35 +91,35 @@ window.AFLP_Pregnancy = {
     return result.reduce((a,b) => a+b, 0);
   },
 
-	recordBirth: async (actor, pregId, { suppressChat=false } = {}) => {
-	  const FLAG = AFLP.FLAG_SCOPE;
-	  const pregnancies = structuredClone(await actor.getFlag(FLAG, "pregnancy")) ?? {};
-	  const preg = pregnancies[pregId];
-	  if (!preg) return;
+  recordBirth: async (actor, pregId, { suppressChat=false } = {}) => {
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    const FLAG = AFLP.FLAG_SCOPE;
+    const pregnancies = structuredClone(await worldActor.getFlag(FLAG, "pregnancy")) ?? {};
+    const preg = pregnancies[pregId];
+    if (!preg) return;
 
-	  preg.gestationRemaining = "Complete";
-	  await actor.setFlag(FLAG, "pregnancy", pregnancies);
+    preg.gestationRemaining = "Complete";
+    await worldActor.setFlag(FLAG, "pregnancy", pregnancies);
 
-	  if (!suppressChat) {
-		// Normalize sourceName for chat
-		const sourceName = preg.sourceName || "Unknown";
-		const type = preg.deliveryType === "egg" ? "eggs" : "offspring";
-		ChatMessage.create({
-		  content: `${actor.name} gave birth to ${preg.offspring} ${type} fathered by ${sourceName}!`
-		});
-	  }
+    if (!suppressChat) {
+      const sourceName = preg.sourceName || "Unknown";
+      const type = preg.deliveryType === "egg" ? "eggs" : "offspring";
+      ChatMessage.create({
+        content: `${worldActor.name} gave birth to ${preg.offspring} ${type} fathered by ${sourceName}!`
+      });
+    }
 
-	  return preg;
-	}
+    return preg;
+  }
 
 };
 
 // ===============================
-// AFLP Sexual Stats Dialog
+// AFLP Sexual Stats Dialog (world actor persistence)
 // ===============================
 AFLP.UI.SexualStatsDialog = class SexualStatsDialog {
   constructor(actor) {
-    this.actor = actor;
+    this.actor = actor.getWorldActor?.() ?? actor;
     this.FLAG = AFLP.FLAG_SCOPE;
     this.view = "display";
     this.cumUnits = "ml";
