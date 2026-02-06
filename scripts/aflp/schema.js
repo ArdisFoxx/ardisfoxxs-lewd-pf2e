@@ -115,8 +115,7 @@ Object.assign(window.AFLP, {
       cumReceived: 0,
       cumGiven: 0,
       mlReceived: { oral: 0, vaginal: 0, anal: 0, facial: 0 },
-      timesImpregnated: 0,
-      pregnancyHistory: {}
+      timesImpregnated: 0
     },
     event: {
       oral: 0,
@@ -126,7 +125,8 @@ Object.assign(window.AFLP, {
       gangbang: 0
     },
     titles: [],
-    favorites: []
+    favorites: [],
+	kinks: {}
   },
 
   // ===============================
@@ -140,6 +140,60 @@ Object.assign(window.AFLP, {
     gestationRemaining: 30,
     offspring: 0,
     deliveryType: "live"
+  },
+
+  // ===============================
+  // Kink Registry
+  // ===============================
+  kinks: {
+  "dominant": {
+	name: "Dominant",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.C5ZtoqW4NXEAUdCf"
+  },
+  "submissive": {
+	name: "Submissive",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.R0DRa8QhwXC3LhUD"
+  },
+  "switch": {
+	name: "Switch",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.bRrDiw8DIxqYFgRA"
+  },
+  "aphrodisiac-junkie": {
+  	name: "Aphrodisiac Junkie",
+  	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.k71GcOR7w25IiwTG"
+  },
+  "bondage-princess": {
+	name: "Bondage Princess",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.3iI8WWhDnl71NqVW"
+  },
+  "brood-sow": {
+	name: "Brood Sow",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.zfNxhu2nn3YPz9Lb"
+  },
+  "creature-fetish": {
+	name: "Creature Fetish",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fcnEx5qeoOFNcr5v"
+  },
+  "cum-slut": {
+	name: "Cum Slut",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.omYlzPBNXLVAI7N3"
+  },
+  "edge-master": {
+	name: "Edge Master",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.6xLbRrviQSmUEsKP"
+  },
+  "exhibitionist": {
+	name: "Exhibitionist",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JRXfjU2WvdruuhWD"
+  },
+  "party-animal": {
+	name: "Party Animal",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.pfs8GCIbh6E8polc"
+  },
+  "purity": {
+	name: "Purity",
+	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.eFcEwxfe56UxqlJc"
+    }
   },
 
   // ===============================
@@ -162,7 +216,7 @@ Object.assign(window.AFLP, {
   // ===============================
   // Default cumflation values
   // ===============================
-  cumflationDefaults: { anal: 0, oral: 0, vaginal: 0 },
+  cumflationDefaults: { anal: 0, oral: 0, vaginal: 0 , facial: 0 },
 
   // ===============================
   // Compute average total cumflation
@@ -187,16 +241,17 @@ Object.assign(window.AFLP, {
   async ensureCoreFlags(actor) {
     await this.ensureFlag(actor, "sexual", structuredClone(this.sexualDefaults));
     await this.ensureFlag(actor, "cum", { current: 0, max: 0 });
+	await this.ensureFlag(actor, "cumOverflow", { anal:0, oral:0, vaginal:0, facial:0 });
     await this.ensureFlag(actor, "coomer", { level: 0 });
     await this.ensureFlag(actor, "pussy", this.genitaliaDefaults.pussy);
     await this.ensureFlag(actor, "cock", this.genitaliaDefaults.cock);
+	await this.ensureFlag(actor, "sexual.kinks", {});
     await this.ensureFlag(
       actor,
       "cockTypes",
       Object.fromEntries(Object.keys(this.cockTypes).map(k => [k, false]))
     );
     await this.ensureFlag(actor, "pregnancy", {});
-    await this.ensureFlag(actor, "pregnancySourcesHistory", []);
     await this.ensureFlag(actor, "cumflation", structuredClone(this.cumflationDefaults));
     await this.ensureFlag(actor, "schemaVersion", this.SCHEMA_VERSION);
   },

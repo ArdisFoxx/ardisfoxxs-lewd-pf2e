@@ -33,29 +33,63 @@ window.AFLP_Pregnancy = {
     return { id, ...pregnancies[id] };
   },
 
-  attemptImpregnation: async (actor, sourceActor, cockTypes, hasPotionOfBreeding) => {
+  attemptImpregnation: async (targetActor, sourceActor, cockTypes, hasPotionOfBreeding) => {
+    const targetSexual = targetActor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {};
+    const targetKinks = targetSexual.kinks ?? {};
+
+    const hasBroodSow = !!targetKinks["brood-sow"];
+    const hasBreeder = !!cockTypes["cock-breeder"];
+    const hasFertile = !!cockTypes["cock-fertile"];
+
+    // Delivery type
     const isOvidepositor = !!cockTypes["cock-ovidepositor"];
     const deliveryType = isOvidepositor ? "egg" : "live";
-    const dc = cockTypes["cock-breeder"] ? 20 : cockTypes["cock-fertile"] ? 11 : 5;
 
-    const roll = await new Roll("1d20").evaluate({ async: true });
-    const success = roll.total <= dc;
+    // Auto-success conditions
+    const autoSuccess = hasBroodSow || hasBreeder;
 
+    // DC assignment (only used if not auto-success)
+    let dc = 15; // baseline: hard to impregnate
+    if (hasFertile) dc = 11;
+
+    let roll = { total: 0 }, success; // initialize roll for autoSuccess
+
+    if (autoSuccess) {
+      success = true;
+    } else {
+      roll = await new Roll("1d20").evaluate({ async: true });
+      success = roll.total >= dc;
+    }
+
+    // Chat output
     ChatMessage.create({
-      content: `<strong>Impregnation Flat Check</strong><br>
-                Source: <strong>${sourceActor.name}</strong><br>
-                Roll: <strong>${roll.total}</strong> vs DC <strong>${dc}</strong><br>
-                Result: <strong>${success ? "Impregnation!" : "No impregnation."}</strong>`
+      content: `
+        <strong>Impregnation Check</strong><br>
+        Source: <strong>${sourceActor.name}</strong><br>
+        ${
+          hasBroodSow
+            ? `<em>${targetActor.name} is a <strong>Brood Sow</strong> — their womb eagerly accepts seed.</em><br>`
+            : hasBreeder
+              ? `<em>${sourceActor.name}'s breeder cock guarantees impregnation.</em><br>`
+              : `Roll: <strong>${roll.total}</strong> vs DC <strong>${dc}</strong><br>`
+        }
+        Result: <strong>${success ? "Impregnation!" : "No impregnation."}</strong>
+      `
     });
 
     if (!success) return null;
 
-    const gestationDays = deliveryType === "egg" ? 9 : hasPotionOfBreeding ? 11 : 30;
+    const gestationDays = deliveryType === "egg"
+      ? 9
+      : hasPotionOfBreeding
+        ? 11
+        : 30;
+
     const offspring = deliveryType === "live"
       ? await AFLP_Pregnancy.rollLiveBirth()
       : await AFLP_Pregnancy.rollExploding2D4();
 
-    return await AFLP_Pregnancy.addPregnancy(actor, {
+    return await AFLP_Pregnancy.addPregnancy(targetActor, {
       partner: sourceActor,
       gestationTotal: gestationDays,
       offspring,
@@ -68,15 +102,39 @@ window.AFLP_Pregnancy = {
     await worldActor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
   },
 
-  rollLiveBirth: async () => {
-    let count = 1;
-    while (true) {
-      const roll = await new Roll("1d6").evaluate({ async: true });
-      if (roll.total === 6) count++;
-      else break;
-    }
-    return count;
-  },
+rollLiveBirth: async (actor = null) => {
+	  let count = 1;
+
+	  let hasBroodSow = false;
+	  let level = 0;
+
+	  if (actor) {
+		const sexual = actor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {};
+		const kinks = sexual.kinks ?? {};
+		hasBroodSow = !!kinks["brood-sow"];
+
+		// PF2e-standard level path
+		level = actor.system?.details?.level?.value ?? 0;
+	  }
+
+	  while (true) {
+		const roll = await new Roll("1d6").evaluate({ async: true });
+
+		const explode =
+		  roll.total === 6 ||
+		  (hasBroodSow && roll.total >= 5) ||
+		  (hasBroodSow && level >= 3 && roll.total >= 4) ||
+		  (hasBroodSow && level >= 7 && roll.total >= 3);
+
+		if (explode) {
+		  count++;
+		} else {
+		  break;
+		}
+	  }
+
+	  return count;
+	},
 
   rollExploding2D4: async () => {
     let dice = 2;
@@ -126,46 +184,64 @@ AFLP.UI.SexualStatsDialog = class SexualStatsDialog {
     this.CUM_UNIT_ML = 125;
     this.flatPregnancy = [];
   }
+};
 
-  async load() {
-    await AFLP.ensureCoreFlags(this.actor);
-    this.sexual = structuredClone(this.actor.getFlag(this.FLAG, "sexual"));
-    this.cum = structuredClone(this.actor.getFlag(this.FLAG, "cum"));
-    this.coomer = structuredClone(this.actor.getFlag(this.FLAG, "coomer"));
-    this.hasPussy = !!this.actor.getFlag(this.FLAG, "pussy");
-    this.hasCock = !!this.actor.getFlag(this.FLAG, "cock");
-    this.cockTypes = structuredClone(this.actor.getFlag(this.FLAG, "cockTypes") ?? {});
-    this.pregnancy = structuredClone(this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
-    this.size = this.actor.system.traits?.size?.value ?? "med";
+AFLP.UI.SexualStatsDialog.prototype.load = async function() {
+  await AFLP.ensureCoreFlags(this.actor);
 
-    for (const [id, preg] of Object.entries(this.pregnancy)) {
-      if (typeof preg.gestationRemaining === "number" && preg.gestationRemaining <= 0) {
-        await AFLP_Pregnancy.recordBirth(this.actor, id);
-      }
+  // Fetch all sexual-related flags, ensure defaults exist
+  this.sexual = structuredClone(await this.actor.getFlag(this.FLAG, "sexual") ?? AFLP.sexualDefaults);
+  this.cum = structuredClone(await this.actor.getFlag(this.FLAG, "cum") ?? { current:0, max:0 });
+  this.coomer = structuredClone(await this.actor.getFlag(this.FLAG, "coomer") ?? { level: 0 });
+
+  this.hasPussy = !!(await this.actor.getFlag(this.FLAG, "pussy"));
+  this.hasCock = !!(await this.actor.getFlag(this.FLAG, "cock"));
+  this.cockTypes = structuredClone(await this.actor.getFlag(this.FLAG, "cockTypes") ?? {});
+  
+  // Patch: Always ensure kinks object exists
+  this.kinks = structuredClone(this.sexual.kinks ?? {});
+
+  this.pregnancy = structuredClone(await this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
+  this.size = this.actor.system.traits?.size?.value ?? "med";
+
+  // Auto-resolve completed pregnancies
+  for (const [id, preg] of Object.entries(this.pregnancy)) {
+    if (typeof preg.gestationRemaining === "number" && preg.gestationRemaining <= 0) {
+      await AFLP_Pregnancy.recordBirth(this.actor, id);
     }
-
-    this.flatPregnancy = Object.entries(this.pregnancy).map(([id, data]) => ({ ...data, __id: id }));
   }
 
-  async _handleBirthById(pregId) {
-    if (!pregId) return;
-    await AFLP_Pregnancy.recordBirth(this.actor, pregId);
-    this.pregnancy = structuredClone(await this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
-    this.flatPregnancy = Object.entries(this.pregnancy).map(([id, data]) => ({ ...data, __id: id }));
-    this.render();
-  }
+  // Refresh pregnancy data to ensure flatPregnancy is accurate
+  this.pregnancy = structuredClone(await this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
+  this.flatPregnancy = Object.entries(this.pregnancy).map(([id, data]) => ({ ...data, __id: id }));
+};
 
-  render() {
-    const dialog = new Dialog({
-      title: `${this.actor.name} — Sexual Stats`,
-      content: this._renderContent(),
-      buttons: { close: { label: "Close" } },
-      render: html => this._activateListeners(html, dialog)
-    });
-    dialog.render(true);
-  }
+AFLP.UI.SexualStatsDialog.prototype._handleBirthById = async function(pregId) {
+  if (!pregId) return;
+  await AFLP_Pregnancy.recordBirth(this.actor, pregId);
+  this.pregnancy = structuredClone(await this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
+  this.flatPregnancy = Object.entries(this.pregnancy).map(([id, data]) => ({ ...data, __id: id }));
+  this.render();
+};
 
-  _renderContent() {
+AFLP.UI.SexualStatsDialog.prototype.render = async function() {
+  const content = await this._renderContent();
+
+  const dialog = new Dialog({
+    title: `${this.actor.name} — Sexual Stats`,
+    content,
+    buttons: { close: { label: "Close" } },
+    render: html => this._activateListeners(html, dialog)
+  });
+
+  dialog.render(true);
+};
+
+
+// =======================
+// Assign _renderContent
+// =======================
+AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
     const acts = ["oral","vaginal","anal","facial","gangbang"].map(act => {
       if (act==="vaginal" && !this.hasPussy) return "";
       const L=this.sexual.lifetime[act]; const E=this.sexual.event[act];
@@ -174,19 +250,48 @@ AFLP.UI.SexualStatsDialog = class SexualStatsDialog {
         : `<tr><td>${act}</td><td><input name="lifetime-${act}" type="number" value="${L}"/></td><td><input name="event-${act}" type="number" value="${E}"/></td></tr>`;
     }).join("");
 
-	 const cumReceived = ["oral","vaginal","anal","facial"].map(act=>{
-	   if(act==="vaginal" && !this.hasPussy) return "";
-	   const ml = this.sexual.lifetime.mlReceived[act] ?? 0;
-
-	   return this.view==="display"
-		 ? `<li>${act}: ${ml.toLocaleString()} ml</li>`
-		 : `<li>${act}: <input name="ml-${act}" type="number" value="${ml}"/></li>`;
-	 }).join("");
+    const cumReceived = ["oral","vaginal","anal","facial"].map(act=>{
+       if(act==="vaginal" && !this.hasPussy) return "";
+       const ml = this.sexual.lifetime.mlReceived[act] ?? 0;
+       return this.view==="display"
+         ? `<li>${act}: ${ml.toLocaleString()} ml</li>`
+         : `<li>${act}: <input name="ml-${act}" type="number" value="${ml}"/></li>`;
+    }).join("");
 
     const cockTypesHtml = Object.keys(AFLP.cockTypes).map(type=>{
       const checked=this.cockTypes[type]?"checked":"";
       return `<label><input type="checkbox" name="cockType-${type}" ${checked}/> ${type.replace("cock-","")}</label>`;
     }).join("");
+
+	// Kinks section (async enrichment, alphabetically sorted)
+	let kinkList = await Promise.all(
+	  Object.entries(this.kinks)
+		.map(([slug, enabled]) => {
+		  const kink = AFLP.kinks[slug];
+		  if (!kink) return null;
+		  return { slug, enabled, kink };
+		})
+		.filter(Boolean)
+		.sort((a, b) => a.kink.name.localeCompare(b.kink.name))
+		.map(async ({ slug, enabled, kink }) => {
+		  if (this.view === "display") {
+			if (!enabled) return "";
+			return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}</li>`;
+		  } else {
+			return `<label><input type="checkbox" name="kink-${slug}" ${enabled ? "checked" : ""}/> ${kink.name}</label>`;
+		  }
+		})
+	);
+
+	kinkList = kinkList.filter(x => x).join(this.view === "display" ? "" : "<br>");
+
+
+    const kinkSection = `
+      <div class="aflp-section">
+        <b>Kinks</b>
+        ${kinkList ? (this.view==="display" ? `<ul>${kinkList}</ul>` : `<div>${kinkList}</div>`) : `<div>None</div>`}
+      </div>
+    `;
 
     const pregRows = this.flatPregnancy.map(p => `
       <tr>
@@ -218,6 +323,8 @@ AFLP.UI.SexualStatsDialog = class SexualStatsDialog {
 
       ${this.hasCock?`<div class="aflp-section"><b>Cum Given</b>${this.view==="display"?`${this.sexual.lifetime.cumGiven*this.CUM_UNIT_ML} ml`:`<input name="cumGiven" type="number" value="${this.sexual.lifetime.cumGiven}"/> units`}</div>`:''}
 
+      ${kinkSection}
+
       ${this.hasPussy?`<div class="aflp-section"><b>Pregnancy</b>${pregRows?`<table class="aflp-table"><tr><th>Source</th><th>Type</th><th>Number</th><th>Gestation</th></tr>${pregRows}</table>`:'<div>None</div>'}</div>`:''}
 
       ${this.view==="adjust"?`<div class="aflp-section"><b>Genitalia</b><br><label><input type="checkbox" name="pussy" ${this.hasPussy?"checked":""}/> Pussy</label> <label><input type="checkbox" name="cock" ${this.hasCock?"checked":""}/> Cock</label><div>${cockTypesHtml}</div></div>`:''}
@@ -228,9 +335,11 @@ AFLP.UI.SexualStatsDialog = class SexualStatsDialog {
       </div>
     </form>
     `;
-  }
+};
 
-  _activateListeners(html, dialog) {
+
+
+AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) {
     html.find("[data-action=adjust]").click(()=>{this.view="adjust";dialog.close();this.render();});
     html.find("[data-action=display]").click(()=>{this.view="display";dialog.close();this.render();});
 
@@ -240,37 +349,57 @@ AFLP.UI.SexualStatsDialog = class SexualStatsDialog {
 
       await this.actor.setFlag(this.FLAG,"sexual",structuredClone(AFLP.sexualDefaults));
       await this.actor.unsetFlag(this.FLAG,"pregnancy");
-      await this.actor.setFlag(this.FLAG,"pregnancySourcesHistory",[]);
       if (this.actor) await AFLP.recalculateCum(this.actor);
       ui.notifications.info(`${this.actor.name} sexual stats reset.`);
       dialog.close();
     });
 
-    html.find("#aflp-sexual-stats").on("submit", async ev=>{
-      ev.preventDefault();
-      const fd=new FormData(ev.currentTarget);
-      this.coomer.level=Number(fd.get("coomer")??0);await this.actor.setFlag(this.FLAG,"coomer",this.coomer);
-      await AFLP.recalculateCum(this.actor);
-      this.cum = structuredClone(await this.actor.getFlag(this.FLAG,"cum"));
+	html.find("#aflp-sexual-stats").on("submit", async ev => {
+	  ev.preventDefault();
+	  const fd = new FormData(ev.currentTarget);
 
-      ["oral","vaginal","anal","facial","gangbang"].forEach(act=>{
-        if(act==="vaginal"&&!fd.get("pussy")) return;
-        this.sexual.lifetime[act]=Number(fd.get(`lifetime-${act}`))||0;
-        this.sexual.event[act]=Number(fd.get(`event-${act}`))||0;
-        if(this.sexual.lifetime.mlReceived[act]!==undefined) this.sexual.lifetime.mlReceived[act]=Number(fd.get(`ml-${act}`))||0;
-      });
+	  // Coomer and recalc
+	  this.coomer.level = Number(fd.get("coomer") ?? 0);
+	  await this.actor.setFlag(this.FLAG, "coomer", this.coomer);
+	  await AFLP.recalculateCum(this.actor);
+	  this.cum = structuredClone(await this.actor.getFlag(this.FLAG, "cum"));
 
-      this.hasPussy=!!fd.get("pussy"); this.hasCock=!!fd.get("cock");
-      await this.actor.setFlag(this.FLAG,"pussy",this.hasPussy); await this.actor.setFlag(this.FLAG,"cock",this.hasCock);
+	  // Acts
+	  ["oral","vaginal","anal","facial","gangbang"].forEach(act=>{
+		if(act==="vaginal" && !fd.get("pussy")) return;
+		this.sexual.lifetime[act] = Number(fd.get(`lifetime-${act}`)) || 0;
+		this.sexual.event[act] = Number(fd.get(`event-${act}`)) || 0;
+		if(this.sexual.lifetime.mlReceived[act] !== undefined) this.sexual.lifetime.mlReceived[act] = Number(fd.get(`ml-${act}`)) || 0;
+	  });
 
-      for(const type of Object.keys(AFLP.cockTypes)){ this.cockTypes[type]=!!fd.get(`cockType-${type}`);}
-      await this.actor.setFlag(this.FLAG,"cockTypes",this.cockTypes);
+	  // Genitalia flags
+	  this.hasPussy = !!fd.get("pussy");
+	  this.hasCock = !!fd.get("cock");
+	  await this.actor.setFlag(this.FLAG, "pussy", this.hasPussy);
+	  await this.actor.setFlag(this.FLAG, "cock", this.hasCock);
 
-      if(this.hasCock) this.sexual.lifetime.cumGiven=Number(fd.get("cumGiven"))||0;
-      await this.actor.setFlag(this.FLAG,"sexual",this.sexual);
+	  // Cock types
+	  for(const type of Object.keys(AFLP.cockTypes)){
+		this.cockTypes[type] = !!fd.get(`cockType-${type}`);
+	  }
+	  await this.actor.setFlag(this.FLAG, "cockTypes", this.cockTypes);
 
-      ui.notifications.info("Sexual stats updated.");
-      this.view="display";dialog.close();this.render();
-    });
-  }
+	  // Cum given
+	  if(this.hasCock) this.sexual.lifetime.cumGiven = Number(fd.get("cumGiven")) || 0;
+
+	  // --- PATCHED: Kinks ---
+	  for(const slug of Object.keys(AFLP.kinks)) {
+	    this.kinks[slug] = !!fd.get(`kink-${slug}`);
+	  }
+
+	  // Ensure sexual.kinks is updated to match this.kinks
+	  this.sexual.kinks = structuredClone(this.kinks);
+
+	  await this.actor.setFlag(this.FLAG, "sexual", this.sexual);
+
+	  ui.notifications.info("Sexual stats updated.");
+	  this.view="display";
+	  dialog.close();
+	  this.render();
+	});
 };
