@@ -198,8 +198,14 @@ AFLP.UI.SexualStatsDialog.prototype.load = async function() {
   this.hasCock = !!(await this.actor.getFlag(this.FLAG, "cock"));
   this.cockTypes = structuredClone(await this.actor.getFlag(this.FLAG, "cockTypes") ?? {});
   
-  // Patch: Always ensure kinks object exists
-  this.kinks = structuredClone(this.sexual.kinks ?? {});
+// Patch: Always ensure kinks + kinkNotes exist (all slugs)
+this.kinks = {};
+for (const slug of Object.keys(AFLP.kinks)) {
+  this.kinks[slug] = !!this.sexual.kinks?.[slug];
+}
+
+this.kinkNotes = structuredClone(this.sexual.kinkNotes ?? {});
+
 
   this.pregnancy = structuredClone(await this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
   this.size = this.actor.system.traits?.size?.value ?? "med";
@@ -265,22 +271,49 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
 
 	// Kinks section (async enrichment, alphabetically sorted)
 	let kinkList = await Promise.all(
-	  Object.entries(this.kinks)
-		.map(([slug, enabled]) => {
-		  const kink = AFLP.kinks[slug];
-		  if (!kink) return null;
-		  return { slug, enabled, kink };
-		})
+  Object.entries(AFLP.kinks)
+    .map(([slug, kink]) => {
+      const enabled = !!this.kinks[slug];
+      return { slug, enabled, kink };
+    })
 		.filter(Boolean)
 		.sort((a, b) => a.kink.name.localeCompare(b.kink.name))
 		.map(async ({ slug, enabled, kink }) => {
-		  if (this.view === "display") {
-			if (!enabled) return "";
-			return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}</li>`;
-		  } else {
-			return `<label><input type="checkbox" name="kink-${slug}" ${enabled ? "checked" : ""}/> ${kink.name}</label>`;
-		  }
-		})
+
+  // DISPLAY MODE
+  if (this.view === "display") {
+    if (!enabled) return "";
+
+    if (slug === "creature-fetish") {
+      const note = this.kinkNotes?.[slug];
+      const extra = note ? ` — <em>${note}</em>` : "";
+      return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}${extra}</li>`;
+    }
+
+    return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}</li>`;
+  }
+
+  // ADJUST MODE
+  if (slug === "creature-fetish") {
+    const note = this.kinkNotes?.[slug] ?? "";
+    return `
+      <label>
+        <input type="checkbox" name="kink-${slug}" ${enabled ? "checked" : ""}/>
+        ${kink.name}
+      </label>
+      <input
+        type="text"
+        name="kinknote-${slug}"
+        value="${note}"
+        placeholder="e.g. dragons, beasts, slimes"
+        style="width:100%; margin-left:6px;"
+      />
+    `;
+  }
+
+  return `<label><input type="checkbox" name="kink-${slug}" ${enabled ? "checked" : ""}/> ${kink.name}</label>`;
+})
+
 	);
 
 	kinkList = kinkList.filter(x => x).join(this.view === "display" ? "" : "<br>");
@@ -391,9 +424,19 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
 	  for(const slug of Object.keys(AFLP.kinks)) {
 	    this.kinks[slug] = !!fd.get(`kink-${slug}`);
 	  }
+	  // --- Kink Notes (Creature Fetish text field) ---
+const creatureNote = String(fd.get("kinknote-creature-fetish") ?? "").trim();
+if (creatureNote) {
+  this.kinkNotes["creature-fetish"] = creatureNote;
+} else {
+  delete this.kinkNotes["creature-fetish"];
+}
+
 
 	  // Ensure sexual.kinks is updated to match this.kinks
 	  this.sexual.kinks = structuredClone(this.kinks);
+this.sexual.kinkNotes = structuredClone(this.kinkNotes);
+
 
 	  await this.actor.setFlag(this.FLAG, "sexual", this.sexual);
 
