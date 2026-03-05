@@ -1,5 +1,5 @@
 // ===============================
-// AFLP Cumflation Helper (aflp_cumflation.js) – AUDITED
+// AFLP Cumflation Helper (cumflation.js)
 // ===============================
 
 if (!window.AFLP.Macros) window.AFLP.Macros = {};
@@ -9,7 +9,7 @@ window.AFLP_Cumflation = {
   getCumOverflow: actor => structuredClone(actor.getFlag(AFLP.FLAG_SCOPE, "cumOverflow") ?? { anal: 0, oral: 0, vaginal: 0, facial: 0 }),
 
   applyCumflation: (actor, cumFlags, cumOverflow, sexualStatsDialog, selectedHoles, cumUnitsSpent) => {
-    const receivingHoles = selectedHoles.filter(h => ["oral","anal","vaginal","facial"].includes(h));
+    const receivingHoles = selectedHoles.filter(h => ["oral", "anal", "vaginal", "facial"].includes(h));
     if (!receivingHoles.length) return;
 
     const perHole = Math.floor(cumUnitsSpent / receivingHoles.length);
@@ -17,26 +17,32 @@ window.AFLP_Cumflation = {
 
     for (const [i, hole] of receivingHoles.entries()) {
       const prevUnits = cumFlags[hole] ?? 0;
+      const unitsToAdd = perHole + (i === 0 ? remainder : 0);
 
-      // Apply tier clamping for anal/oral/vaginal only
-      const appliedTier = hole === "facial" ? prevUnits + perHole + (i === 0 ? remainder : 0) : Math.min(8, prevUnits + perHole + (i === 0 ? remainder : 0));
+      // Apply tier clamping for anal/oral/vaginal only; facial is uncapped
+      const appliedTier = hole === "facial"
+        ? prevUnits + unitsToAdd
+        : Math.min(8, prevUnits + unitsToAdd);
       cumFlags[hole] = appliedTier;
 
       // Overflow only applies to capped holes
-      const overflow = (hole === "facial") ? 0 : Math.max(0, (prevUnits + perHole + (i === 0 ? remainder : 0)) - 8);
+      const overflow = hole === "facial"
+        ? 0
+        : Math.max(0, (prevUnits + unitsToAdd) - 8);
       cumOverflow[hole] = (cumOverflow[hole] ?? 0) + overflow;
 
       // Ensure lifetime mlReceived exists
-      if (!sexualStatsDialog.sexual.lifetime.mlReceived[hole]) sexualStatsDialog.sexual.lifetime.mlReceived[hole] = 0;
+      if (!sexualStatsDialog.sexual.lifetime.mlReceived[hole]) {
+        sexualStatsDialog.sexual.lifetime.mlReceived[hole] = 0;
+      }
 
-      // Increment lifetime mlReceived fully, uncapped
-      const unitsToAdd = perHole + (i === 0 ? remainder : 0);
-      sexualStatsDialog.sexual.lifetime.mlReceived[hole] += unitsToAdd * 125;
+      // Increment lifetime mlReceived fully, uncapped, using shared constant
+      sexualStatsDialog.sexual.lifetime.mlReceived[hole] += unitsToAdd * AFLP.CUM_UNIT_ML;
     }
 
-    // Total cumReceived across all holes (uncapped)
+    // Total cumReceived across all holes (uncapped), using shared constant
     if (sexualStatsDialog?.sexual?.lifetime?.cumReceived !== undefined) {
-      sexualStatsDialog.sexual.lifetime.cumReceived += cumUnitsSpent * 125;
+      sexualStatsDialog.sexual.lifetime.cumReceived += cumUnitsSpent * AFLP.CUM_UNIT_ML;
     }
   },
 
@@ -55,7 +61,7 @@ window.AFLP_Cumflation = {
       // Facial has no embedded effects
     };
 
-    for (const hole of ["anal","oral","vaginal"]) {
+    for (const hole of ["anal", "oral", "vaginal"]) {
       const tier = cumFlags[hole] ?? 0;
       if (tier <= 0) continue;
 
@@ -65,7 +71,7 @@ window.AFLP_Cumflation = {
       const old = actor.items.filter(i =>
         i.name.startsWith(`Cumflated ${hole.charAt(0).toUpperCase() + hole.slice(1)}`)
       );
-      if (old.length) await actor.deleteEmbeddedDocuments("Item", old.map(i=>i.id), { noHook:true });
+      if (old.length) await actor.deleteEmbeddedDocuments("Item", old.map(i => i.id), { noHook: true });
 
       const effectDoc = await fromUuid(uuid);
       if (!effectDoc) continue;
@@ -84,9 +90,9 @@ window.AFLP_Cumflation = {
       if (uuid) {
         const oldTotal = actor.items.filter(i =>
           i.name.startsWith("Cumflated ") &&
-          !["Oral","Anal","Vaginal"].some(h => i.name.includes(h))
+          !["Oral", "Anal", "Vaginal"].some(h => i.name.includes(h))
         );
-        if (oldTotal.length) await actor.deleteEmbeddedDocuments("Item", oldTotal.map(i=>i.id), { noHook:true });
+        if (oldTotal.length) await actor.deleteEmbeddedDocuments("Item", oldTotal.map(i => i.id), { noHook: true });
 
         const effectDoc = await fromUuid(uuid);
         if (effectDoc) {
@@ -97,6 +103,6 @@ window.AFLP_Cumflation = {
       }
     }
 
-    if (newItems.length) await actor.createEmbeddedDocuments("Item", newItems, { noHook:true });
+    if (newItems.length) await actor.createEmbeddedDocuments("Item", newItems, { noHook: true });
   }
 };

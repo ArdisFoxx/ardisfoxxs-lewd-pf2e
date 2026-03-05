@@ -3,7 +3,7 @@
 // ===============================
 // - Core schema for AFLP module
 // - Configures the flag system for use in AFLP macros and scripts
-// - Ensures defaults for sexual stats, genitalia, cumflation, and cock types
+// - Ensures defaults for sexual stats, genitalia, cumflation, and genital types
 // ===============================
 
 // Ensure AFLP global exists
@@ -12,15 +12,21 @@ if (!window.AFLP) window.AFLP = {};
 AFLP.BASE_CUM_BY_SIZE = {
   tiny: 1,
   sm: 2,
-  med: 4,
-  lg: 80,
-  huge: 1600,
-  grg: 32000
+  med: 2,
+  lg: 40,
+  huge: 800,
+  grg: 1600
 };
 
 Object.assign(window.AFLP, {
   SCHEMA_VERSION: 1,
   FLAG_SCOPE: "world",
+
+  // ===============================
+  // Cum unit → ml conversion
+  // 1 unit = 250ml
+  // ===============================
+  CUM_UNIT_ML: 250,
 
   // ===============================
   // Core items used in the module
@@ -93,7 +99,7 @@ Object.assign(window.AFLP, {
   },
 
   // ===============================
-  // Default genitalia flags
+  // Default genitalia flags (top-level)
   // ===============================
   genitaliaDefaults: {
     pussy: false,
@@ -117,17 +123,17 @@ Object.assign(window.AFLP, {
       mlReceived: { oral: 0, vaginal: 0, anal: 0, facial: 0 },
       timesImpregnated: 0
     },
-    event: {
-      oral: 0,
-      vaginal: 0,
-      anal: 0,
-      facial: 0,
-      gangbang: 0
-    },
     titles: [],
     favorites: [],
-	kinks: {}
+    kinks: {},
+    kinkNotes: {}
   },
+
+  // ===============================
+  // Default cum / coomer
+  // ===============================
+  cumDefaults: { current: 0, max: 0 },
+  coomerDefaults: { level: 0 },
 
   // ===============================
   // Default pregnancy template
@@ -146,77 +152,128 @@ Object.assign(window.AFLP, {
   // Kink Registry
   // ===============================
   kinks: {
-  "dominant": {
-	name: "Dominant",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.C5ZtoqW4NXEAUdCf"
-  },
-  "submissive": {
-	name: "Submissive",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.R0DRa8QhwXC3LhUD"
-  },
-  "switch": {
-	name: "Switch",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.bRrDiw8DIxqYFgRA"
-  },
-  "aphrodisiac-junkie": {
-  	name: "Aphrodisiac Junkie",
-  	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.k71GcOR7w25IiwTG"
-  },
-  "bondage-princess": {
-	name: "Bondage Princess",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.3iI8WWhDnl71NqVW"
-  },
-  "brood-sow": {
-	name: "Brood Sow",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.zfNxhu2nn3YPz9Lb"
-  },
-  "creature-fetish": {
-	name: "Creature Fetish",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fcnEx5qeoOFNcr5v"
-  },
-  "cum-slut": {
-	name: "Cum Slut",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.omYlzPBNXLVAI7N3"
-  },
-  "edge-master": {
-	name: "Edge Master",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.6xLbRrviQSmUEsKP"
-  },
-  "exhibitionist": {
-	name: "Exhibitionist",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JRXfjU2WvdruuhWD"
-  },
-  "party-animal": {
-	name: "Party Animal",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.pfs8GCIbh6E8polc"
-  },
-  "purity": {
-	name: "Purity",
-	uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.eFcEwxfe56UxqlJc"
+    "dominant": {
+      name: "Dominant",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.C5ZtoqW4NXEAUdCf"
+    },
+    "submissive": {
+      name: "Submissive",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.R0DRa8QhwXC3LhUD"
+    },
+    "switch": {
+      name: "Switch",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.bRrDiw8DIxqYFgRA"
+    },
+    "aphrodisiac-junkie": {
+      name: "Aphrodisiac Junkie",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.k71GcOR7w25IiwTG"
+    },
+    "bondage-princess": {
+      name: "Bondage Princess",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.3iI8WWhDnl71NqVW"
+    },
+    "brood-sow": {
+      name: "Brood Sow",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.zfNxhu2nn3YPz9Lb"
+    },
+    "creature-fetish": {
+      name: "Creature Fetish",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fcnEx5qeoOFNcr5v"
+    },
+    "cum-slut": {
+      name: "Cum Slut",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.omYlzPBNXLVAI7N3"
+    },
+    "edge-master": {
+      name: "Edge Master",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.6xLbRrviQSmUEsKP"
+    },
+    "exhibitionist": {
+      name: "Exhibitionist",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JRXfjU2WvdruuhWD"
+    },
+    "party-animal": {
+      name: "Party Animal",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.pfs8GCIbh6E8polc"
+    },
+    "purity": {
+      name: "Purity",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.eFcEwxfe56UxqlJc"
     }
   },
 
   // ===============================
-  // Cock type defaults
+  // Genital Type Registry
+  // Replaces cockTypes — includes pussy and all cock subtypes
+  // Top-level cock/pussy booleans remain as separate flags
   // ===============================
-  cockTypes: {
-    cock: true,
-    "cock-breeder": true,
-    "cock-electrifying": true,
-    "cock-fertile": true,
-    "cock-flared": true,
-    "cock-hemipenis": true,
-    "cock-knot": true,
-    "cock-ovidepositor": true,
-    "cock-pacifying": true,
-    "cock-paralyzing": true,
-    "cock-slime": true
+  genitalTypes: {
+    pussy: {
+      name: "Pussy",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.pXivTb1f84SDm2xc",
+      parent: null
+    },
+    cock: {
+      name: "Cock",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.PR96OQsnDSzt1e4i",
+      parent: null
+    },
+    "cock-breeder": {
+      name: "Breeder",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Lsd1xTTpGv7irtB",
+      parent: "cock"
+    },
+    "cock-electrifying": {
+      name: "Electrifying",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.jkRFNqFtRcKkAZwC",
+      parent: "cock"
+    },
+    "cock-fertile": {
+      name: "Fertile",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tUqN9UtQhawLd5Nq",
+      parent: "cock"
+    },
+    "cock-flared": {
+      name: "Flared",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.qF8wy9Nz11DyBgRH",
+      parent: "cock"
+    },
+    "cock-hemipenis": {
+      name: "Hemipenis",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JTWCaeV5zCKpT7uk",
+      parent: "cock"
+    },
+    "cock-knot": {
+      name: "Knot",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.A8cubySA9aPKmNCF",
+      parent: "cock"
+    },
+    "cock-ovidepositor": {
+      name: "Ovidepositor",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.0sZoe3XFXKv57RJ6",
+      parent: "cock"
+    },
+    "cock-pacifying": {
+      name: "Pacifying",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tuc39pbCilMKvYx8",
+      parent: "cock"
+    },
+    "cock-paralyzing": {
+      name: "Paralyzing",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.vy3wCGu8tRKwfAP5",
+      parent: "cock"
+    },
+    "cock-slime": {
+      name: "Slime",
+      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.TAfvb2RvjbwcT7Ci",
+      parent: "cock"
+    }
   },
 
   // ===============================
   // Default cumflation values
   // ===============================
-  cumflationDefaults: { anal: 0, oral: 0, vaginal: 0 , facial: 0 },
+  cumflationDefaults: { anal: 0, oral: 0, vaginal: 0, facial: 0 },
 
   // ===============================
   // Compute average total cumflation
@@ -240,16 +297,16 @@ Object.assign(window.AFLP, {
   // ===============================
   async ensureCoreFlags(actor) {
     await this.ensureFlag(actor, "sexual", structuredClone(this.sexualDefaults));
-    await this.ensureFlag(actor, "cum", { current: 0, max: 0 });
-	await this.ensureFlag(actor, "cumOverflow", { anal:0, oral:0, vaginal:0, facial:0 });
-    await this.ensureFlag(actor, "coomer", { level: 0 });
+    await this.ensureFlag(actor, "cum", structuredClone(this.cumDefaults));
+    await this.ensureFlag(actor, "cumOverflow", { anal: 0, oral: 0, vaginal: 0, facial: 0 });
+    await this.ensureFlag(actor, "coomer", structuredClone(this.coomerDefaults));
     await this.ensureFlag(actor, "pussy", this.genitaliaDefaults.pussy);
     await this.ensureFlag(actor, "cock", this.genitaliaDefaults.cock);
-	await this.ensureFlag(actor, "sexual.kinks", {});
+    await this.ensureFlag(actor, "sexual.kinks", {});
     await this.ensureFlag(
       actor,
-      "cockTypes",
-      Object.fromEntries(Object.keys(this.cockTypes).map(k => [k, false]))
+      "genitalTypes",
+      Object.fromEntries(Object.keys(this.genitalTypes).map(k => [k, false]))
     );
     await this.ensureFlag(actor, "pregnancy", {});
     await this.ensureFlag(actor, "cumflation", structuredClone(this.cumflationDefaults));
@@ -266,18 +323,12 @@ Object.assign(window.AFLP, {
     }
 
     const FLAG = AFLP.FLAG_SCOPE;
-
     const coomer = (await actor.getFlag(FLAG, "coomer")) ?? { level: 0 };
     const size = actor.system?.traits?.size?.value ?? "med";
-
-    const base =
-      AFLP.BASE_CUM_BY_SIZE[size] ??
-      AFLP.BASE_CUM_BY_SIZE.med;
-
+    const base = AFLP.BASE_CUM_BY_SIZE[size] ?? AFLP.BASE_CUM_BY_SIZE.med;
     const max = base * (1 + (coomer.level ?? 0));
 
     await actor.setFlag(FLAG, "cum", { current: max, max });
-
     return { current: max, max };
   }
 
