@@ -25,9 +25,13 @@ window.AFLP_Lovense = {
 
   // ── Direct mode: built-in Lovense Preset names mapped to intensity tiers
   // Available presets in Lovense Connect: pulse, wave, fireworks, earthquake
-  // Lovense Remote (both PC and mobile) only supports Function commands, not named Presets.
-  // Presets (wave, pulse, fireworks, earthquake) are Lovense Connect-only and silently no-op
-  // on Remote. We differentiate events purely via strength and duration instead.
+  DIRECT_PRESETS: {
+    arousal_low:    "wave",
+    arousal_medium: "pulse",
+    arousal_high:   "fireworks",
+    cum:            "earthquake",
+    edge:           "fireworks",
+  },
 
   EVENTS: {
     arousal_low:    { label: "Arousal (Low)",    emoji: "\u{1F497}", group: "Arousal",    logKey: "AFLP Arousal Low",    pattern: "build_low",    defMinStr: 15, defMaxStr: 30,  defMinDur: 1,  defMaxDur: 2  },
@@ -153,8 +157,11 @@ window.AFLP_Lovense = {
     const strength = Math.round((min + Math.random() * (max - min)) / 100 * 20);
     const duration = Math.round(minD + Math.random() * (maxD - minD));
 
-    // Always use Function:Vibrate — Lovense Remote doesn't support named Presets
-    const body = { command: "Function", action: `Vibrate:${strength}`, timeSec: duration, apiVer: 1 };
+    // Use a named Preset for intensity-tier events, Function for conditions
+    const preset = this.DIRECT_PRESETS[eventKey];
+    const body = preset
+      ? { command: "Preset", name: preset, timeSec: duration, apiVer: 1 }
+      : { command: "Function", action: `Vibrate:${strength}`, timeSec: duration, apiVer: 1 };
 
     fetch(this.getDirectUrl(), {
       method: "POST",
