@@ -137,6 +137,18 @@ for (const actor of game.actors.contents) {
   }
 
   // -------------------------------
+  // Arousal — strip effect, reset flag to default
+  // -------------------------------
+  const arousalEffects = actor.items.filter(i =>
+    i.slug === "arousal" ||
+    i.sourceId === "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Z2RdSitwyyppWN8"
+  );
+  if (arousalEffects.length) {
+    await actor.deleteEmbeddedDocuments("Item", arousalEffects.map(i => i.id));
+  }
+  await actor.setFlag(FLAG, "arousal", structuredClone(AFLP.arousalDefaults));
+
+  // -------------------------------
   // Recalculate cum if missing
   // -------------------------------
   const cumFinal = actor.getFlag(FLAG, "cum");

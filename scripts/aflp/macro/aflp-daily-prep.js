@@ -23,8 +23,10 @@ if (!tokens.length) return ui.notifications.warn("Select at least one token.");
 for (const { actor } of tokens) {
   await AFLP.ensureCoreFlags(actor);
 
-  // Reset arousal
-  await actor.setFlag(FLAG, "arousal", { value: 0 });
+  // Reset arousal (preserve maxBase, reset current to 0)
+  const arousal = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
+  arousal.current = 0;
+  await actor.setFlag(FLAG, "arousal", arousal);
 
   // Cum refill — use schema values via recalculateCum
   await AFLP.recalculateCum(actor);

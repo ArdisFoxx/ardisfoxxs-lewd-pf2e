@@ -1,108 +1,108 @@
 // ===============================
 // AFLP Cumflation Helper (cumflation.js)
 // ===============================
+// Per-hole cumflation tiers (anal/oral/vaginal/facial) are now stored as
+// flags only. Only the total cumflation effect is applied as an item,
+// as it carries actual mechanical status penalties.
 
 if (!window.AFLP.Macros) window.AFLP.Macros = {};
 
 window.AFLP_Cumflation = {
-  getCumflation: actor => structuredClone(actor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? { anal: 0, oral: 0, vaginal: 0, facial: 0 }),
-  getCumOverflow: actor => structuredClone(actor.getFlag(AFLP.FLAG_SCOPE, "cumOverflow") ?? { anal: 0, oral: 0, vaginal: 0, facial: 0 }),
 
+  getCumflation: actor => structuredClone(
+    actor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? { anal: 0, oral: 0, vaginal: 0, facial: 0 }
+  ),
+
+  getCumOverflow: actor => structuredClone(
+    actor.getFlag(AFLP.FLAG_SCOPE, "cumOverflow") ?? { anal: 0, oral: 0, vaginal: 0, facial: 0 }
+  ),
+
+  // Distribute cumUnitsSpent across the given holes on the target.
+  // Mutates cumFlags and sexualStatsDialog.sexual in place.
+  // Caller is responsible for saving afterward.
   applyCumflation: (actor, cumFlags, cumOverflow, sexualStatsDialog, selectedHoles, cumUnitsSpent) => {
     const receivingHoles = selectedHoles.filter(h => ["oral", "anal", "vaginal", "facial"].includes(h));
     if (!receivingHoles.length) return;
 
-    const perHole = Math.floor(cumUnitsSpent / receivingHoles.length);
+    const perHole  = Math.floor(cumUnitsSpent / receivingHoles.length);
     const remainder = cumUnitsSpent % receivingHoles.length;
 
     for (const [i, hole] of receivingHoles.entries()) {
-      const prevUnits = cumFlags[hole] ?? 0;
+      const prevUnits  = cumFlags[hole] ?? 0;
       const unitsToAdd = perHole + (i === 0 ? remainder : 0);
 
-      // Apply tier clamping for anal/oral/vaginal only; facial is uncapped
-      const appliedTier = hole === "facial"
+      // Tier clamped to 8 for anal/oral/vaginal; facial is uncapped
+      cumFlags[hole] = hole === "facial"
         ? prevUnits + unitsToAdd
         : Math.min(8, prevUnits + unitsToAdd);
-      cumFlags[hole] = appliedTier;
 
-      // Overflow only applies to capped holes
-      const overflow = hole === "facial"
-        ? 0
-        : Math.max(0, (prevUnits + unitsToAdd) - 8);
-      cumOverflow[hole] = (cumOverflow[hole] ?? 0) + overflow;
-
-      // Ensure lifetime mlReceived exists
-      if (!sexualStatsDialog.sexual.lifetime.mlReceived[hole]) {
-        sexualStatsDialog.sexual.lifetime.mlReceived[hole] = 0;
+      // Track overflow for capped holes
+      if (hole !== "facial") {
+        const overflow = Math.max(0, (prevUnits + unitsToAdd) - 8);
+        cumOverflow[hole] = (cumOverflow[hole] ?? 0) + overflow;
       }
 
-      // Increment lifetime mlReceived fully, uncapped, using shared constant
-      sexualStatsDialog.sexual.lifetime.mlReceived[hole] += unitsToAdd * AFLP.CUM_UNIT_ML;
+      // Lifetime mlReceived per hole
+      // Guard against mlReceived being stored as a number (legacy data) or missing entirely.
+      if (typeof sexualStatsDialog.sexual.lifetime.mlReceived !== "object" ||
+          sexualStatsDialog.sexual.lifetime.mlReceived === null) {
+        sexualStatsDialog.sexual.lifetime.mlReceived = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
+      }
+      sexualStatsDialog.sexual.lifetime.mlReceived[hole] =
+        (sexualStatsDialog.sexual.lifetime.mlReceived[hole] ?? 0) + (unitsToAdd * AFLP.CUM_UNIT_ML);
     }
 
-    // Total cumReceived across all holes (uncapped), using shared constant
-    if (sexualStatsDialog?.sexual?.lifetime?.cumReceived !== undefined) {
-      sexualStatsDialog.sexual.lifetime.cumReceived += cumUnitsSpent * AFLP.CUM_UNIT_ML;
+    // Lifetime total cumReceived (all holes combined)
+    if (sexualStatsDialog?.sexual?.lifetime !== undefined) {
+      sexualStatsDialog.sexual.lifetime.cumReceived =
+        (sexualStatsDialog.sexual.lifetime.cumReceived ?? 0) + cumUnitsSpent * AFLP.CUM_UNIT_ML;
     }
   },
 
   saveCumflation: async (actor, cumFlags, cumOverflow) => {
-    await actor.setFlag(AFLP.FLAG_SCOPE, "cumflation", cumFlags);
+    await actor.setFlag(AFLP.FLAG_SCOPE, "cumflation",  cumFlags);
     await actor.setFlag(AFLP.FLAG_SCOPE, "cumOverflow", cumOverflow);
   },
 
+  // Applies only the TOTAL cumflation effect item.
+  // Per-hole effects are no longer applied as items — tier is flag-only.
+  // Total = Math.floor((anal + oral + vaginal) / 3), capped at 8.
   applyCumflationEffects: async actor => {
-    const cumFlags = actor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {};
-    const newItems = [];
-    const holeEffectMap = {
-      anal: AFLP.items.cumflationAnal,
-      oral: AFLP.items.cumflationOral,
-      vaginal: AFLP.items.cumflationVaginal
-      // Facial has no embedded effects
-    };
+    const FLAG      = AFLP.FLAG_SCOPE;
+    const cumFlags  = actor.getFlag(FLAG, "cumflation") ?? {};
+    const sexual    = actor.getFlag(FLAG, "sexual") ?? {};
+    const kinks     = sexual.kinks ?? {};
+    const isCumSlut = !!kinks["cum-slut"];
 
-    for (const hole of ["anal", "oral", "vaginal"]) {
-      const tier = cumFlags[hole] ?? 0;
-      if (tier <= 0) continue;
+    const anal    = cumFlags.anal    ?? 0;
+    const oral    = cumFlags.oral    ?? 0;
+    const vaginal = cumFlags.vaginal ?? 0;
 
-      const uuid = holeEffectMap[hole]?.[tier - 1];
-      if (!uuid) continue;
+    // Total tier = floor average of the three capped holes, capped at 8
+    const totalTier = Math.min(8, Math.floor((anal + oral + vaginal) / 3));
 
-      const old = actor.items.filter(i =>
-        i.name.startsWith(`Cumflated ${hole.charAt(0).toUpperCase() + hole.slice(1)}`)
-      );
-      if (old.length) await actor.deleteEmbeddedDocuments("Item", old.map(i => i.id), { noHook: true });
-
-      const effectDoc = await fromUuid(uuid);
-      if (!effectDoc) continue;
-
-      const effect = effectDoc.toObject();
-      effect.name = `Cumflated ${hole.charAt(0).toUpperCase() + hole.slice(1)} ${tier}`;
-      newItems.push(effect);
+    // Remove any existing total cumflation effect
+    const oldTotal = actor.items.filter(i => i.getFlag("world", "aflpCumflationTotal") === true);
+    if (oldTotal.length) {
+      await actor.deleteEmbeddedDocuments("Item", oldTotal.map(i => i.id), { noHook: true });
     }
 
-    // Total cumflation tier (anal/oral/vaginal average)
-    const totalRaw = ((cumFlags.anal ?? 0) + (cumFlags.oral ?? 0) + (cumFlags.vaginal ?? 0)) / 3;
-    const totalTier = Math.clamp(Math.round(totalRaw), 0, 8);
+    if (totalTier <= 0) return;
 
-    if (totalTier > 0) {
-      const uuid = AFLP.items.cumflationTotal?.[totalTier - 1];
-      if (uuid) {
-        const oldTotal = actor.items.filter(i =>
-          i.name.startsWith("Cumflated ") &&
-          !["Oral", "Anal", "Vaginal"].some(h => i.name.includes(h))
-        );
-        if (oldTotal.length) await actor.deleteEmbeddedDocuments("Item", oldTotal.map(i => i.id), { noHook: true });
+    // Pick cum-slut override or standard total effect
+    const uuidArray = isCumSlut ? AFLP.items.cumSlutTotal : AFLP.items.cumflationTotal;
+    const uuid      = uuidArray?.[totalTier - 1];
+    if (!uuid) return;
 
-        const effectDoc = await fromUuid(uuid);
-        if (effectDoc) {
-          const effect = effectDoc.toObject();
-          effect.name = `Cumflated ${totalTier}`;
-          newItems.push(effect);
-        }
-      }
-    }
+    const effectDoc = await fromUuid(uuid);
+    if (!effectDoc) return;
 
-    if (newItems.length) await actor.createEmbeddedDocuments("Item", newItems, { noHook: true });
+    const effect = effectDoc.toObject();
+    effect.name  = `Cumflated ${totalTier}`;
+
+    // Tag with a flag so we can find it reliably later
+    foundry.utils.setProperty(effect, "flags.world.aflpCumflationTotal", true);
+
+    await actor.createEmbeddedDocuments("Item", [effect], { noHook: true });
   }
 };

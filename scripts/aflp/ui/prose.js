@@ -38,7 +38,7 @@ window.AFLP_PROSE = {
       "Their ass is stretched wide as their mouth-pussy is used like a fleshy onahole, plunging them into raw, degrading submission with cum filling every crevice."
     ],
     "anal-vaginal": [
-      "Their body convulses as double penetration takes hold— their ass is roughly opened while their pussy is relentlessly pounded, leaving them in raw submission. A thick double load stretches both holes with a decadent flood.",
+      "Their body convulses as double penetration takes hold - their ass is roughly opened while their pussy is relentlessly pounded, leaving them in raw submission. A thick double load stretches both holes with a decadent flood.",
       "Under powerful thrusts, their ass and pussy are penetrated in savage rhythm as heavy cum leaves both their holes slick and dripping.",
       "Ruthless double penetration seizes both their ass and pussy; the unyielding assault merges into degrading surrender with continuous ropes of cum."
     ],

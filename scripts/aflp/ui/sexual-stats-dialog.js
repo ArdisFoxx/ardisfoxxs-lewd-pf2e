@@ -54,7 +54,7 @@ window.AFLP_Pregnancy = {
     if (autoSuccess) {
       success = true;
     } else {
-      roll = await new Roll("1d20").evaluate({ async: true });
+      roll = await new Roll("1d20").evaluate();
       success = roll.total >= dc;
     }
 
@@ -64,7 +64,7 @@ window.AFLP_Pregnancy = {
         Source: <strong>${sourceActor.name}</strong><br>
         ${
           hasBroodSow
-            ? `<em>${targetActor.name} is a <strong>Brood Sow</strong> — their womb eagerly accepts seed.</em><br>`
+            ? `<em>${targetActor.name} is a <strong>Brood Sow</strong> - their womb eagerly accepts seed.</em><br>`
             : hasBreeder
               ? `<em>${sourceActor.name}'s breeder cock guarantees impregnation.</em><br>`
               : `Roll: <strong>${roll.total}</strong> vs DC <strong>${dc}</strong><br>`
@@ -111,7 +111,7 @@ window.AFLP_Pregnancy = {
     }
 
     while (true) {
-      const roll = await new Roll("1d6").evaluate({ async: true });
+      const roll = await new Roll("1d6").evaluate();
       const explode =
         roll.total === 6 ||
         (hasBroodSow && roll.total >= 5) ||
@@ -127,7 +127,7 @@ window.AFLP_Pregnancy = {
     let dice = 2;
     let result = [];
     while (true) {
-      const r = await new Roll(`${dice}d4`).evaluate({ async: true });
+      const r = await new Roll(`${dice}d4`).evaluate();
       const faces = r.dice[0].results.map(x => x.result);
       result.push(...faces);
       if (faces.every(x => x === 4)) dice += 2;
@@ -191,6 +191,18 @@ AFLP.UI.SexualStatsDialog.prototype.load = async function() {
   }
   this.kinkNotes = structuredClone(this.sexual.kinkNotes ?? {});
 
+  // Patch missing sub-objects for older actors
+  if (!this.sexual.lifetime.mlReceived) {
+    this.sexual.lifetime.mlReceived = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
+  } else if (this.sexual.lifetime.mlReceived.gangbang === undefined) {
+    this.sexual.lifetime.mlReceived.gangbang = 0;
+  }
+  if (!this.sexual.lifetime.mlGiven) {
+    this.sexual.lifetime.mlGiven = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
+  } else if (this.sexual.lifetime.mlGiven.gangbang === undefined) {
+    this.sexual.lifetime.mlGiven.gangbang = 0;
+  }
+
   this.pregnancy = structuredClone(await this.actor.getFlag(this.FLAG, "pregnancy") ?? {});
   this.size = this.actor.system.traits?.size?.value ?? "med";
 
@@ -220,7 +232,7 @@ AFLP.UI.SexualStatsDialog.prototype.render = async function() {
     content,
     buttons: { close: { label: "Close" } },
     render: html => this._activateListeners(html, dialog)
-  }, { width: 620 });
+  }, { width: 680 });
 
   dialog.render(true);
 };
@@ -230,23 +242,74 @@ AFLP.UI.SexualStatsDialog.prototype.render = async function() {
 // =======================
 AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
 
-  // ---- Acts table (lifetime only) ----
-  const acts = ["oral", "vaginal", "anal", "facial", "gangbang"].map(act => {
+  // -----------------------------------------------
+  // Unified Lifetime Totals table
+  // Columns: Sex Act | Times Given | Times Received | Cum Given (ml) | Cum Received (ml)
+  // Given columns hidden entirely if !hasCock
+  // Vaginal row hidden if !hasPussy
+  // -----------------------------------------------
+  const allActs = ["oral", "vaginal", "anal", "facial", "gangbang"];
+
+  const tableHeaders = `
+    <tr>
+      <th>Sex Act</th>
+      ${this.hasCock ? `<th>Times Given</th>` : ""}
+      <th>Times Received</th>
+      ${this.hasCock ? `<th>Cum Given (ml)</th>` : ""}
+      <th>Cum Received (ml)</th>
+    </tr>`;
+
+  const actRows = allActs.map(act => {
     if (act === "vaginal" && !this.hasPussy) return "";
-    const L = this.sexual.lifetime[act] ?? 0;
-    return this.view === "display"
-      ? `<tr><td>${act}</td><td>${L}</td></tr>`
-      : `<tr><td>${act}</td><td><input name="lifetime-${act}" type="number" value="${L}" style="width:60px"/></td></tr>`;
+
+    const timesReceived = this.sexual.lifetime[act] ?? 0;
+    const timesGiven    = act === "gangbang" ? "—" : (this.sexual.lifetime[act] ?? 0);
+    const mlReceived    = this.sexual.lifetime.mlReceived?.[act] ?? 0;
+    const mlGiven       = this.sexual.lifetime.mlGiven?.[act] ?? 0;
+
+    if (this.view === "display") {
+      return `
+        <tr>
+          <td>${act}</td>
+          ${this.hasCock ? `<td>${timesGiven}</td>` : ""}
+          <td>${timesReceived}</td>
+          ${this.hasCock ? `<td>${mlGiven.toLocaleString()} ml</td>` : ""}
+          <td>${mlReceived.toLocaleString()} ml</td>
+        </tr>`;
+    } else {
+      // Gangbang: times given is not tracked (shown as —), but ml given and ml received are editable
+      const timesGivenCell = act === "gangbang"
+        ? `<td>—</td>`
+        : `<td><input name="times-given-${act}" type="number" value="${timesGiven}" style="width:55px"/></td>`;
+
+      const timesReceivedCell = act === "gangbang"
+        ? `<td><input name="lifetime-gangbang" type="number" value="${timesReceived}" style="width:55px"/></td>`
+        : `<td><input name="lifetime-${act}" type="number" value="${timesReceived}" style="width:55px"/></td>`;
+
+      const mlGivenCell = act === "gangbang"
+        ? `<td><input name="ml-given-gangbang" type="number" value="${mlGiven}" style="width:70px"/></td>`
+        : `<td><input name="ml-given-${act}" type="number" value="${mlGiven}" style="width:70px"/></td>`;
+
+      const mlReceivedCell = act === "gangbang"
+        ? `<td><input name="ml-received-gangbang" type="number" value="${mlReceived}" style="width:70px"/></td>`
+        : `<td><input name="ml-received-${act}" type="number" value="${mlReceived}" style="width:70px"/></td>`;
+
+      return `
+        <tr>
+          <td>${act}</td>
+          ${this.hasCock ? `${timesGivenCell}` : ""}
+          ${timesReceivedCell}
+          ${this.hasCock ? `${mlGivenCell}` : ""}
+          ${mlReceivedCell}
+        </tr>`;
+    }
   }).join("");
 
-  // ---- Cum Received ----
-  const cumReceived = ["oral", "vaginal", "anal", "facial"].map(act => {
-    if (act === "vaginal" && !this.hasPussy) return "";
-    const ml = this.sexual.lifetime.mlReceived?.[act] ?? 0;
-    return this.view === "display"
-      ? `<li>${act}: ${ml.toLocaleString()} ml</li>`
-      : `<li>${act}: <input name="ml-${act}" type="number" value="${ml}" style="width:70px"/></li>`;
-  }).join("");
+  const lifetimeTable = `
+    <table class="aflp-table">
+      ${tableHeaders}
+      ${actRows}
+    </table>`;
 
   // ---- Kinks (left column) ----
   let kinkList = await Promise.all(
@@ -364,24 +427,9 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
     </div>
 
     <div class="aflp-section">
-      <table class="aflp-table">
-        <tr><th>Act</th><th>Lifetime</th></tr>
-        ${acts}
-      </table>
+      <b>Lifetime Totals</b>
+      ${lifetimeTable}
     </div>
-
-    <div class="aflp-section">
-      <b>Cum Received</b>
-      <ul style="margin:4px 0 0 0;padding-left:16px">${cumReceived}</ul>
-    </div>
-
-    ${this.hasCock ? `
-    <div class="aflp-section">
-      <b>Cum Given</b>
-      ${this.view === "display"
-        ? `${((this.sexual.lifetime.cumGiven ?? 0) * this.CUM_UNIT_ML).toLocaleString()} ml`
-        : `<input name="cumGiven" type="number" value="${this.sexual.lifetime.cumGiven ?? 0}" style="width:70px"/> units`}
-    </div>` : ""}
 
     <div class="aflp-two-col">
       ${kinkSection}
@@ -437,13 +485,21 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
     await AFLP.recalculateCum(this.actor);
     this.cum = structuredClone(await this.actor.getFlag(this.FLAG, "cum"));
 
-    // Acts (lifetime only)
-    for (const act of ["oral", "vaginal", "anal", "facial", "gangbang"]) {
+    // Lifetime act counters + ml per hole
+    for (const act of ["oral", "vaginal", "anal", "facial"]) {
       if (act === "vaginal" && !this.hasPussy) continue;
       this.sexual.lifetime[act] = Number(fd.get(`lifetime-${act}`)) || 0;
-      if (this.sexual.lifetime.mlReceived?.[act] !== undefined) {
-        this.sexual.lifetime.mlReceived[act] = Number(fd.get(`ml-${act}`)) || 0;
+      this.sexual.lifetime.mlReceived[act] = Number(fd.get(`ml-received-${act}`)) || 0;
+      if (this.hasCock) {
+        this.sexual.lifetime.mlGiven[act] = Number(fd.get(`ml-given-${act}`)) || 0;
       }
+    }
+
+    // Gangbang
+    this.sexual.lifetime.gangbang = Number(fd.get("lifetime-gangbang")) || 0;
+    this.sexual.lifetime.mlReceived.gangbang = Number(fd.get("ml-received-gangbang")) || 0;
+    if (this.hasCock) {
+      this.sexual.lifetime.mlGiven.gangbang = Number(fd.get("ml-given-gangbang")) || 0;
     }
 
     // Genitalia top-level flags
@@ -452,7 +508,7 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
     await this.actor.setFlag(this.FLAG, "pussy", this.hasPussy);
     await this.actor.setFlag(this.FLAG, "cock", this.hasCock);
 
-    // GenitalTypes — subtypes + sync top-level
+    // GenitalTypes
     for (const slug of Object.keys(AFLP.genitalTypes)) {
       if (slug === "pussy") {
         this.genitalTypes[slug] = this.hasPussy;
@@ -463,9 +519,6 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
       }
     }
     await this.actor.setFlag(this.FLAG, "genitalTypes", this.genitalTypes);
-
-    // Cum given
-    if (this.hasCock) this.sexual.lifetime.cumGiven = Number(fd.get("cumGiven")) || 0;
 
     // Kinks
     for (const slug of Object.keys(AFLP.kinks)) {

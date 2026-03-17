@@ -21,6 +21,37 @@ import { setupSocket } from "./socket.js";
 // Called once when Foundry initializes modules
 Hooks.once("init", async function () {
   setupSocket();
+
+  // Register AFLP custom traits so they appear in the trait selector on all
+  // item types and show a description tooltip on mouseover. Must run in init
+  // so the dictionaries exist before any item sheets open.
+  const aflpTraits = {
+    aphrodisiac: {
+      label: "Aphrodisiac",
+      description: "This item has the aphrodisiac trait, causing heightened arousal and susceptibility to sexual influences in those who consume or are exposed to it."
+    },
+    bondage: {
+      label: "Bondage",
+      description: "This item has the bondage trait, used to restrain or bind a creature. Items with this trait interact with the Bondage Princess kink and related AFLP mechanics."
+    },
+    sexual: {
+      label: "Sexual",
+      description: "This item has the sexual trait, marking it as inherently erotic in nature. Items with this trait interact with AFLP arousal, kink, and scene mechanics."
+    },
+  };
+
+  // PF2e stores trait labels in category-specific dicts and descriptions in a shared dict.
+  // We inject into every category to ensure the traits appear regardless of item type.
+  const traitDicts = [
+    "actionTraits", "featTraits", "equipmentTraits", "consumableTraits",
+    "spellTraits", "weaponTraits", "armorTraits", "hazardTraits",
+  ];
+  for (const [key, { label, description }] of Object.entries(aflpTraits)) {
+    for (const dict of traitDicts) {
+      if (CONFIG.PF2E?.[dict]) CONFIG.PF2E[dict][key] = label;
+    }
+    if (CONFIG.PF2E?.traitDescriptions) CONFIG.PF2E.traitDescriptions[key] = description;
+  }
 });
 
 // -------------------------------

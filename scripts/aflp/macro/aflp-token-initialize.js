@@ -108,6 +108,21 @@ for (const { actor } of tokens) {
   await worldActor.setFlag(FLAG, "sexual", sexual);
 
   // --------------------------------------------------
+  // Arousal — strip any existing Arousal effect/condition and reset to flag default.
+  // Arousal is now tracked entirely in flags; the effect is no longer needed.
+  // --------------------------------------------------
+  const arousalEffects = worldActor.items.filter(i =>
+    i.slug === "arousal" ||
+    i.sourceId === "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Z2RdSitwyyppWN8"
+  );
+  if (arousalEffects.length) {
+    await worldActor.deleteEmbeddedDocuments("Item", arousalEffects.map(i => i.id));
+    console.log(`AFLP | Stripped ${arousalEffects.length} Arousal effect(s) from ${worldActor.name}`);
+  }
+  // Ensure arousal flag exists at default (0 current, 6 max base)
+  await worldActor.setFlag(FLAG, "arousal", structuredClone(AFLP.arousalDefaults));
+
+  // --------------------------------------------------
   // Recalculate cum volume from coomer level
   // --------------------------------------------------
   await AFLP.recalculateCum(worldActor);
