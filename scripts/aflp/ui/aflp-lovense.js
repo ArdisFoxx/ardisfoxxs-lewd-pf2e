@@ -25,13 +25,9 @@ window.AFLP_Lovense = {
 
   // ── Direct mode: built-in Lovense Preset names mapped to intensity tiers
   // Available presets in Lovense Connect: pulse, wave, fireworks, earthquake
-  DIRECT_PRESETS: {
-    arousal_low:    "wave",
-    arousal_medium: "pulse",
-    arousal_high:   "fireworks",
-    cum:            "earthquake",
-    edge:           "fireworks",
-  },
+  // Lovense Remote (both PC and mobile) only supports Function commands, not named Presets.
+  // Presets (wave, pulse, fireworks, earthquake) are Lovense Connect-only and silently no-op
+  // on Remote. We differentiate events purely via strength and duration instead.
 
   EVENTS: {
     arousal_low:    { label: "Arousal (Low)",    emoji: "\u{1F497}", group: "Arousal",    logKey: "AFLP Arousal Low",    pattern: "build_low",    defMinStr: 15, defMaxStr: 30,  defMinDur: 1,  defMaxDur: 2  },
@@ -157,11 +153,8 @@ window.AFLP_Lovense = {
     const strength = Math.round((min + Math.random() * (max - min)) / 100 * 20);
     const duration = Math.round(minD + Math.random() * (maxD - minD));
 
-    // Use a named Preset for intensity-tier events, Function for conditions
-    const preset = this.DIRECT_PRESETS[eventKey];
-    const body = preset
-      ? { command: "Preset", name: preset, timeSec: duration, apiVer: 1 }
-      : { command: "Function", action: `Vibrate:${strength}`, timeSec: duration, apiVer: 1 };
+    // Always use Function:Vibrate — Lovense Remote doesn't support named Presets
+    const body = { command: "Function", action: `Vibrate:${strength}`, timeSec: duration, apiVer: 1 };
 
     fetch(this.getDirectUrl(), {
       method: "POST",
@@ -812,20 +805,25 @@ window.AFLP_Lovense = {
     </label>
   </div>
   <div id="wiz-gift-new-content" style="display:${isNew ? "block" : "none"};">
+    <div style="background:#1a180a;border:1px solid #f0a04a55;border-radius:4px;padding:8px 12px;margin-bottom:8px;">
+      <div style="font-size:11px;color:#f0a04a;font-weight:600;margin-bottom:3px;">⚠️ Important — GIFT requires a special browser shortcut</div>
+      <div style="font-size:11px;color:#ccc;line-height:1.6;">Chrome only writes console output to a file when launched with special flags. You must open Foundry using <strong style="color:#f0a04a;">Browser - Chrome with Logging.lnk</strong> from inside the GIFT folder — not your regular Chrome shortcut. Using your normal browser means GIFT sees nothing.</div>
+    </div>
     <div style="background:#1a1410;border:1px solid #c9a96e22;border-radius:4px;padding:10px 12px;margin-bottom:10px;">
       <div style="font-size:12px;font-weight:600;color:#c9a96e;margin-bottom:6px;">Setup steps:</div>
       <ol style="margin:0;padding-left:18px;font-size:12px;color:#ccc;line-height:2;">
         <li>Download and extract <a href="https://github.com/MinLL/GameInterfaceForToys/releases/latest" target="_blank" style="color:#c9a96e;">GameInterfaceForToys</a> to a permanent folder</li>
-        <li>Download your <strong style="color:#c9a96e;">AFLP Config Pack</strong> below and extract into that folder</li>
-        <li>Launch GIFT, click Configuration, set your log file path</li>
-        <li>Select Lovense as your toy type, enter your Lovense host IP</li>
-        <li>Save and your toy should respond to in-game events</li>
+        <li>Download your <strong style="color:#c9a96e;">AFLP Config Pack</strong> below and extract the files into that folder</li>
+        <li>Launch GIFT, click Configuration — set log file, character name, and Lovense host IP</li>
+        <li>Save, then close GIFT</li>
+        <li>From the GIFT folder, open Foundry using <strong style="color:#f0a04a;">Browser - Chrome with Logging.lnk</strong></li>
+        <li>Come back here and click Test Connection below — your toy should respond</li>
       </ol>
     </div>
   </div>
   <div id="wiz-gift-existing-content" style="display:${!isNew ? "block" : "none"};">
     <div style="background:#1a1410;border:1px solid #c9a96e22;border-radius:4px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#ccc;">
-      Download the config files below and drop them into your GIFT installation folder, replacing the existing ones. Then restart GIFT.
+      Download the config files below and drop them into your GIFT folder, replacing the existing ones. Restart GIFT, then open Foundry via <strong style="color:#f0a04a;">Browser - Chrome with Logging.lnk</strong> from the GIFT folder.
     </div>
   </div>
   <div style="margin-bottom:10px;">
