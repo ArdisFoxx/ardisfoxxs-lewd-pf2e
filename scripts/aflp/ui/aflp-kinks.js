@@ -310,6 +310,8 @@ AFLP.Kinks = {
     }
 
     console.log(`AFLP | ${actorName} Edge: succeeded (${outcomeLabel}), Denied now ${deniedTotal}`);
+    // Lovense: edge event
+    if (window.AFLP_Lovense) AFLP_Lovense.emitEdge(actor);
   },
 
   // Normal DC by level — matches PF2e Simple DC table (GMG p.503 / remaster).

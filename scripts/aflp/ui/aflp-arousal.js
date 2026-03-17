@@ -91,6 +91,9 @@ window.AFLP_Arousal = {
 
     console.log(`AFLP | ${actor.name} arousal: ${prev} → ${arousal.current}/${max} (+${total} from ${source})`);
 
+    // Lovense: emit arousal tier event
+    if (window.AFLP_Lovense) AFLP_Lovense.emitArousal(actor, arousal.current, max);
+
     // Refresh H scene card arousal bars — after flag write so bars read updated value
     if (AFLP.Settings.hsceneEnabled) {
       // Small timeout ensures the flag has propagated before we re-read it for the bar
@@ -502,6 +505,9 @@ window.AFLP_Arousal = {
     if (AFLP.Settings.automation && window.AFLP_SentientItems) {
       await AFLP_SentientItems.onActorCum(actor);
     }
+
+    // ── Lovense: peak cum event ──────────────────────────────────────────
+    if (window.AFLP_Lovense) AFLP_Lovense.emitCum(actor);
 
     // ── Fire cum macro ──────────────────────────────────────────────────
     // Only fire if automation is on, an H scene exists, AND this actor is the

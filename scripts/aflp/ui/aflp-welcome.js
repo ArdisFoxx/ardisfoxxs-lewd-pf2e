@@ -66,13 +66,15 @@ Hooks.once("ready", async () => {
       <strong style="color:#c9a96e;">AFLP 5.0 is available as a PDF</strong> - a full GM guide for running AFLP campaigns.<br/>
       Available to <strong>$15 Subscribers</strong> at
       <a href="https://subscribestar.adult/ardisfoxxart" target="_blank" style="color:#c9a96e;">ArdisFoxXx on SubscribeStar.adult</a>.
-      Your subscription also includes access to the <strong>AFLP Member Discord</strong> where you can guide the module development, meet fans of the module and organize AFLP play groups in the LFG forum.
+      Your subscription also includes access to the <strong>AFLP Member Discord</strong>! <br/>
+	  Join the community, make friends, organise AFLP campaigns and help guide the module's development.
     </div>
   </div>
 </div>`;
 
   await foundry.applications.api.DialogV2.wait({
     window: { title: "Welcome - What's New in AFLP 5.0", resizable: true },
+    position: { top: 120, left: 400 },
     content,
     buttons: [
       {

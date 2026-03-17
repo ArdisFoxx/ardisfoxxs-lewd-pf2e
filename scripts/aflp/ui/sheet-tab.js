@@ -9,6 +9,8 @@ if (!window.AFLP.UI) window.AFLP.UI = {};
 
 // Per-actor tracking of whether AFLP tab was active, keyed by actor.uuid
 const _aflpTabWasActive = new Map();
+// Staged pregnancy additions survive panel rebuilds by living here rather than on the DOM node
+const _aflpPregAdditions = new Map(); // actorId → Array of newPreg objects
 
 AFLP.UI.SheetTab = {
 
@@ -132,7 +134,8 @@ AFLP.UI.SheetTab = {
       return;
     }
 
-    const panelHtml = await AFLP.UI.SheetTab._buildPanel(actor, false);
+    const wasEditMode = sheet?._aflpEditMode ?? false;
+    const panelHtml = await AFLP.UI.SheetTab._buildPanel(actor, wasEditMode);
     body.insertAdjacentHTML("beforeend", `
       <div class="tab aflp-tab" data-tab="aflp" data-group="primary" style="display:none;">
         ${panelHtml}
@@ -331,7 +334,8 @@ AFLP.UI.SheetTab = {
           ${editMode
             ? `<button type="button" class="aflp-btn aflp-save-btn">💾 Save</button>
                <button type="button" class="aflp-btn aflp-cancel-btn" style="margin-left:4px">✕ Cancel</button>`
-            : `<button type="button" class="aflp-btn aflp-edit-btn">✏ Edit</button>`
+            : `<button type="button" class="aflp-btn aflp-edit-btn">✏ Edit</button>
+               ${AFLP._lovenseDevMode ? `<button type="button" class="aflp-btn aflp-lovense-btn" style="margin-left:4px" title="Lovense Integration Settings">🖤</button>` : ""}`
           }
         </div>
       </div>
@@ -1283,10 +1287,21 @@ AFLP.UI.SheetTab = {
         return;
       }
       if (btn.classList.contains("aflp-edit-btn")) {
+        if (sheet) sheet._aflpEditMode = true;
         await AFLP.UI.SheetTab._refreshPanel(html, actor, true);
         return;
       }
+      if (btn.classList.contains("aflp-lovense-btn")) {
+        if (window.AFLP_Lovense) {
+          const hasConfig = !!game.user.getFlag(AFLP.FLAG_SCOPE, "lovense")?.mode;
+          if (hasConfig) AFLP_Lovense.openSettings();
+          else           AFLP_Lovense.openWizard();
+        }
+        return;
+      }
       if (btn.classList.contains("aflp-cancel-btn")) {
+        if (sheet) sheet._aflpEditMode = false;
+        _aflpPregAdditions.delete(actor.id);
         await AFLP.UI.SheetTab._refreshPanel(html, actor, false);
         return;
       }
@@ -1344,7 +1359,7 @@ AFLP.UI.SheetTab = {
         // Apply numeric field edits from inputs
         const dirty = {};
         root.querySelectorAll(
-          "input.aflp-input:not([name^='kink-']):not([name^='genitalia-']):not([name^='genitalType-']):not([name^='kinknote-'])"
+          "input.aflp-input:not([name^='kink-']):not([name^='genitalia-']):not([name^='genitalType-']):not([name^='kinknote-']), select.aflp-input"
         ).forEach(inp => { if (inp.name && inp.value !== "") dirty[inp.name] = inp.value; });
         // Also collect the hidden horny.permanent staging input (not class=aflp-input)
         const hornyHidden = root.querySelector("input[type='hidden'][name='horny.permanent']");
@@ -1445,56 +1460,45 @@ AFLP.UI.SheetTab = {
           await actor.setFlag(FLAG, "horny", horny);
         }
 
-        // Pregnancy edits — preg.PREGID.{sourceName,deliveryType,offspring,gestationRemaining,gestationTotal}
-        const pregDirty = Object.entries(dirty).filter(([k]) => k.startsWith("preg."));
-        if (pregDirty.length && !resetSections.pregnancy) {
-          const pregnancies = structuredClone(actor.getFlag(FLAG, "pregnancy") ?? {});
+        // ── Pregnancy edits, removals, additions — single atomic write ──────
+        // All three operations read from one base clone and write once,
+        // avoiding stale-cache issues from separate setFlag calls on a
+        // synthetic token actor.
+        if (!resetSections.pregnancy) {
+          // Always read from the world actor to bypass synthetic token cache
+          const pregnancies = structuredClone(
+            game.actors?.get(actor.id)?.getFlag(FLAG, "pregnancy")
+            ?? actor.getFlag(FLAG, "pregnancy")
+            ?? {}
+          );
+
+          // Apply dirty field edits from still-visible inputs
+          const pregDirty = Object.entries(dirty).filter(([k]) => k.startsWith("preg."));
           for (const [field, raw] of pregDirty) {
             const parts = field.split(".");
             if (parts.length !== 3) continue;
             const [, pregId, prop] = parts;
             if (!pregnancies[pregId]) continue;
-
             switch (prop) {
               case "gestationRemaining":
               case "gestationTotal":
               case "offspring": {
                 const val = parseInt(raw, 10);
-                if (isNaN(val) || val < 0) continue;
-                pregnancies[pregId][prop] = val;
+                if (!isNaN(val) && val >= 0) pregnancies[pregId][prop] = val;
                 break;
               }
-              case "sourceName":
-                pregnancies[pregId].sourceName = raw?.trim() || "Unknown";
-                break;
-              case "deliveryType":
-                pregnancies[pregId].deliveryType = raw === "egg" ? "egg" : "live";
-                break;
-              default:
-                continue;
+              case "sourceName":   pregnancies[pregId].sourceName   = raw?.trim() || "Unknown"; break;
+              case "deliveryType": pregnancies[pregId].deliveryType = raw === "egg" ? "egg" : "live"; break;
             }
           }
-          await actor.setFlag(FLAG, "pregnancy", pregnancies);
-        }
 
-        // Pregnancy removals (from edit mode remove buttons)
-        if (!resetSections.pregnancy && panelRoot._aflpPregRemovals?.length) {
-          const pregnancies = structuredClone(actor.getFlag(FLAG, "pregnancy") ?? {});
-          for (const pregId of panelRoot._aflpPregRemovals) {
-            delete pregnancies[pregId];
-          }
-          await actor.setFlag(FLAG, "pregnancy", pregnancies);
-          panelRoot._aflpPregRemovals = [];
-        }
-
-        // Pregnancy additions (from edit mode add button)
-        if (!resetSections.pregnancy && panelRoot._aflpPregAdditions?.length) {
-          const pregnancies = structuredClone(actor.getFlag(FLAG, "pregnancy") ?? {});
-          for (let i = 0; i < panelRoot._aflpPregAdditions.length; i++) {
-            const base = panelRoot._aflpPregAdditions[i];
+          // Apply staged additions
+          const additions = _aflpPregAdditions.get(actor.id) ?? [];
+          for (let i = 0; i < additions.length; i++) {
+            const base = additions[i];
             if (!base) continue; // null = removed before save
 
-            // Read edited values from the DOM inputs (user may have changed defaults)
+            // Read edited values from DOM inputs (user may have changed defaults)
             const readVal = (prop) => root.querySelector(`[name="preg-new.${i}.${prop}"]`)?.value;
             const newPreg = {
               sourceUuid: "",
@@ -1506,11 +1510,13 @@ AFLP.UI.SheetTab = {
               method: "vaginal",
               startedAt: game.time.worldTime,
             };
-            const id = foundry.utils.randomID();
-            pregnancies[id] = newPreg;
+            pregnancies[foundry.utils.randomID()] = newPreg;
           }
-          await actor.setFlag(FLAG, "pregnancy", pregnancies);
-          panelRoot._aflpPregAdditions = [];
+          _aflpPregAdditions.delete(actor.id);
+
+          // Write using dot-notation path — setFlag deep-merges and won't remove keys
+          const worldActorWrite = game.actors?.get(actor.id) ?? actor;
+          await worldActorWrite.update({ [`flags.${FLAG}.pregnancy`]: pregnancies });
         }
 
         // Separate flag resets
@@ -1536,6 +1542,7 @@ AFLP.UI.SheetTab = {
           ui.notifications.info(`${actor.name}: reset ${labels}.`);
         }
 
+        if (sheet) sheet._aflpEditMode = false;
         await AFLP.UI.SheetTab._refreshPanel(html, actor, false);
         return;
       }
@@ -1555,18 +1562,23 @@ AFLP.UI.SheetTab = {
         ev.preventDefault(); ev.stopPropagation();
         const pregId = btn.dataset.pregId;
         if (!pregId) return;
-        // Stage removal for save (don't write immediately - edit mode batches changes)
-        if (!panelRoot._aflpPregRemovals) panelRoot._aflpPregRemovals = [];
-        panelRoot._aflpPregRemovals.push(pregId);
-        // Visually remove the row
-        const row = btn.closest("tr[data-preg-id]");
-        if (row) row.remove();
+        try {
+          const worldActor = game.actors?.get(actor.id) ?? actor;
+          // Use Foundry's -=key deletion syntax — dot-notation replacement and setFlag
+          // both deep-merge and leave deleted keys intact. Only -=key actually removes.
+          await worldActor.update({ [`flags.${FLAG}.pregnancy.-=${pregId}`]: null });
+          if (sheet) sheet._aflpEditMode = true;
+          await AFLP.UI.SheetTab._refreshPanel(html, actor, true);
+        } catch(err) {
+          console.error("AFLP | Pregnancy remove failed:", err);
+          ui.notifications?.error("AFLP: Failed to remove pregnancy — see console for details.");
+        }
         return;
       }
       if (btn.classList.contains("aflp-preg-add-btn")) {
         ev.preventDefault(); ev.stopPropagation();
         // Stage a new pregnancy for save
-        if (!panelRoot._aflpPregAdditions) panelRoot._aflpPregAdditions = [];
+        if (!_aflpPregAdditions.has(actor.id)) _aflpPregAdditions.set(actor.id, []);
         const newPreg = {
           sourceUuid: "",
           sourceName: "Unknown",
@@ -1578,7 +1590,7 @@ AFLP.UI.SheetTab = {
           startedAt: game.time.worldTime,
         };
         const tempId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        panelRoot._aflpPregAdditions.push(newPreg);
+        _aflpPregAdditions.get(actor.id).push(newPreg);
 
         // Insert a new editable row into the table
         const table = panelRoot.querySelector(".aflp-preg-table tbody");
@@ -1588,11 +1600,11 @@ AFLP.UI.SheetTab = {
           tr.innerHTML = `
             <td style="text-align:left">
               <input class="aflp-input" type="text"
-                name="preg-new.${panelRoot._aflpPregAdditions.length - 1}.sourceName"
+                name="preg-new.${(_aflpPregAdditions.get(actor.id)?.length ?? 1) - 1}.sourceName"
                 value="" style="width:100%;min-width:70px;" placeholder="Source name"/>
             </td>
             <td>
-              <select class="aflp-input" name="preg-new.${panelRoot._aflpPregAdditions.length - 1}.deliveryType"
+              <select class="aflp-input" name="preg-new.${(_aflpPregAdditions.get(actor.id)?.length ?? 1) - 1}.deliveryType"
                 style="font-size:11px;padding:1px 4px;">
                 <option value="live" selected>Live</option>
                 <option value="egg">Egg</option>
@@ -1600,21 +1612,21 @@ AFLP.UI.SheetTab = {
             </td>
             <td>
               <input class="aflp-input" type="number" min="1"
-                name="preg-new.${panelRoot._aflpPregAdditions.length - 1}.offspring"
+                name="preg-new.${(_aflpPregAdditions.get(actor.id)?.length ?? 1) - 1}.offspring"
                 value="1" style="width:38px;text-align:center;"/>
             </td>
             <td style="text-align:center">
               <input class="aflp-input" type="number" min="0"
-                name="preg-new.${panelRoot._aflpPregAdditions.length - 1}.gestationRemaining"
+                name="preg-new.${(_aflpPregAdditions.get(actor.id)?.length ?? 1) - 1}.gestationRemaining"
                 value="30" style="width:38px;text-align:center;" title="Days remaining"/>
               <span style="color:#aaa;font-size:10px;margin:0 2px">/</span>
               <input class="aflp-input" type="number" min="1"
-                name="preg-new.${panelRoot._aflpPregAdditions.length - 1}.gestationTotal"
+                name="preg-new.${(_aflpPregAdditions.get(actor.id)?.length ?? 1) - 1}.gestationTotal"
                 value="30" style="width:38px;text-align:center;" title="Total gestation days"/>
             </td>
             <td>
               <button type="button" class="aflp-btn aflp-preg-remove-new-btn"
-                data-new-idx="${panelRoot._aflpPregAdditions.length - 1}"
+                data-new-idx="${(_aflpPregAdditions.get(actor.id)?.length ?? 1) - 1}"
                 style="font-size:10px;padding:1px 5px;color:#c05040;border-color:rgba(200,60,40,0.4);"
                 title="Remove">&#10005;</button>
             </td>`;
@@ -1624,7 +1636,7 @@ AFLP.UI.SheetTab = {
           tr.querySelector(".aflp-preg-remove-new-btn")?.addEventListener("click", (e2) => {
             e2.preventDefault(); e2.stopPropagation();
             const idx = parseInt(e2.currentTarget.dataset.newIdx);
-            if (!isNaN(idx)) panelRoot._aflpPregAdditions[idx] = null; // null out, filtered on save
+            if (!isNaN(idx)) { const _pa = _aflpPregAdditions.get(actor.id); if (_pa) _pa[idx] = null; } // null out, filtered on save
             tr.remove();
           });
         }

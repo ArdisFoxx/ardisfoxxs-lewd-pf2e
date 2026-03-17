@@ -75,33 +75,43 @@ Hooks.once("ready", async function () {
     logEffect(item);
   });
 
-  // Track applied damage messages
-  Hooks.on("createChatMessage", async function (msg, _status, userid) {
-    if (!msg.flags?.pf2e?.appliedDamage) return;
-    if (userid !== game.user.id) return;
-
-    const dmg = msg?.rolls?.total ?? msg?.flags?.pf2e?.appliedDamage?.updates?.reduce((acc, val) => acc + val, 0);
-    const actor = game.actors.get(foundry.utils.parseUuid(msg?.flags?.pf2e?.origin?.actor)?.id ?? msg?.flags?.pf2e?.context?.actor);
-    const now = new Date();
-
-    logForEveryone(
-      `${getFormattedDateTime(now)} ${actor.name}, damage${
-        msg?.flags?.pf2e?.context?.options?.includes("check:outcome:critical-success") ? " Critical" : ""
-      }`
-    );
-  });
+  // Note: Damage-based Lovense events are intentionally removed in AFLP 5.0.
+  // Arousal is now a discrete flag system, not tied to HP damage.
+  // Arousal events (low/medium/high/cum/edge) are emitted by aflp-lovense.js.
 
   // -------------------------------
   // Helper: Log an effect item
   // -------------------------------
+  // Conditions/effects to always skip (not sexual in nature)
+  const LOVENSE_SKIP_SLUGS = new Set(["prone", "grabbed", "restrained", "unconscious",
+    "blinded", "deafened", "slowed", "stunned", "sickened", "frightened", "dazzled",
+    "off-guard", "encumbered", "quickened", "clumsy", "stupefied", "enfeebled",
+    "fleeing", "immobilized", "paralyzed", "petrified", "fascinated"]);
+
   function logEffect(item) {
     const actor = item.actor;
+    if (!actor) return;
+
+    // Skip non-sexual PF2e conditions
+    const slug = item.slug ?? item.system?.slug ?? "";
+    if (LOVENSE_SKIP_SLUGS.has(slug)) return;
+
+    // Check AFLP_Lovense per-event filtering if available
+    if (window.AFLP_Lovense && !AFLP_Lovense.shouldEmit(slug, actor.name)) return;
+
     let itemName = item.name;
     if (item?.system?.badge?.value) {
       itemName += ` (${item?.system?.badge?.label || item?.system?.badge?.value})`;
     }
     const now = new Date();
-    logForEveryone(`${getFormattedDateTime(now)} ${actor.name}, ${itemName}`);
+    // GIFT mode: broadcast log line
+    if (!window.AFLP_Lovense || AFLP_Lovense.useGift()) {
+      logForEveryone(`${getFormattedDateTime(now)} ${actor.name}, ${itemName}`);
+    }
+    // Direct mode: fire toy directly (only GM to avoid multi-fire)
+    if (window.AFLP_Lovense && AFLP_Lovense.useDirect() && game.user?.isGM) {
+      AFLP_Lovense.emitCondition(actor, slug);
+    }
   }
 
   // -------------------------------

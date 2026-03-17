@@ -14,7 +14,7 @@ AFLP.BASE_CUM_BY_SIZE = {
 };
 
 Object.assign(window.AFLP, {
-  SCHEMA_VERSION: 1,
+  SCHEMA_VERSION: 2,
   FLAG_SCOPE: "world",
 
   // 1 unit = 250ml
@@ -115,6 +115,7 @@ Object.assign(window.AFLP, {
     "exposed-nude":{ name: "Exposed (Nude)", uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.Y8wxUgOvsXaF2Mc4" },
     "horny":         { name: "Horny",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.hmYj3xU7xrdjMHpe" },
     "horny-always":  { name: "Horny (Always)",uuid: null },  // UUID: set after importing the effect into the compendium
+    "bimbofied":     { name: "Bimbofied",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.9ySsqXnpfZkhmp2V" },
     "mind-break":  { name: "Mind Break",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.B74Z3GBzgNMoVXr7" },
     "submitting":  { name: "Submitting",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.kBLJPOJNjz8fmxrQ" },
   },
@@ -378,6 +379,22 @@ Object.assign(window.AFLP, {
     await this.ensureFlag(actor, "cumflation",     structuredClone(this.cumflationDefaults));
     await this.ensureFlag(actor, "partnerHistory", []);
     await this.ensureFlag(actor, "schemaVersion",  this.SCHEMA_VERSION);
+
+    // ── Schema migrations ────────────────────────────────────────────────────
+    // Run in version order. Each migration checks the stored version and patches
+    // only what's missing, then bumps the stored version.
+    const storedVersion = actor.getFlag(this.FLAG_SCOPE, "schemaVersion") ?? 0;
+
+    if (storedVersion < 2) {
+      // v2: add sexual.lifetime.given sub-object (tracks cum given by category)
+      const sexual = actor.getFlag(this.FLAG_SCOPE, "sexual");
+      if (sexual?.lifetime && !sexual.lifetime.given) {
+        const givenDefaults = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
+        await actor.update({ [`flags.${this.FLAG_SCOPE}.sexual.lifetime.given`]: givenDefaults });
+        console.log(`AFLP | ${actor.name}: migrated to schema v2 (added sexual.lifetime.given)`);
+      }
+      await actor.setFlag(this.FLAG_SCOPE, "schemaVersion", 2);
+    }
   },
 
   recalculateCum: async actor => {

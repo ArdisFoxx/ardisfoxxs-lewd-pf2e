@@ -20,6 +20,13 @@ Hooks.once("init", async () => {
 Hooks.once("ready", async () => {
   if (!window.AFLP) return;
 
+  // Check for dev flag file — if present, show Lovense sheet button.
+  // Delete deletethis.md from the module folder before shipping to repo.
+  AFLP._lovenseDevMode = await fetch(
+    "modules/ardisfoxxs-lewd-pf2e/deletethis.md",
+    { method: "HEAD", cache: "no-store" }
+  ).then(r => r.ok).catch(() => false);
+
   await import("./ui/sexual-stats-dialog.js");
   await import("./ui/cumflation.js");
   await import("./ui/sheet-tab.js");
