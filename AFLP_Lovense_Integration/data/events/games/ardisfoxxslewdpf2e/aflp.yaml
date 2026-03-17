@@ -1,86 +1,144 @@
-- Player Character Damaged:
-    regex: .+{GIFT_ACTOR_NAME}, Damage+
+# AFLP 5.x Lovense Integration — default GIFT event config
+# ---------------------------------------------------------------
+# This file is the default template. The in-game Setup Wizard
+# (AFLP sheet tab → heart button) generates a personalised version
+# pre-filled with your character name and intensity preferences.
+# Use the wizard — don't edit this file manually.
+# ---------------------------------------------------------------
+# Place in: GIFT\data\events\games\ardisfoxxslewdpf2e\aflp.yaml
+
+# ── Arousal tier events ──────────────────────────────────────────
+- Arousal (Low):
+    regex: .+{GIFT_ACTOR_NAME}, AFLP Arousal Low+
     function: generic_random_vibrate
     toy_class: vibrator
     params:
         min_duration: 1
         max_duration: 2
-        min_strength: 25
-        max_strength: 45
-- Player Character Grabbed:
+        min_strength: 15
+        max_strength: 30
+
+- Arousal (Medium):
+    regex: .+{GIFT_ACTOR_NAME}, AFLP Arousal Medium+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 2
+        max_duration: 4
+        min_strength: 30
+        max_strength: 55
+
+- Arousal (High):
+    regex: .+{GIFT_ACTOR_NAME}, AFLP Arousal High+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 3
+        max_duration: 5
+        min_strength: 55
+        max_strength: 80
+
+# ── Peak events ──────────────────────────────────────────────────
+- Cum:
+    regex: .+{GIFT_ACTOR_NAME}, AFLP Cummed+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 8
+        max_duration: 15
+        min_strength: 90
+        max_strength: 100
+
+- Edged:
+    regex: .+{GIFT_ACTOR_NAME}, AFLP Edged+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 3
+        max_duration: 6
+        min_strength: 70
+        max_strength: 90
+
+- Denied:
+    regex: .+{GIFT_ACTOR_NAME}, Denied+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 2
+        max_duration: 5
+        min_strength: 40
+        max_strength: 65
+
+# ── Condition events ─────────────────────────────────────────────
+- Mind Break:
+    regex: .+{GIFT_ACTOR_NAME}, Mind Break+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 20
+        max_duration: 45
+        min_strength: 85
+        max_strength: 100
+
+- Horny:
+    regex: .+{GIFT_ACTOR_NAME}, Horny+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 3
+        max_duration: 6
+        min_strength: 15
+        max_strength: 35
+
+- Submitting:
+    regex: .+{GIFT_ACTOR_NAME}, Submitting+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 2
+        max_duration: 4
+        min_strength: 20
+        max_strength: 40
+
+- Exposed:
+    regex: .+{GIFT_ACTOR_NAME}, Exposed+
+    function: generic_random_vibrate
+    toy_class: vibrator
+    params:
+        min_duration: 1
+        max_duration: 2
+        min_strength: 10
+        max_strength: 25
+
+- Grabbed:
     regex: .+{GIFT_ACTOR_NAME}, Grabbed+
     function: generic_random_vibrate
     toy_class: vibrator
     params:
         min_duration: 1
         max_duration: 2
-        min_strength: 25
-        max_strength: 45
-- Player Character Prone:
-    regex: .+{GIFT_ACTOR_NAME}, Prone+
+        min_strength: 15
+        max_strength: 30
+
+- Bimbofied:
+    regex: .+{GIFT_ACTOR_NAME}, Bimbofied+
     function: generic_random_vibrate
     toy_class: vibrator
     params:
-        min_duration: 1
-        max_duration: 2
-        min_strength: 25
-        max_strength: 45
-- Player Character Defeated:
-    regex: .+{GIFT_ACTOR_NAME}, Unconscious+
-    function: generic_random_vibrate
-    toy_class: vibrator
-    params:
-        min_duration: 6
-        max_duration: 10
-        min_strength: 45
-        max_strength: 65
-- Player Character Exposed:
-    regex: .+{GIFT_ACTOR_NAME}, Exposed+
-    function: generic_random_vibrate
-    toy_class: vibrator
-    params:
-        min_duration: 2
-        max_duration: 3
-        min_strength: 25
-        max_strength: 45
-- Player Character Horny:
-    regex: .+{GIFT_ACTOR_NAME}, Horny+
-    function: generic_random_vibrate
-    toy_class: vibrator
-    params:
-        min_duration: 5
-        max_duration: 10
-        min_strength: 25
-        max_strength: 35
-- Player Character Mind Broken:
-    regex: .+{GIFT_ACTOR_NAME}, Mind Broken+
-    function: generic_random_vibrate
-    toy_class: vibrator
-    params:
-        min_duration: 30
-        max_duration: 60
-        min_strength: 85
-        max_strength: 100
-- Player Character Cumflated:
-    regex: .+{GIFT_ACTOR_NAME}, Cumflated*
-    function: generic_random_vibrate
-    toy_class: vibrator
-    params:
-        min_duration: 20
-        max_duration: 30
-        min_strength: 85
-        max_strength: 100
-- Sex Start:
+        min_duration: 3
+        max_duration: 6
+        min_strength: 20
+        max_strength: 40
+
+# ── Scene events ─────────────────────────────────────────────────
+- H Scene Start:
     regex: .+{GIFT_ACTOR_NAME}, Amorous Activity*
     function: sex_start
     group: default
     case_sensitive: False
     toy_class: vibrator
-- Sex Stage Start:
-    regex: .+{GIFT_ACTOR_NAME}, Arousal Points*
-    function: sex_stage_start
-    toy_class: vibrator
-- Sex End:
+
+- H Scene End:
     regex: .+{GIFT_ACTOR_NAME}, Afterglow*
     function: sex_end
     group: default
