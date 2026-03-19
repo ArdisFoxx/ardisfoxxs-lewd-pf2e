@@ -235,7 +235,7 @@ window.AFLP_Lovense = {
         }
       }).catch(err => {
         console.warn("AFLP Lovense Direct | startup check failed:", err.message,
-          "— ensure Lovense Remote is running and Foundry is served over HTTPS");
+          "Check that Lovense Remote is running and Foundry is served over HTTPS");
       });
     }
   },
@@ -249,7 +249,7 @@ window.AFLP_Lovense = {
     if (this.useDirect()) {
       this._directFire(key);
     }
-    ui.notifications?.info(`AFLP Lovense | Test fired: ${def.label} — check your toy`);
+    ui.notifications?.info(`AFLP Lovense | Test fired: ${def.label}. Check your toy.`);
   },
 
   // Manual connection test — fires 3s pulse then stops; returns a Promise with result text
@@ -266,11 +266,11 @@ window.AFLP_Lovense = {
         let toys = {};
         try { toys = JSON.parse(data.data?.toys ?? "{}"); } catch { /**/ }
         const names = Object.values(toys).map(t => t.nickName || t.name);
-        return { ok: true, msg: names.length ? `Connected — toys: ${names.join(", ")}` : "Connected — no toys detected" };
+        return { ok: true, msg: names.length ? `Connected. Toys: ${names.join(", ")}` : "Connected. No toys detected." };
       }
       return { ok: false, msg: `Lovense Remote responded with code ${data?.code}` };
     } catch (err) {
-      return { ok: false, msg: `Could not reach Lovense Remote: ${err.message}. Common causes: (1) Lovense Remote isn't open, (2) Game Mode isn't enabled in the app, (3) you're accessing Foundry over HTTP — Chrome blocks direct connections to local apps from HTTP pages (Private Network Access). Accessing Foundry over HTTPS resolves this.` };
+      return { ok: false, msg: `Could not reach Lovense Remote: ${err.message}. Common causes: (1) Lovense Remote isn't open, (2) Game Mode isn't enabled in the app, (3) you're accessing Foundry over HTTP (Chrome blocks direct connections to local apps from HTTP pages Private Network Access). Accessing Foundry over HTTPS resolves this.` };
     }
   },
 
@@ -386,7 +386,7 @@ window.AFLP_Lovense = {
         : `<input id="lv-charname" type="text" value="${charName}" style="background:#1a1a1a;border:1px solid #c9a96e44;color:#ddd;padding:3px 6px;font-size:12px;width:160px;"/>`}
       <button id="lv-conntest-gift" style="font-size:10px;padding:2px 8px;cursor:pointer;background:#1a2a1a;border:1px solid #5a9a5a55;color:#8aca8e;border-radius:3px;">Test Connection</button>
     </div>
-    <div style="font-size:10px;color:#666;margin-top:5px;">Must match <em>GIFT_ACTOR_NAME</em> in GameInterfaceForToys settings.yaml. The Toy column below controls which toy fires per event — requires two named toys in GIFT.</div>
+    <div style="font-size:10px;color:#666;margin-top:5px;">Must match <em>GIFT_ACTOR_NAME</em> in GameInterfaceForToys settings.yaml. The Toy column below controls which toy fires per event. Requires two named toys in GIFT.</div>
   </div>
 
   <!-- Direct settings -->
@@ -398,7 +398,7 @@ window.AFLP_Lovense = {
         <input type="radio" name="lv-apptype" value="pc" ${dAppType === 'pc' ? 'checked' : ''} style="margin-top:2px;flex-shrink:0;"/>
         <div>
           <div style="font-size:12px;font-weight:600;color:#c9a96e;">Lovense Remote (PC)</div>
-          <div style="font-size:10px;color:#888;">Lovense Remote PC on the same machine. Requires Foundry on HTTPS — Chrome blocks local app connections from HTTP pages.</div>
+          <div style="font-size:10px;color:#888;">Lovense Remote PC on the same machine. Requires Foundry on HTTPS. Chrome blocks local app connections from HTTP pages.</div>
         </div>
       </label>
       <label style="display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:4px;border:1px solid ${dAppType === 'mobile' ? '#c9a96e88' : '#c9a96e22'};background:${dAppType === 'mobile' ? '#2a1e10' : '#1a1410'};cursor:pointer;flex:1;" id="lv-apptype-mobile-label" data-apptype="mobile">
@@ -441,7 +441,7 @@ window.AFLP_Lovense = {
   <details style="margin-top:10px;">
     <summary style="cursor:pointer;font-size:11px;font-weight:700;color:#c9a96e;text-transform:uppercase;letter-spacing:0.8px;user-select:none;">Chaster Integration (digital chastity lock time)</summary>
     <div style="margin-top:6px;padding:8px;background:#1a1410;border:1px solid #c9a96e22;border-radius:4px;">
-      <p style="font-size:10px;color:#888;margin:0 0 8px;">Adds time to your Chaster lock when these events fire. GIFT mode only — requires Chaster developer access in GIFT settings.yaml.</p>
+      <p style="font-size:10px;color:#888;margin:0 0 8px;">Adds time to your Chaster lock when these events fire. GIFT mode only. Requires Chaster developer access in GIFT settings.yaml.</p>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
         <input type="checkbox" id="ch-enabled" ${chaster.enabled ? "checked" : ""} style="width:15px;height:15px;cursor:pointer;"/>
         <label style="font-size:12px;color:#c9a96e;">Enable Chaster penalties</label>
@@ -530,7 +530,7 @@ window.AFLP_Lovense = {
         html.querySelector("#lv-conntest-gift")?.addEventListener("click", () => {
           const name = html.querySelector("#lv-charname")?.value?.trim() || self.getCharacterName();
           console.log(`${self._ts()} ${name}, AFLP Connected`);
-          ui.notifications?.info(`AFLP Lovense | GIFT test line sent for "${name}" — check GIFT log`);
+          ui.notifications?.info(`AFLP Lovense | GIFT test line sent for "${name}". Check the GIFT log.`);
         });
 
         // Apply initial GIFT-only visibility based on saved mode
@@ -674,7 +674,7 @@ window.AFLP_Lovense = {
 
   _downloadAflpYaml(charName, rows, ch) {
     const L = [
-      "# AFLP 5.3 Lovense Integration — GIFT config",
+      "# AFLP 5.3 Lovense Integration: GIFT config",
       "# Generated by AFLP in-game settings",
       "# Place in: AFLP_Lovense_Integration/data/events/games/ardisfoxxslewdpf2e/",
       "",
@@ -715,7 +715,7 @@ window.AFLP_Lovense = {
     }
 
     this._dl("aflp.yaml", L.join("\n"));
-    ui.notifications?.info("aflp.yaml downloaded — place in AFLP_Lovense_Integration/data/events/games/ardisfoxxslewdpf2e/");
+    ui.notifications?.info("aflp.yaml downloaded. Place it in AFLP_Lovense_Integration/data/events/games/ardisfoxxslewdpf2e/");
   },
 
   _downloadToyMapYaml(charName, rows) {
@@ -738,7 +738,7 @@ window.AFLP_Lovense = {
       L.push("");
     }
     this._dl("toy-event-map.yaml", L.join("\n"));
-    ui.notifications?.info("toy-event-map.yaml downloaded — rename toy names to match GIFT");
+    ui.notifications?.info("toy-event-map.yaml downloaded. Rename toy names to match GIFT.");
   },
 
   _dl(name, content) {
@@ -784,8 +784,8 @@ window.AFLP_Lovense = {
   <div style="text-align:center;margin-bottom:14px;">
     <div style="font-size:16px;font-weight:700;color:#c9a96e;margin-bottom:4px;">How do you want to connect?</div>
     ${isHttps
-      ? stepHint("Your Foundry instance is on <strong style='color:#8aca8e;'>HTTPS</strong> — all three options are available. Lovense Remote Direct is the easiest.")
-      : stepHint("Your Foundry instance is on <strong style='color:#f0a04a;'>HTTP</strong> — Lovense Remote Direct requires HTTPS, so GIFT is recommended.")}
+      ? stepHint("Your Foundry instance is on <strong style='color:#8aca8e;'>HTTPS</strong>, so all three options are available. Lovense Remote Direct is the easiest.")
+      : stepHint("Your Foundry instance is on <strong style='color:#f0a04a;'>HTTP</strong>. Lovense Remote Direct requires HTTPS, so GIFT is recommended.")}
   </div>
   ${optCard("direct", "Lovense Remote Direct", isHttps ? "✅ Recommended" : "⚠️ Requires HTTPS",
     "Connects directly to the Lovense Remote app on your PC or phone. No extra software. Fastest response.",
@@ -843,18 +843,25 @@ window.AFLP_Lovense = {
   </div>
   <div id="wiz-gift-new-content" style="display:${isNew ? "block" : "none"};">
     <div style="background:#1a180a;border:1px solid #f0a04a55;border-radius:4px;padding:8px 12px;margin-bottom:8px;">
-      <div style="font-size:11px;color:#f0a04a;font-weight:600;margin-bottom:3px;">⚠️ Important — GIFT requires a special browser shortcut</div>
-      <div style="font-size:11px;color:#ccc;line-height:1.6;">Chrome only writes console output to a file when launched with special flags. You must open Foundry using <strong style="color:#f0a04a;">Browser - Chrome with Logging.lnk</strong> from inside the GIFT folder — not your regular Chrome shortcut. Using your normal browser means GIFT sees nothing.</div>
+      <div style="font-size:11px;color:#f0a04a;font-weight:600;margin-bottom:3px;">⚠️ Important: GIFT requires a special browser shortcut</div>
+      <div style="font-size:11px;color:#ccc;line-height:1.6;">Chrome only writes console output to a file when launched with special flags. You must open Foundry using <strong style="color:#f0a04a;">Browser - Chrome with Logging.lnk</strong> from inside the GIFT folder, not your regular Chrome shortcut. Using your normal browser means GIFT sees nothing.</div>
     </div>
     <div style="background:#1a1410;border:1px solid #c9a96e22;border-radius:4px;padding:10px 12px;margin-bottom:10px;">
       <div style="font-size:12px;font-weight:600;color:#c9a96e;margin-bottom:6px;">Setup steps:</div>
       <ol style="margin:0;padding-left:18px;font-size:12px;color:#ccc;line-height:2;">
         <li>Download and extract <a href="https://github.com/MinLL/GameInterfaceForToys/releases/latest" target="_blank" style="color:#c9a96e;">GameInterfaceForToys</a> to a permanent folder</li>
         <li>Download your <strong style="color:#c9a96e;">AFLP Config Pack</strong> below and extract the files into that folder</li>
-        <li>Launch GIFT, click Configuration — set log file, character name, and Lovense host IP</li>
+        <li>Launch GIFT, click <strong>Configuration</strong></li>
+        <li>
+          <strong>Log File:</strong> Click <em>Select Log File</em>, then paste this into the address bar at the top of the file picker window and press Enter:<br/>
+          <code style="display:block;margin:4px 0;padding:3px 6px;background:#111;border-radius:3px;font-size:11px;color:#c9a96e;user-select:all;">%localappdata%\Google\Chrome\User Data\chrome_debug.log</code>
+          <span style="font-size:10px;color:#888;">This file only exists after you've used the logging shortcut at least once. If it's not there, do step 5 first, then come back and set this.</span>
+        </li>
+        <li>Set <strong>Character Name</strong> to match exactly what you entered above</li>
+        <li>Set <strong>Toy Type</strong> to Lovense and enter your Lovense host IP</li>
         <li>Save, then close GIFT</li>
         <li>From the GIFT folder, open Foundry using <strong style="color:#f0a04a;">Browser - Chrome with Logging.lnk</strong></li>
-        <li>Come back here and click Test Connection below — your toy should respond</li>
+        <li>Come back here and click Test Connection below. Your toy should respond.</li>
       </ol>
     </div>
   </div>
@@ -893,22 +900,22 @@ window.AFLP_Lovense = {
       if (step === "choose")      return step1Html;
       if (step === "direct")      return step2DirectHtml(directAppType, mobileIp);
       if (step === "gift")        return step2GiftHtml(giftIsNew);
-      if (step === "both_direct") return `<div><div style="font-size:12px;color:#c9a96e;margin-bottom:12px;font-weight:600;">Step 1 of 2 — Connect Lovense Remote Direct</div>${step2DirectHtml(directAppType, mobileIp).replace(/<div>/, "").replace(/<\/div>\s*$/, "")}</div>`;
-      if (step === "both_gift")   return `<div><div style="font-size:12px;color:#c9a96e;margin-bottom:12px;font-weight:600;">Step 2 of 2 — Set up GIFT</div>${step2GiftHtml(giftIsNew).replace(/<div>/, "").replace(/<\/div>\s*$/, "")}</div>`;
+      if (step === "both_direct") return `<div><div style="font-size:12px;color:#c9a96e;margin-bottom:12px;font-weight:600;">Step 1 of 2: Connect Lovense Remote Direct</div>${step2DirectHtml(directAppType, mobileIp).replace(/<div>/, "").replace(/<\/div>\s*$/, "")}</div>`;
+      if (step === "both_gift")   return `<div><div style="font-size:12px;color:#c9a96e;margin-bottom:12px;font-weight:600;">Step 2 of 2: Set up GIFT</div>${step2GiftHtml(giftIsNew).replace(/<div>/, "").replace(/<\/div>\s*$/, "")}</div>`;
       if (step === "done")        return stepDoneHtml(finalMode);
       return step1Html;
     };
 
     const getButtons = () => {
       if (step === "done") return [{ action: "close", label: "Open Settings", default: true, callback: async () => { await self.openSettings(); } }, { action: "finish", label: "Done", callback: async () => {} }];
-      if (step === "choose") return [{ action: "next", label: "Next →", default: true, callback: async () => {} }, { action: "cancel", label: "Skip — take me to settings", callback: async () => { await self.openSettings(); } }];
+      if (step === "choose") return [{ action: "next", label: "Next →", default: true, callback: async () => {} }, { action: "cancel", label: "Skip to settings", callback: async () => { await self.openSettings(); } }];
       return [{ action: "back", label: "← Back", callback: async () => {} }, { action: "next", label: step.includes("gift") ? "Save & Finish" : "Next →", default: true, callback: async () => {} }, { action: "cancel", label: "Skip", callback: async () => { await self.openSettings(); } }];
     };
 
     // Use a live-updating wrapper dialog
     const showStep = async () => {
       await foundry.applications.api.DialogV2.wait({
-        window: { title: "AFLP Lovense — Setup Wizard", resizable: true },
+        window: { title: "AFLP Lovense Setup Wizard", resizable: true },
         content: `<div style="font-family:'Helvetica Neue',Arial,sans-serif;color:#ddd;max-width:540px;" id="wiz-root">${getContent()}</div>`,
         render(ev, dialog) {
           const html = dialog.element;
@@ -978,7 +985,7 @@ window.AFLP_Lovense = {
             const name = root.querySelector("#wiz-charname")?.value?.trim() || self.getCharacterName();
             const statusEl = root.querySelector("#wiz-dl-status");
             self._downloadGiftConfigPack(name);
-            if (statusEl) { statusEl.textContent = "3 files downloaded — aflp.yaml, toy-event-map.yaml, AFLP_GIFT_README.txt"; statusEl.style.color = "#8aca8e"; }
+            if (statusEl) { statusEl.textContent = "3 files downloaded: aflp.yaml, toy-event-map.yaml, AFLP_GIFT_README.txt"; statusEl.style.color = "#8aca8e"; }
           });
         },
         buttons: getButtons(),
@@ -1041,25 +1048,25 @@ window.AFLP_Lovense = {
   },
 
   _buildGiftReadme(charName) {
-    return `AFLP — GameInterfaceForToys Setup Guide
+    return `AFLP: GameInterfaceForToys Setup Guide
 ========================================
 
 This pack was generated for character: ${charName}
 
 FILES IN THIS PACK
 ------------------
-aflp.yaml         — Drop into: GIFT\\data\\events\\games\\ardisfoxxslewdpf2e\\
-toy-event-map.yaml — Drop into: GIFT\\ (root folder, replace existing)
-AFLP_GIFT_README.txt — This file
+aflp.yaml         -- Place in: GIFT\\data\\events\\games\\ardisfoxxslewdpf2e\\
+toy-event-map.yaml -- Place in: GIFT\\ (root folder, replace existing)
+AFLP_GIFT_README.txt -- This file
 
-STEP 1 — DOWNLOAD GIFT
+STEP 1: DOWNLOAD GIFT
 -----------------------
 Download the latest GameInterfaceForToys release from:
 https://github.com/MinLL/GameInterfaceForToys/releases/latest
 
 Extract to a permanent folder, e.g. C:\\GIFT\\
 
-STEP 2 — INSTALL YOUR CONFIG FILES
+STEP 2: INSTALL YOUR CONFIG FILES
 -----------------------------------
 1. Copy aflp.yaml to:
    C:\\GIFT\\data\\events\\games\\ardisfoxxslewdpf2e\\aflp.yaml
@@ -1067,7 +1074,7 @@ STEP 2 — INSTALL YOUR CONFIG FILES
 
 2. Open toy-event-map.yaml in a text editor.
    Replace "primary_toy" and "secondary_toy" with the exact toy names
-   shown in GIFT's toy list. Example — if your toy is named "hush":
+   shown in GIFT's toy list. Example: if your toy is named "hush":
      data_events_games_ardisfoxxslewdpf2e_aflp.yaml_Cum:
      - hush
 
@@ -1075,15 +1082,15 @@ STEP 2 — INSTALL YOUR CONFIG FILES
    C:\\GIFT\\toy-event-map.yaml
    (Replace the existing file)
 
-STEP 3 — CONFIGURE GIFT
+STEP 3: CONFIGURE GIFT
 ------------------------
 1. Launch GameInterfaceForToys.exe
 2. Click Configuration
-3. Log File: click "Select Log File" and find your browser's debug log.
-   You MUST use the browser shortcut in the GIFT folder that enables logging:
-   "Browser - Chrome with Logging.lnk" or "Browser - Edge with Logging.lnk"
-   Default log path (Chrome):
-   C:\\Users\\YourName\\AppData\\Local\\Google\\Chrome\\User Data\\chrome_debug.log
+3. Log File: click "Select Log File". In the file picker's address bar, paste:
+   %localappdata%\\Google\\Chrome\\User Data\\chrome_debug.log
+   Press Enter to navigate there, then click the file.
+   Note: this file only exists after you've used the logging browser shortcut at least once.
+   If it's not there yet, complete step 5 first, then return here.
 
 4. Character Name: enter exactly: ${charName}
    (This must match what you entered in AFLP Lovense settings)
@@ -1096,11 +1103,11 @@ STEP 3 — CONFIGURE GIFT
 
 7. Click Save. GIFT will restart with your settings.
 
-STEP 4 — TEST IT
+STEP 4: TEST IT
 -----------------
 1. Open Foundry in the GIFT logging browser (NOT your regular browser)
 2. Open a character sheet, go to the AFLP tab, click the heart button
-3. Click "Test Connection" — your toy should buzz
+3. Click "Test Connection". Your toy should buzz.
 
 TROUBLESHOOTING
 ---------------

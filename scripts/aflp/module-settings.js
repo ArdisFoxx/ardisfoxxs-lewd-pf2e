@@ -24,6 +24,7 @@ AFLP.Settings = {
     EDGE_AUTO:           "edgeAuto",
     EDGE_SKIP_DIALOG:    "edgeSkipDialog",
     EDGE_INCLUDE_NPC:    "edgeIncludeNpc",
+    SHOW_WELCOME:        "showWelcome",
   },
 
   register() {
@@ -177,6 +178,17 @@ AFLP.Settings = {
       type:    Boolean,
       default: true,
     });
+
+    // ── Welcome message ──────────────────────────────────────────────────────
+
+    game.settings.register(S.ID, S.KEYS.SHOW_WELCOME, {
+      name:    "Show Welcome Message on Load",
+      hint:    "Show the AFLP welcome / what's new message when the world loads. Uncheck to suppress it. A new version's message will re-enable this automatically.",
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      default: true,
+    });
   },
 
   // ── Convenience getters ──────────────────────────────────────────────────
@@ -205,4 +217,5 @@ AFLP.Settings = {
   get edgeAuto()             { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.EDGE_AUTO); },
   get edgeSkipDialog()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.EDGE_SKIP_DIALOG); },
   get edgeIncludeNpc()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.EDGE_INCLUDE_NPC); },
+  get showWelcome()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SHOW_WELCOME); },
 };
