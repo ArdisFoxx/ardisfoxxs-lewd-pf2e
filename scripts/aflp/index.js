@@ -17,6 +17,63 @@ Hooks.once("init", async () => {
   AFLP.Settings.register();
 });
 
+// ── Weapon trait injection ───────────────────────────────────────────────
+// PF2e 7.x recomputes system.traits.value for weapon items from the base
+// item definition in prepareBASEData(), which overwrites any stored custom
+// traits. We patch the prototype AFTER PF2e's init (in setup) to re-inject
+// AFLP custom traits after PF2e's computation completes.
+Hooks.once("setup", () => {
+  const WeaponClass = CONFIG.PF2E?.Item?.documentClasses?.weapon;
+  if (!WeaponClass) return;
+
+  // Slugs of all AFLP Alcumical folder weapons that need custom traits
+  const ALCUMICAL_WEAPON_SLUGS = new Set([
+    "aphrodisiac-bomb-lesser",
+    "aphrodisiac-bomb-moderate",
+    "aphrodisiac-bomb-major",
+    "aphrodisiac-bomb-greater",
+    "aphrodisiac-charge",
+    "aphrodisiac-charge-moderate",
+    "aphrodisiac-charge-greater",
+    "sticky-bomb-lesser",
+    "sticky-bomb-moderate",
+    "sticky-bomb-major",
+    "sticky-bomb-greater",
+    "suppression-bomb",
+  ]);
+  const APHRODISIAC_WEAPON_SLUGS = new Set([
+    "aphrodisiac-bomb-lesser",
+    "aphrodisiac-bomb-moderate",
+    "aphrodisiac-bomb-major",
+    "aphrodisiac-bomb-greater",
+    "aphrodisiac-charge",
+    "aphrodisiac-charge-moderate",
+    "aphrodisiac-charge-greater",
+  ]);
+
+  const _origPrepareBASEData = WeaponClass.prototype.prepareBASEData;
+  WeaponClass.prototype.prepareBASEData = function () {
+    _origPrepareBASEData.call(this);
+
+    const slug = this.system?.slug ?? this._source?.system?.slug ?? "";
+    if (!ALCUMICAL_WEAPON_SLUGS.has(slug)) return;
+
+    const traits = this.system?.traits?.value;
+    if (!Array.isArray(traits)) return;
+
+    const toAdd = ["alcumical", "sexual"];
+    if (APHRODISIAC_WEAPON_SLUGS.has(slug)) toAdd.push("aphrodisiac");
+
+    for (const t of toAdd) {
+      if (!traits.includes(t)) traits.push(t);
+    }
+  };
+
+  console.log("AFLP | Weapon trait injection registered for Alcumical items.");
+});
+
+
+
 Hooks.once("ready", async () => {
   if (!window.AFLP) return;
 
