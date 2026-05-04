@@ -12,6 +12,7 @@ const AFLP_Alcumist = {
   DEDICATION_SLUG: "alcumist-dedication",
   VIAL_BASE_UUID:  "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.rloXTr10gPd7Xh0J",
   ALCUM_FOLDER_ID: "Q16vSMzhEHZqktXy",
+  BOMB_FOLDER_ID:  "TfZI5bZITuwLyDhh",
 
   // Priority list of creature traits → vial type name
   // More specific subtypes first, broad types last
@@ -96,7 +97,7 @@ const AFLP_Alcumist = {
     const pack = game.packs.get("ardisfoxxs-lewd-pf2e.aflp-lewd-items");
     await pack.getIndex({ fields: ["name","type","folder","system.level","system.traits"] });
     const alcumItems = [...pack.index]
-      .filter(e => e.folder === AFLP_Alcumist.ALCUM_FOLDER_ID && e.type !== "feat")
+      .filter(e => (e.folder === AFLP_Alcumist.ALCUM_FOLDER_ID || e.folder === AFLP_Alcumist.BOMB_FOLDER_ID) && e.type !== "feat")
       .sort((a, b) => (a.system?.level?.value ?? 0) - (b.system?.level?.value ?? 0));
 
     // Get typed vials in actor's inventory
