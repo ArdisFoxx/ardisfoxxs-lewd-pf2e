@@ -30,6 +30,12 @@ window.AFLP_Pregnancy = {
       startedAt: game.time.worldTime
     };
     await worldActor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
+
+    // Brood Sow: apply Endurance (unlimited duration) on becoming pregnant
+    if (AFLP.Settings.automation && AFLP.Kinks?.applyBroodSowEndurance) {
+      await AFLP.Kinks.applyBroodSowEndurance(worldActor);
+    }
+
     return { id, ...pregnancies[id] };
   },
 
@@ -54,7 +60,7 @@ window.AFLP_Pregnancy = {
     if (autoSuccess) {
       success = true;
     } else {
-      roll = await new Roll("1d20").evaluate();
+      roll = await new Roll("1d20").evaluate({async: true});
       success = roll.total >= dc;
     }
 
@@ -111,7 +117,7 @@ window.AFLP_Pregnancy = {
     }
 
     while (true) {
-      const roll = await new Roll("1d6").evaluate();
+      const roll = await new Roll("1d6").evaluate({async: true});
       const explode =
         roll.total === 6 ||
         (hasBroodSow && roll.total >= 5) ||
@@ -127,7 +133,7 @@ window.AFLP_Pregnancy = {
     let dice = 2;
     let result = [];
     while (true) {
-      const r = await new Roll(`${dice}d4`).evaluate();
+      const r = await new Roll(`${dice}d4`).evaluate({async: true});
       const faces = r.dice[0].results.map(x => x.result);
       result.push(...faces);
       if (faces.every(x => x === 4)) dice += 2;
@@ -144,6 +150,13 @@ window.AFLP_Pregnancy = {
     if (!preg) return;
     preg.gestationRemaining = "Complete";
     await worldActor.setFlag(FLAG, "pregnancy", pregnancies);
+
+    // Brood Sow: remove Endurance if no active pregnancies remain
+    if (AFLP.Settings.automation && AFLP.Kinks?.applyBroodSowEndurance) {
+      const active = Object.values(pregnancies).filter(p => p.gestationRemaining !== "Complete");
+      if (active.length === 0) await AFLP.Kinks.removeBroodSowEndurance(worldActor);
+    }
+
     if (!suppressChat) {
       const sourceName = preg.sourceName || "Unknown";
       const type = preg.deliveryType === "egg" ? "eggs" : "offspring";
@@ -227,14 +240,15 @@ AFLP.UI.SexualStatsDialog.prototype._handleBirthById = async function(pregId) {
 AFLP.UI.SexualStatsDialog.prototype.render = async function() {
   const content = await this._renderContent();
 
-  const dialog = new Dialog({
-    title: `${this.actor.name} — Sexual Stats`,
+  const self = this;
+  foundry.applications.api.DialogV2.wait({
+    window:   { title: `${this.actor.name}: Sexual Stats`, resizable: true },
+    position: { width: 680 },
     content,
-    buttons: { close: { label: "Close" } },
-    render: html => this._activateListeners(html, dialog)
-  }, { width: 680 });
-
-  dialog.render(true);
+    buttons:  [{ action: "close", label: "Close", default: true, callback: async () => {} }],
+    close:    async () => {},
+    render(ev, dlg) { self._activateListeners($(dlg.element), dlg); },
+  });
 };
 
 // =======================
@@ -263,7 +277,7 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
     if (act === "vaginal" && !this.hasPussy) return "";
 
     const timesReceived = this.sexual.lifetime[act] ?? 0;
-    const timesGiven    = act === "gangbang" ? "—" : (this.sexual.lifetime[act] ?? 0);
+    const timesGiven    = act === "gangbang" ? "-" : (this.sexual.lifetime[act] ?? 0);
     const mlReceived    = this.sexual.lifetime.mlReceived?.[act] ?? 0;
     const mlGiven       = this.sexual.lifetime.mlGiven?.[act] ?? 0;
 
@@ -279,7 +293,7 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
     } else {
       // Gangbang: times given is not tracked (shown as —), but ml given and ml received are editable
       const timesGivenCell = act === "gangbang"
-        ? `<td>—</td>`
+        ? `<td>-</td>`
         : `<td><input name="times-given-${act}" type="number" value="${timesGiven}" style="width:55px"/></td>`;
 
       const timesReceivedCell = act === "gangbang"
@@ -321,7 +335,7 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
           if (!enabled) return "";
           if (slug === "creature-fetish") {
             const note = this.kinkNotes?.[slug];
-            const extra = note ? ` — <em>${note}</em>` : "";
+            const extra = note ? `: <em>${note}</em>` : "";
             return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)  }${extra}</li>`;
           }
           return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}</li>`;

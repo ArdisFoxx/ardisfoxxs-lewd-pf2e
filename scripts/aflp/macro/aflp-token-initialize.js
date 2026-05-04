@@ -33,6 +33,7 @@ const GENITAL_TYPE_ITEMS = {
   "cock-slime":        "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.TAfvb2RvjbwcT7Ci"
 };
 
+const initialized = [];
 for (const { actor } of tokens) {
   const worldActor = actor.getWorldActor?.() ?? actor;
 
@@ -127,7 +128,12 @@ for (const { actor } of tokens) {
   // --------------------------------------------------
   await AFLP.recalculateCum(worldActor);
 
-  ui.notifications.info(`${worldActor.name}: AFLP flags initialized.`);
+  initialized.push(worldActor.name);
 }
 
+if (initialized.length === 1) {
+  ui.notifications.info(`AFLP: ${initialized[0]} initialized.`);
+} else {
+  ui.notifications.info(`AFLP: ${initialized.length} tokens initialized: ${initialized.join(", ")}.`);
+}
 window.AFLP_FLAGS_INITIALIZED = true;

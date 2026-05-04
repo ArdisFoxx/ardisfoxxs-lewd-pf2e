@@ -97,7 +97,9 @@ Object.assign(window.AFLP, {
     "purity":            { name: "Purity",            uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.eFcEwxfe56UxqlJc" },
     "monstrous-prowess": { name: "Monstrous Prowess", uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.0HV6GDwcBG8Yw1ZU" },
     "bimbo":             { name: "Bimbo",             uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.mTSsjimziKIcEbLO" },
-    "gangslut":          { name: "Gangslut",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fNSwvzZ3ddJmu7yG" }
+    "gangslut":          { name: "Gangslut",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fNSwvzZ3ddJmu7yG" },
+    "voyeurism":         { name: "Voyeurism",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.NKiO32mIdFJZpwnb" },
+    "ouroboros":         { name: "Ouroboros",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QvwGGnxQotq1giao" }
   },
 
   // ===============================
@@ -114,7 +116,7 @@ Object.assign(window.AFLP, {
     "exposed":     { name: "Exposed",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.ocRgNSfLD65sWBhs" },
     "exposed-nude":{ name: "Exposed (Nude)", uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.Y8wxUgOvsXaF2Mc4" },
     "horny":         { name: "Horny",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.hmYj3xU7xrdjMHpe" },
-    "horny-always":  { name: "Horny (Always)",uuid: null },  // UUID: set after importing the effect into the compendium
+    "horny-always":  { name: "Horny (Permanent)", uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.RekITrc0sIsHFXvK" },
     "bimbofied":     { name: "Bimbofied",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.9ySsqXnpfZkhmp2V" },
     "mind-break":  { name: "Mind Break",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.B74Z3GBzgNMoVXr7" },
     "submitting":  { name: "Submitting",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.kBLJPOJNjz8fmxrQ" },
@@ -211,20 +213,32 @@ Object.assign(window.AFLP, {
   actorHasKink(actor, slug) {
     if (!actor || !slug) return false;
     const uuid = this.kinks[slug]?.uuid;
-    return actor.items?.some(i =>
+    // Check 1: kink item present on the actor (e.g. dragged from compendium)
+    const hasItem = actor.items?.some(i =>
       i.slug === slug || (uuid && (i.flags?.core?.sourceId ?? i.sourceId) === uuid)
     ) ?? false;
+    if (hasItem) return true;
+    // Check 2: kink toggled via AFLP tab (stored as world flag, no item required)
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    return worldActor.getFlag(this.FLAG_SCOPE, "sexual")?.kinks?.[slug] === true;
   },
 
-  // Returns the badge/level value of a kink item, or 0 if the actor doesn't have it.
-  // Kinks that have levels (Edge Master, Creature Fetish, etc.) store their level as badge.value.
+  // Returns the effective kink level for an actor, based on their character level.
+  // Kinks unlock features at character levels 2, 3, 5, and 7 — not via badge values.
+  // Returns 0 if the actor doesn't have the kink.
+  // Returns the actor's character level (capped at the highest unlock tier, 7) if they do.
   getKinkLevel(actor, slug) {
     if (!actor || !slug) return 0;
     const uuid = this.kinks[slug]?.uuid;
-    const item = actor.items?.find(i =>
+    const hasItem = actor.items?.some(i =>
       i.slug === slug || (uuid && (i.flags?.core?.sourceId ?? i.sourceId) === uuid)
-    );
-    return item?.system?.badge?.value ?? (item ? 1 : 0);
+    ) ?? false;
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    const hasFlag = worldActor.getFlag(this.FLAG_SCOPE, "sexual")?.kinks?.[slug] === true;
+    if (!hasItem && !hasFlag) return 0;
+    // Character level determines which kink feature tiers are unlocked
+    // (Tiers: 1 = base, 2 = level 2+, 3 = level 3+, 5 = level 5+, 7 = level 7+)
+    return actor.system?.details?.level?.value ?? actor.level ?? 1;
   },
 
   // ===============================
@@ -331,7 +345,7 @@ Object.assign(window.AFLP, {
     "cock-slime":        { name: "Slime",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.TAfvb2RvjbwcT7Ci", parent: "cock" }
   },
 
-  cumflationDefaults: { anal: 0, oral: 0, vaginal: 0, facial: 0 },
+  cumflationDefaults: { anal: 0, oral: 0, vaginal: 0, facial: 0, paizuri: 0 },
 
   // Average of anal+oral+vaginal, floored, capped at 8. Facial excluded.
   cumflationTotal(actor) {
@@ -348,7 +362,7 @@ Object.assign(window.AFLP, {
   async ensureCoreFlags(actor) {
     await this.ensureFlag(actor, "sexual",      structuredClone(this.sexualDefaults));
     await this.ensureFlag(actor, "cum",         structuredClone(this.cumDefaults));
-    await this.ensureFlag(actor, "cumOverflow", { anal: 0, oral: 0, vaginal: 0, facial: 0 });
+    await this.ensureFlag(actor, "cumOverflow", { anal: 0, oral: 0, vaginal: 0, facial: 0, paizuri: 0 });
     await this.ensureFlag(actor, "coomer",      structuredClone(this.coomerDefaults));
     await this.ensureFlag(actor, "arousal",     structuredClone(this.arousalDefaults));
     await this.ensureFlag(actor, "horny",       structuredClone(this.hornyDefaults));

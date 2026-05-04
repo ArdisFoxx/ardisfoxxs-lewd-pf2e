@@ -85,7 +85,16 @@ window.AFLP_Lovense = {
   // ── Accessors ─────────────────────────────────────────────────────────────
 
   getSettings()      { return game.user.getFlag(this.MODULE, this.FLAG) ?? {}; },
-  isEnabled()        { return this.getSettings().enabled !== false; },
+
+  // _sessionConnected: true only after the user clicks ♥ and completes a
+  // successful connection test this session. Resets to false on every page load.
+  // All emit calls are silently gated on this — no errors if not connected.
+  _sessionConnected: false,
+
+  setSessionConnected(val) { this._sessionConnected = !!val; },
+  isSessionConnected()     { return this._sessionConnected; },
+
+  isEnabled()        { return this._sessionConnected && this.getSettings().enabled !== false; },
   isEventEnabled(k)  { return this.isEnabled() && this.getSettings().events?.[k]?.enabled !== false; },
   getCharacterName() {
     const s = this.getSettings();
@@ -629,6 +638,7 @@ window.AFLP_Lovense = {
               };
             });
             await game.user.setFlag(self.MODULE, self.FLAG, ns);
+            self.setSessionConnected(true);
             ui.notifications?.info("AFLP Lovense settings saved.");
           },
         },
@@ -1010,10 +1020,12 @@ window.AFLP_Lovense = {
             finalMode = "direct";
             const dHost = directAppType === "pc" ? "127-0-0-1.lovense.club" : mobileIp;
             await game.user.setFlag(self.MODULE, self.FLAG, { ...(self.getSettings()), mode: "direct", directAppType, directHost: dHost, directPort: 30010 });
+            self.setSessionConnected(true);
             step = "done";
           } else if (step === "gift") {
             finalMode = "gift";
             await game.user.setFlag(self.MODULE, self.FLAG, { ...(self.getSettings()), mode: "gift" });
+            self.setSessionConnected(true);
             step = "done";
           } else if (step === "both_direct") {
             step = "both_gift";
@@ -1021,6 +1033,7 @@ window.AFLP_Lovense = {
             finalMode = "both";
             const dHost = directAppType === "pc" ? "127-0-0-1.lovense.club" : mobileIp;
             await game.user.setFlag(self.MODULE, self.FLAG, { ...(self.getSettings()), mode: "both", directAppType, directHost: dHost, directPort: 30010 });
+            self.setSessionConnected(true);
             step = "done";
           }
           await showStep();
@@ -1121,7 +1134,5 @@ For more help, visit the AFLP Discord at https://subscribestar.adult/ardisfoxxar
 
 }; // end window.AFLP_Lovense
 
-// Connection test on world load
-Hooks.once("ready", () => {
-  setTimeout(() => { if (window.AFLP_Lovense?.isEnabled?.()) AFLP_Lovense.emitConnectionTest(); }, 3000);
-});
+// No auto-connect on world load — users must click ♥ on their sheet tab
+// to open the wizard and connect their toy each session.

@@ -25,14 +25,18 @@
       }
     ]
   },
-"scripts": [
-  "scripts/aflp/index.js",
-  "scripts/aflp/ui/prose.js",
-  "scripts/aflp/ui/aflp-welcome.js",
+  "scripts": [
+    "scripts/aflp/index.js",
+    "scripts/aflp/ui/prose.js",
+    "scripts/aflp/ui/aflp-welcome.js",
     "scripts/aflp/ui/aflp-lovense.js"
-],
-"esmodules": ["scripts/module.js"],
-  "styles": ["styles/module.css"],
+  ],
+  "esmodules": [
+    "scripts/module.js"
+  ],
+  "styles": [
+    "styles/module.css"
+  ],
   "socket": true,
   "languages": [
     {
@@ -76,6 +80,13 @@
         "PLAYER": "OBSERVER",
         "ASSISTANT": "OWNER"
       },
+      "system": "pf2e"
+    },
+    {
+      "name": "aflp-lewd-journals",
+      "label": "AFLP Lewd Journals",
+      "path": "packs/aflp-lewd-journals",
+      "type": "JournalEntry",
       "system": "pf2e"
     }
   ]

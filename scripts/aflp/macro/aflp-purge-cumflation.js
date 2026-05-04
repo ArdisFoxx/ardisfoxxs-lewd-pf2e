@@ -28,11 +28,14 @@ const getNormalDC = (level) => {
   return dcByLevel[Math.min(level, 20)];
 };
 
-// Removes the total cumflation effect item (tagged with aflpCumflationTotal flag)
+// Removes the total cumflation effect item and any facial vision conditions (Dazzled/Blinded)
 const clearTotalCumflationEffect = async () => {
-  const totalEffects = actor.items.filter(i => i.getFlag("world", "aflpCumflationTotal") === true);
-  if (totalEffects.length) {
-    await actor.deleteEmbeddedDocuments("Item", totalEffects.map(e => e.id), { noHook: true });
+  const toRemove = actor.items.filter(i =>
+    i.getFlag("world", "aflpCumflationTotal") === true ||
+    i.getFlag("world", "aflpFacialVision") === true
+  );
+  if (toRemove.length) {
+    await actor.deleteEmbeddedDocuments("Item", toRemove.map(e => e.id), { noHook: true });
   }
 };
 
@@ -45,7 +48,7 @@ const rollPurge = async () => {
     roll = await actor.saves.fortitude.roll({ dc, flavor });
   } else {
     const fortMod = actor.system.saves.fortitude?.value ?? 0;
-    roll = await new Roll(`1d20 + ${fortMod}`).evaluate();
+    roll = await new Roll(`1d20 + ${fortMod}`).evaluate({async: true});
     roll.toMessage({ flavor });
   }
 

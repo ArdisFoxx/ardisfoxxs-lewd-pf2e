@@ -34,7 +34,7 @@ window.AFLP_Arousal = {
       const hasMonstrousProwess = AFLP.actorHasMonstrousProwess(actor);
 
       const liveActorForBonus = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
-      // Submitting bonus: +1 per Arousal increase
+      // Submitting bonus: +1 per Arousal increase while Submitting.
       const isSubmitting = liveActorForBonus.items?.some(c =>
         c.slug === "submitting" ||
         c.sourceId === AFLP.conditions["submitting"].uuid
@@ -220,7 +220,7 @@ window.AFLP_Arousal = {
     window[debounceKey] = true;
     setTimeout(() => { delete window[debounceKey]; }, 100);
 
-    const roll    = await new Roll("1d20").evaluate();
+    const roll    = await new Roll("1d20").evaluate({async: true});
     const success = roll.total >= 11;
 
     await roll.toMessage({
@@ -324,10 +324,15 @@ window.AFLP_Arousal = {
         ];
         const combined = combinedLines[Math.floor(Math.random() * combinedLines.length)];
 
-        await ChatMessage.create({
-          content: `<div class="aflp-chat-card">${combined}</div>`,
-          speaker: { alias: "AFLP" },
-        });
+        // Post combined orgasm narrative to scene log only
+        if (game.user.isGM && window.AFLP?.HScene?._scenes) {
+          const sceneEntry = [...AFLP.HScene._scenes.entries()]
+            .find(([, sc]) => sc.targetActorId === actor.id || sc.attackers.some(a => a.actorId === actor.id));
+          if (sceneEntry) {
+            const combinedPlain = combined.replace(/<[^>]+>/g, "");
+            AFLP.HScene.addProse(sceneEntry[0], combinedPlain, "flavor");
+          }
+        }
       } else {
         // First actor — register and post individual message after brief delay
         // so the second actor (if any) can cancel it
@@ -348,10 +353,15 @@ window.AFLP_Arousal = {
               `<p><strong>${actor.name}</strong> tips over, undone  -  a helpless, shaking orgasm that leaves them limp.</p>`,
             ];
             const solo = soloLines[Math.floor(Math.random() * soloLines.length)];
-            await ChatMessage.create({
-              content: `<div class="aflp-chat-card">${solo}</div>`,
-              speaker: { alias: "AFLP" },
-            });
+            // Post solo orgasm narrative to scene log only
+            if (game.user.isGM && window.AFLP?.HScene?._scenes) {
+              const sceneEntry = [...AFLP.HScene._scenes.entries()]
+                .find(([, sc]) => sc.targetActorId === actor.id || sc.attackers.some(a => a.actorId === actor.id));
+              if (sceneEntry) {
+                const soloPlain = solo.replace(/<[^>]+>/g, "");
+                AFLP.HScene.addProse(sceneEntry[0], soloPlain, "flavor");
+              }
+            }
           }
         }
       }
@@ -371,10 +381,11 @@ window.AFLP_Arousal = {
       }
     }
 
-    // Reset arousal immediately so we don't re-trigger
+    // Reset arousal immediately so we don't re-trigger.
+    // Collect all flag writes to this actor into one batched update at the end.
     const arousal   = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
     arousal.current = 0;
-    await actor.setFlag(FLAG, "arousal", arousal);
+    const _batchedFlags = { [`flags.${FLAG}.arousal`]: arousal };
 
     if (AFLP.Settings.hsceneEnabled) {
       AFLP.HScene.incrementSceneOrgasm(actor.id, tokenId);
@@ -386,7 +397,7 @@ window.AFLP_Arousal = {
       const horny = structuredClone(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
       if ((horny.temp ?? 0) > 0) {
         horny.temp = 0;
-        await actor.setFlag(FLAG, "horny", horny);
+        _batchedFlags[`flags.${FLAG}.horny`] = horny;
         console.log(`AFLP | ${actor.name} temp Horny cleared on cum (permanent ${horny.permanent ?? 0} preserved)`);
       }
     }
@@ -486,12 +497,28 @@ window.AFLP_Arousal = {
       }
     }
 
-    // ── Save updated lifetime stats ─────────────────────────────────────
-    await actor.setFlag(FLAG, "sexual", sexual);
+    // ── Save updated lifetime stats — flush ALL pending flag writes in one update ─────
+    _batchedFlags[`flags.${FLAG}.sexual`] = sexual;
+    await actor.update(_batchedFlags);
+
+    // ── Apply base Afterglow ─────────────────────────────────────────────
+    // Applied before kink post-effects so Edge Master can remove and replace it.
+    if (AFLP.Settings.automation) {
+      const afterglowUUID = AFLP.conditions?.["afterglow"]?.uuid;
+      if (afterglowUUID) {
+        const liveActorAg = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
+        const alreadyHas  = liveActorAg.items?.some(c =>
+          c.slug === "afterglow" || (c.flags?.core?.sourceId ?? c.sourceId) === afterglowUUID
+        );
+        if (!alreadyHas) {
+          await AFLP_Arousal._applyCondition(liveActorAg, "afterglow", afterglowUUID, null);
+        }
+      }
+    }
 
     // ── Kink post-cum effects ────────────────────────────────────────────
     if (AFLP.Settings.automation && AFLP.Kinks) {
-      // Edge Master: block Afterglow, apply Sickened 2
+      // Edge Master: block Afterglow, apply Sickened 2 + Edge Master's Afterglow
       await AFLP.Kinks.onCumPostEffect(actor, tokenId);
       // Purity: Sickened 1 if cumming while Submitting (non-consensual)
       await AFLP.Kinks.onCumPurityCheck(actor, tokenId);
@@ -499,6 +526,10 @@ window.AFLP_Arousal = {
       await AFLP.Kinks.enforceAphrodisiacJunkieL7(actor);
       // Aphrodisiac Junkie L7: Stunned 2 to Dominators/Submitting creatures
       await AFLP.Kinks.onCumAphrodisiacJunkieL7(actor);
+      // Brood Sow: apply Brood Sow's Afterglow
+      await AFLP.Kinks.onCumBroodSow(actor, tokenId);
+      // Voyeurism L5: observers must save vs 2 Arousal
+      await AFLP.Kinks.onCumVoyeurism(actor, tokenId);
     }
 
     // ── Sentient item reactions to cum ───────────────────────────────────
@@ -529,6 +560,7 @@ window.AFLP_Arousal = {
     // even if the macro or token setup throws.
     const _cleanupCumGlobals = () => {
       delete window._aflpCumMacroActor;
+      delete window._aflpCumTargetTokenId;
       if (window._aflpPendingCum) window._aflpPendingCum.delete(sceneKey);
     };
     try {
@@ -536,16 +568,23 @@ window.AFLP_Arousal = {
     // ── No-cock orgasm: record mlGiven (pussy squirt) and post chat, skip macro ──
     if (!actorHasCock) {
       const cum = actor.getFlag(FLAG, "cum") ?? { current: 0, max: 10 };
-      const cumUnitsSpent = Math.floor(cum.current / 2);
+      const cumUnitsSpent = Math.ceil(cum.current / 2);
       if (cumUnitsSpent > 0) {
-        await actor.setFlag(FLAG, "cum", { current: cum.current - cumUnitsSpent, max: cum.max });
         const sexualNoCock = structuredClone(actor.getFlag(FLAG, "sexual") ?? AFLP.sexualDefaults);
         sexualNoCock.lifetime = sexualNoCock.lifetime ?? {};
         if (!sexualNoCock.lifetime.mlGiven) sexualNoCock.lifetime.mlGiven = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
         const mlSpray = cumUnitsSpent * AFLP.CUM_UNIT_ML;
         sexualNoCock.lifetime.mlGiven.vaginal = (sexualNoCock.lifetime.mlGiven.vaginal ?? 0) + mlSpray;
         sexualNoCock.lifetime.cumGiven = (sexualNoCock.lifetime.cumGiven ?? 0) + cumUnitsSpent;
-        await actor.setFlag(FLAG, "sexual", sexualNoCock);
+        // Batch cum + sexual into one write — skip cum deduction for NPCs with infinite cum on
+        const isNPCNoCock = actor.type === "npc";
+        const cumUpdate   = (isNPCNoCock && AFLP.Settings.infiniteCum)
+          ? {}
+          : { [`flags.${FLAG}.cum`]: { current: cum.current - cumUnitsSpent, max: cum.max } };
+        await actor.update({
+          ...cumUpdate,
+          [`flags.${FLAG}.sexual`]: sexualNoCock,
+        });
       }
       const noCockLines = [
         `<p><strong>${actor.name}</strong> cums  -  a hot rush of slick lust, thighs trembling as they soak through.</p>`,
@@ -588,6 +627,9 @@ window.AFLP_Arousal = {
           for (const t of macroSourceTokens) t.control({ releaseOthers: false });
           game.user.targets.forEach(t => t.setTarget(false, { user: game.user, releaseOthers: false, groupSelection: false }));
           macroTargetToken.setTarget(true, { user: game.user, releaseOthers: false, groupSelection: false });
+          // Record the intended target token ID so the cum macro can verify it
+          // even if game.user.targets races with another scene's auto-trigger.
+          window._aflpCumTargetTokenId = macroTargetToken.id;
         }
       }
       await cumMacro.execute();
@@ -641,7 +683,6 @@ window.AFLP_Arousal = {
   // and their max value (null = no cap)
   _STACKABLE: {
     "horny":           3,    // Horny caps at 3 in practice (kinks go higher but base is 3)
-    "horny-always":    3,    // Horny (Always) — same cap, not removed on cum
     "mind-break":      null, // No cap
     "exposed":         2,    // 1-2
     "creature-fetish": 9,    // Up to 9

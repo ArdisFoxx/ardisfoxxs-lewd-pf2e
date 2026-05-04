@@ -50,7 +50,7 @@ Object.assign(window.AFLP_Pregnancy, {
       const deliveryType = isOvidepositor ? "egg" : "live";
       const dc = cockTypes["cock-breeder"] ? 20 : cockTypes["cock-fertile"] ? 11 : 5;
 
-      const roll = await new Roll("1d20").evaluate();
+      const roll = await new Roll("1d20").evaluate({async: true});
       const success = roll.total <= dc;
 
       ChatMessage.create({
@@ -86,7 +86,7 @@ Object.assign(window.AFLP_Pregnancy, {
     rollLiveBirth: async () => {
       let count = 1;
       while (true) {
-        const roll = await new Roll("1d6").evaluate();
+        const roll = await new Roll("1d6").evaluate({async: true});
         if (roll.total === 6) count++;
         else break;
       }
@@ -99,7 +99,7 @@ Object.assign(window.AFLP_Pregnancy, {
       let dice = 2;
       let result = [];
       while (true) {
-        const r = await new Roll(`${dice}d4`).evaluate();
+        const r = await new Roll(`${dice}d4`).evaluate({async: true});
         const faces = r.dice[0].results.map(x => x.result);
         result.push(...faces);
         if (faces.every(x => x === 4)) dice += 2;

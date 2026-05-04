@@ -28,6 +28,57 @@ for (const { actor } of tokens) {
   arousal.current = 0;
   await actor.setFlag(FLAG, "arousal", arousal);
 
+  // Denied clears on full rest (daily preparations)
+  const denied = actor.getFlag(FLAG, "denied") ?? { value: 0 };
+  if ((denied.value ?? 0) > 0) {
+    await actor.setFlag(FLAG, "denied", { value: 0 });
+  }
+
+  // Bimbofied: "When you complete your daily preparations, if you haven't had sex
+  // in the last 24 hours, your Bimbofied level is lowered by 1."
+  // We track "had sex" via the partnerHistory — if the most recent entry is within
+  // the last in-world day (86400 seconds), sex occurred.
+  const bimbofiedItem = actor.items?.find(i => i.slug === "bimbofied");
+  if (bimbofiedItem) {
+    // Bimbomancer Dedication: Bimbofied never decays
+    const isBimbomancer = actor.getFlag(FLAG, "bimbomancerDedication") === true;
+    // Like, Ohmigawd!: Bimbofied minimum 2
+    const bimboFloor = actor.getFlag(FLAG, "likeOhmigawd") ? 2 : 0;
+
+    if (!isBimbomancer) {
+      const history = actor.getFlag(FLAG, "partnerHistory") ?? [];
+      const now = game.time.worldTime;
+      const dayInSeconds = 86400;
+      const hadSexToday = history.some(e => (now - (e.date ?? 0)) < dayInSeconds);
+      if (!hadSexToday) {
+        const currentLevel = bimbofiedItem.system?.badge?.value ?? 1;
+        const newLevel = currentLevel - 1;
+        if (newLevel <= bimboFloor) {
+          if (bimboFloor > 0) {
+            await bimbofiedItem.update({ "system.badge.value": bimboFloor });
+          } else {
+            await bimbofiedItem.delete().catch(() => {});
+          }
+        } else {
+          await bimbofiedItem.update({ "system.badge.value": newLevel });
+        }
+      }
+    } else if (bimboFloor > 0) {
+      // Bimbomancer with Ohmigawd floor — enforce minimum even if not decaying
+      const currentLevel = bimbofiedItem.system?.badge?.value ?? 1;
+      if (currentLevel < bimboFloor) {
+        await bimbofiedItem.update({ "system.badge.value": bimboFloor });
+      }
+    }
+  }
+
+  // Reset temp Horny — clears on daily preparations; permanent Horny persists.
+  const horny = structuredClone(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
+  if ((horny.temp ?? 0) > 0) {
+    horny.temp = 0;
+    await actor.setFlag(FLAG, "horny", horny);
+  }
+
   // Cum refill — use schema values via recalculateCum
   await AFLP.recalculateCum(actor);
 
@@ -54,6 +105,26 @@ for (const { actor } of tokens) {
   // We save the full object to capture gestationRemaining decrements on non-complete pregnancies
   await actor.setFlag(FLAG, "pregnancy", pregnancies);
 
+  // Brood Sow kink: remove Endurance if no active pregnancies remain after today's gestation tick
+  if (AFLP.Settings.automation && AFLP.Kinks?.removeBroodSowEndurance) {
+    const updatedPregnancies = actor.getFlag(FLAG, "pregnancy") ?? {};
+    const stillActive = Object.values(updatedPregnancies).some(p => p.gestationRemaining !== "Complete");
+    if (!stillActive) await AFLP.Kinks.removeBroodSowEndurance(actor);
+  }
+
+  // Alcumist Dedication: calculate and display vial count for today
+  // Vials = floor(cum.current / 2), minimum 1
+  const ALCUMIST_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.xdklOfDJHXLwZf31";
+  const hasAlcumist = actor.items?.some(i =>
+    i.slug === "alcumist-dedication" ||
+    (i.flags?.core?.sourceId ?? i.sourceId) === ALCUMIST_UUID
+  );
+  if (hasAlcumist) {
+    const cumForVials = actor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
+    const vialCount = Math.max(1, Math.floor((cumForVials.current ?? 0) / 2));
+    await actor.setFlag(FLAG, "_alcumistVials", vialCount);
+  }
+
   // -------------------------------
   // Chat summary
   // -------------------------------
@@ -65,5 +136,17 @@ for (const { actor } of tokens) {
     message += `<br>${actor.name} gave birth to ${count} ${type} fathered by <strong>${sourceName}</strong>!`;
   }
 
+  if (hasAlcumist) {
+    const vialCount = actor.getFlag(FLAG, "_alcumistVials") ?? 1;
+    message += `<br>${actor.name} prepares <strong>${vialCount} Alcumist Vial${vialCount !== 1 ? "s" : ""}</strong> for today.`;
+  }
+
   ChatMessage.create({ content: message });
+
+  // Alcumist crafting dialog — shown after the chat message so the summary lands first
+  if (hasAlcumist && window.AFLP_Alcumist) {
+    const vialCount = actor.getFlag(FLAG, "_alcumistVials") ?? 1;
+    const selections = await AFLP_Alcumist.showCraftingDialog(actor, vialCount);
+    await AFLP_Alcumist.processCrafting(actor, selections);
+  }
 }

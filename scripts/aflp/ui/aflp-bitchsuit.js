@@ -108,16 +108,54 @@ window.AFLP_Bitchsuit = {
         const suit = this.getEquippedSuit(actor);
         if (!suit) continue;
         const variant = this._suitVariant(suit);
-        if (variant === "animated") continue; // Animated uses turn-based arousal
-
-        const FLAG       = AFLP.FLAG_SCOPE;
-        const wornSince  = actor.getFlag(FLAG, "bitchsuitWornSince");
+        const FLAG    = AFLP.FLAG_SCOPE;
+        const wornSince = actor.getFlag(FLAG, "bitchsuitWornSince");
         if (!wornSince) continue;
 
-        const elapsedSeconds  = worldTime - wornSince;
-        const elapsedHours    = Math.floor(elapsedSeconds / 3600);
-        const appliedHours    = actor.getFlag(FLAG, "bitchsuitWornHours") ?? 0;
-        const dueHours        = elapsedHours - appliedHours;
+        const elapsedSeconds = worldTime - wornSince;
+        const elapsedHours   = Math.floor(elapsedSeconds / 3600);
+
+        // ── Animated: Bimbofied escalation ─────────────────────────
+        // Tier 1 at 1h, Tier 2 at 4h, Tier 3 at 24h, Tier 4 at 48h
+        if (variant === "animated") {
+          const BIMBO_UUID  = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.9ySsqXnpfZkhmp2V";
+          const THRESHOLDS  = [1, 4, 24, 48]; // hours → tier 1,2,3,4
+          const targetTier  = THRESHOLDS.filter(h => elapsedHours >= h).length; // 0–4
+          const appliedTier = actor.getFlag(FLAG, "bitchsuitBimbofiedTier") ?? 0;
+
+          if (targetTier > appliedTier) {
+            // Find existing Bimbofied item on actor
+            const existing = actor.items.find(i =>
+              i.slug === "bimbofied" ||
+              (i.flags?.core?.sourceId ?? i.sourceId) === BIMBO_UUID
+            );
+
+            if (existing) {
+              // Update badge to new tier
+              await existing.update({ "system.badge.value": targetTier });
+            } else {
+              // Create fresh at correct tier
+              const bimboDoc = await fromUuid(BIMBO_UUID);
+              if (bimboDoc) {
+                const effect = bimboDoc.toObject();
+                foundry.utils.setProperty(effect, "system.badge.value", targetTier);
+                await actor.createEmbeddedDocuments("Item", [effect], { noHook: true });
+              }
+            }
+
+            await actor.setFlag(FLAG, "bitchsuitBimbofiedTier", targetTier);
+            await ChatMessage.create({
+              content: `<div class="aflp-chat-card"><p>The <strong>Animated Bitchsuit</strong> has reshaped <strong>${actor.name}</strong>. They are now <strong>Bimbofied ${targetTier}</strong>.</p></div>`,
+              speaker: { alias: "AFLP" },
+            });
+            console.log(`AFLP | ${actor.name} Bitchsuit: Bimbofied tier ${targetTier} applied`);
+          }
+          continue; // animated doesn't use hourly arousal tick below
+        }
+
+        // ── Mundane / Primal: hourly arousal ───────────────────────
+        const appliedHours = actor.getFlag(FLAG, "bitchsuitWornHours") ?? 0;
+        const dueHours     = elapsedHours - appliedHours;
         if (dueHours <= 0) continue;
 
         for (let i = 0; i < dueHours; i++) {
@@ -182,6 +220,19 @@ window.AFLP_Bitchsuit = {
 
     await actor.unsetFlag(FLAG, "bitchsuitWornSince");
     await actor.unsetFlag(FLAG, "bitchsuitWornHours");
+
+    // Animated: remove Bimbofied and clear tier flag
+    if (variant === "animated") {
+      await actor.unsetFlag(FLAG, "bitchsuitBimbofiedTier");
+      const BIMBO_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.9ySsqXnpfZkhmp2V";
+      const bimboItems = actor.items.filter(i =>
+        i.slug === "bimbofied" ||
+        (i.flags?.core?.sourceId ?? i.sourceId) === BIMBO_UUID
+      );
+      if (bimboItems.length) {
+        await actor.deleteEmbeddedDocuments("Item", bimboItems.map(i => i.id));
+      }
+    }
 
     // Primal: remove Creature Fetish if it came from the suit
     // Only remove if the actor doesn't also have the CF kink naturally

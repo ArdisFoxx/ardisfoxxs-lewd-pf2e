@@ -362,7 +362,7 @@ window.AFLP_SentientItems = {
     const dir    = to > from ? "The armor tightens its grip." : "The armor yields a little.";
     await ChatMessage.create({
       content: `<div class="aflp-chat-card">
-        <p>${to > from ? "🖤" : "✨"} <strong>${actor.name}</strong>'s Armor of Hands shifts to <strong>${labels[to]}</strong> (was ${labels[from]}). ${dir}</p>
+        <p><strong>${actor.name}</strong>'s Armor of Hands shifts to <strong>${labels[to]}</strong> (was ${labels[from]}). ${dir}</p>
         <p><em>${source}</em></p>
       </div>`,
       speaker: { alias: "AFLP" },

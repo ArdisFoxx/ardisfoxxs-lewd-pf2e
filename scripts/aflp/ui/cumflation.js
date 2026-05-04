@@ -20,7 +20,7 @@ window.AFLP_Cumflation = {
   // Distribute cumUnitsSpent across the given holes on the target.
   // Mutates cumFlags and sexualStatsDialog.sexual in place.
   // Caller is responsible for saving afterward.
-  applyCumflation: (actor, cumFlags, cumOverflow, sexualStatsDialog, selectedHoles, cumUnitsSpent) => {
+  applyCumflation: async (actor, cumFlags, cumOverflow, sexualStatsDialog, selectedHoles, cumUnitsSpent, attackerName) => {
     const receivingHoles = selectedHoles.filter(h => ["oral", "anal", "vaginal", "facial"].includes(h));
     if (!receivingHoles.length) return;
 
@@ -31,15 +31,63 @@ window.AFLP_Cumflation = {
       const prevUnits  = cumFlags[hole] ?? 0;
       const unitsToAdd = perHole + (i === 0 ? remainder : 0);
 
-      // Tier clamped to 8 for anal/oral/vaginal; facial is uncapped
-      cumFlags[hole] = hole === "facial"
-        ? prevUnits + unitsToAdd
-        : Math.min(8, prevUnits + unitsToAdd);
+      // Tier clamped to 8 for all holes including facial
+      cumFlags[hole] = Math.min(8, prevUnits + unitsToAdd);
 
-      // Track overflow for capped holes
-      if (hole !== "facial") {
-        const overflow = Math.max(0, (prevUnits + unitsToAdd) - 8);
-        cumOverflow[hole] = (cumOverflow[hole] ?? 0) + overflow;
+      // Track overflow for all holes
+      const overflow = Math.max(0, (prevUnits + unitsToAdd) - 8);
+      if (overflow > 0) cumOverflow[hole] = (cumOverflow[hole] ?? 0) + overflow;
+
+      // Fire tier message when the tier increases
+      const newTier = cumFlags[hole];
+      if (newTier > prevUnits && game.user.isGM) {
+        // Cumflation word message
+        if (newTier >= 1 && AFLP.Messages) {
+          const msgKey = `cumflated-${hole}-${newTier}`;
+          const msg = AFLP.Messages.get(msgKey, {
+            target:   actor.name,
+            attacker: attackerName ?? "",
+          });
+          if (msg) {
+            const scenes = AFLP.HScene?._scenes;
+            const sceneEntry = scenes
+              ? [...scenes.entries()].find(([, sc]) => sc.targetActorId === actor.id)
+              : null;
+            if (sceneEntry) AFLP.HScene.addProse?.(sceneEntry[0], msg, "flavor");
+          }
+        }
+
+        // Refresh the H scene portrait to update the cumflation status pill
+        if (game.user.isGM) {
+          const scenes = AFLP.HScene?._scenes;
+          const sceneEntry = scenes
+            ? [...scenes.entries()].find(([, sc]) => sc.targetActorId === actor.id)
+            : null;
+          if (sceneEntry) {
+            // Short defer so cumflation flags are flushed before the refresh reads them
+            setTimeout(() => AFLP.HScene.refreshScene?.(sceneEntry[0]), 200);
+          }
+        }
+        // Speed penalty at tier 8 is handled automatically via FlatModifier rule elements
+        // on the Cumflated [Hole] 8 condition items in the compendium - no direct actor update needed.
+        if (newTier === 8 && ["anal","oral","vaginal"].includes(hole)) {
+          const updatedFlags = { ...cumFlags };
+          const allFull = (updatedFlags.anal ?? 0) >= 8 &&
+                          (updatedFlags.oral ?? 0) >= 8 &&
+                          (updatedFlags.vaginal ?? 0) >= 8;
+          const allFullMsg = allFull
+            ? ` Every hole is completely packed — ${actor.name} can barely move.`
+            : "";
+          const speedMsgs = {
+            anal:    `${actor.name}'s distended belly and leaking ass make every step a struggle.`,
+            oral:    `Cum overflows from ${actor.name}'s mouth with every movement, belly grotesquely swollen.`,
+            vaginal: `${actor.name} staggers, thighs coated in thick ropes of cum leaking from their stuffed pussy.`,
+          };
+          ChatMessage.create({
+            content: `<div class="aflp-chat-card"><p><em>${speedMsgs[hole] ?? `${actor.name} is heavily cumflated.`}${allFullMsg}</em></p></div>`,
+            speaker: { alias: "AFLP" },
+          }).catch(() => {});
+        }
       }
 
       // Lifetime mlReceived per hole
@@ -87,15 +135,25 @@ window.AFLP_Cumflation = {
       await actor.deleteEmbeddedDocuments("Item", oldTotal.map(i => i.id), { noHook: true });
     }
 
-    if (totalTier <= 0) return;
+    if (totalTier <= 0) {
+      // Still need to handle facial vision even if no total tier
+      await _applyFacialVision(actor, cumFlags.facial ?? 0);
+      return;
+    }
 
     // Pick cum-slut override or standard total effect
     const uuidArray = isCumSlut ? AFLP.items.cumSlutTotal : AFLP.items.cumflationTotal;
     const uuid      = uuidArray?.[totalTier - 1];
-    if (!uuid) return;
+    if (!uuid) {
+      await _applyFacialVision(actor, cumFlags.facial ?? 0);
+      return;
+    }
 
     const effectDoc = await fromUuid(uuid);
-    if (!effectDoc) return;
+    if (!effectDoc) {
+      await _applyFacialVision(actor, cumFlags.facial ?? 0);
+      return;
+    }
 
     const effect = effectDoc.toObject();
     effect.name  = `Cumflated ${totalTier}`;
@@ -104,5 +162,27 @@ window.AFLP_Cumflation = {
     foundry.utils.setProperty(effect, "flags.world.aflpCumflationTotal", true);
 
     await actor.createEmbeddedDocuments("Item", [effect], { noHook: true });
+    await _applyFacialVision(actor, cumFlags.facial ?? 0);
   }
+};
+
+async function _applyFacialVision(actor, facialTier) {
+    const DAZZLED_UUID = "Compendium.pf2e.conditionitems.Item.TkIyaNPgTZFBCCuh";
+    const BLINDED_UUID = "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2";
+
+    // Remove any existing facial-vision conditions applied by AFLP
+    const oldVision = actor.items.filter(i => i.getFlag("world", "aflpFacialVision") === true);
+    if (oldVision.length) {
+      await actor.deleteEmbeddedDocuments("Item", oldVision.map(i => i.id), { noHook: true });
+    }
+
+    if (facialTier >= 4) {
+      const condUuid = facialTier >= 8 ? BLINDED_UUID : DAZZLED_UUID;
+      const condDoc  = await fromUuid(condUuid);
+      if (condDoc) {
+        const condObj = condDoc.toObject();
+        foundry.utils.setProperty(condObj, "flags.world.aflpFacialVision", true);
+        await actor.createEmbeddedDocuments("Item", [condObj], { noHook: true });
+      }
+    }
 };

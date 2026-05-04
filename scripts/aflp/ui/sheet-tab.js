@@ -297,7 +297,7 @@ AFLP.UI.SheetTab = {
       const mlG       = sexual.lifetime.mlGiven?.[act]    ?? 0;
 
       const givenCell   = act === "gangbang"
-        ? `<td class="aflp-num">—</td>`
+        ? `<td class="aflp-num">-</td>`
         : `<td class="aflp-num">${cell(tGiven, `given.${act}`)}</td>`;
       const recCell     = `<td class="aflp-num">${cell(tReceived, `lifetime.${act}`)}</td>`;
       const mlGivenCell = `<td class="aflp-num">${cell(mlG, `mlGiven.${act}`)}</td>`;
@@ -335,7 +335,7 @@ AFLP.UI.SheetTab = {
             ? `<button type="button" class="aflp-btn aflp-save-btn">💾 Save</button>
                <button type="button" class="aflp-btn aflp-cancel-btn" style="margin-left:4px">✕ Cancel</button>`
             : `<button type="button" class="aflp-btn aflp-edit-btn">✏ Edit</button>
-               ${AFLP._lovenseDevMode ? `<button type="button" class="aflp-btn aflp-lovense-btn" style="margin-left:4px" title="Lovense Integration Settings">🖤</button>` : ""}`
+               <button type="button" class="aflp-btn aflp-lovense-btn" style="margin-left:4px" title="Lovense Integration Settings">🖤</button>`
           }
         </div>
       </div>
@@ -360,11 +360,11 @@ AFLP.UI.SheetTab = {
           <span class="aflp-bar-val">${arousal.current ?? 0}/${arousalMax}${deniedValue > 0 ? ` <span class="aflp-denied-label">+${deniedValue} Denied</span>` : ""}</span>
           ${editMode
             ? `<span class="aflp-bar-maxedit">Max:<input class="aflp-input" type="number" name="arousal.maxBase" value="${arousal.maxBase ?? 6}" style="width:32px;text-align:center;margin-left:4px;"/></span>`
-            : `<span class="aflp-denied-btns" style="display:flex;align-items:center;gap:3px;margin-left:6px;">
-                <button class="aflp-denied-dec aflp-btn-tiny" title="Remove Denied" ${deniedValue <= 0 ? "disabled" : ""}>-</button>
-                <button class="aflp-denied-inc aflp-btn-tiny" title="Add Denied" ${deniedValue >= 6 ? "disabled" : ""}>+</button>
-              </span>`
-          }
+            : ""}
+          <span class="aflp-denied-btns" style="display:flex;align-items:center;gap:3px;margin-left:6px;">
+            <button class="aflp-denied-dec aflp-btn-tiny" title="Remove Denied" ${deniedValue <= 0 ? "disabled" : ""}>-</button>
+            <button class="aflp-denied-inc aflp-btn-tiny" title="Add Denied" ${deniedValue >= 6 ? "disabled" : ""}>+</button>
+          </span>
         </div>
         <!-- Horny bar -->
         ${(() => {
@@ -380,10 +380,10 @@ AFLP.UI.SheetTab = {
             if (isPerm)     cls = " filled perm";
             else if (isTemp) cls = " filled";
             const tipText = isPerm
-              ? (editMode ? "Permanent Horny — click to remove" : "Permanent Horny (set by kinks/edit)")
+              ? (editMode ? "Permanent Horny (click to remove)" : "Permanent Horny (set by kinks/edit)")
               : isTemp
-                ? (editMode ? "Temp Horny — click to make permanent" : "Temp Horny — click to remove")
-                : (editMode ? "Empty — click to add as permanent" : "Empty — click to add Horny");
+                ? (editMode ? "Temp Horny (click to make permanent)" : "Temp Horny (click to remove)")
+                : (editMode ? "Empty (click to add as permanent)" : "Empty (click to add Horny)");
             return `<span class="aflp-pip aflp-horny-pip${cls}"
                          data-pip-index="${i}" data-pip-type="horny"
                          title="${tipText}"></span>`;
@@ -588,6 +588,15 @@ AFLP.UI.SheetTab = {
       }
       .aflp-panel .aflp-arousal-pip.denied-ext:not(.filled):hover {
         background: rgba(180,150,0,0.2) !important;
+      }
+      /* Cumflation pips — clickable in view mode */
+      .aflp-panel .aflp-cumflation-pip { cursor: pointer; }
+      .aflp-panel .aflp-cumflation-pip:not(.filled):hover {
+        background: rgba(100,160,200,0.25) !important;
+        border-color: rgba(100,160,200,0.6) !important;
+      }
+      .aflp-panel .aflp-cumflation-pip.filled:hover {
+        opacity: 0.7;
       }
       /* Horny pips — pink temp, pink+thick-red-border permanent, lighter staged-perm */
       .aflp-panel .aflp-horny-pip { background: rgba(0,0,0,0.07) !important; border-color: rgba(0,0,0,0.18) !important; }
@@ -879,7 +888,7 @@ AFLP.UI.SheetTab = {
     const items = await Promise.all(enabled.map(async ([slug, data]) => {
       const link = await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${data.uuid}]{${data.name}}`);
       const note = slug === "creature-fetish" && kinkNotes?.[slug]
-        ? ` — <em>${kinkNotes[slug]}</em>` : "";
+        ? `: <em>${kinkNotes[slug]}</em>` : "";
       return `<li>${link}${note}</li>`;
     }));
     return `<ul>${items.join("")}</ul>`;
@@ -952,20 +961,40 @@ AFLP.UI.SheetTab = {
   // Render cumflation bars
   // -----------------------------------------------
   async _renderCumflationRows(cumflation, totalTier) {
+    const DAZZLED_UUID = "Compendium.pf2e.conditionitems.Item.TkIyaNPgTZFBCCuh";
+    const BLINDED_UUID = "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2";
+
     const rows = await Promise.all(["oral", "vaginal", "anal", "facial"].map(async hole => {
       const tier    = cumflation[hole] ?? 0;
-      const maxPips = hole === "facial" ? Math.max(tier, 8) : 8;
+      const maxPips = 8;  // all holes capped at 8
       const pips    = Array.from({ length: maxPips }, (_, i) =>
-        `<span class="aflp-pip${i < tier ? " filled" : ""}"></span>`
+        `<span class="aflp-pip aflp-cumflation-pip${i < tier ? " filled" : ""}"
+               data-pip-type="cumflation" data-hole="${hole}" data-pip-index="${i}"
+               title="${hole} tier ${i+1}/8 - click to set"></span>`
       ).join("");
 
       let link = "";
       if (tier > 0) {
-        const key  = `cumflation${hole.charAt(0).toUpperCase() + hole.slice(1)}`;
-        const uuid = AFLP.items[key]?.[tier - 1];
-        link = uuid
-          ? await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${uuid}]{Tier ${tier}}`)
-          : `Tier ${tier}`;
+        if (hole === "facial") {
+          // Facial has no tier effect items — link to the relevant PF2e vision condition instead
+          if (tier >= 8) {
+            link = await foundry.applications.ux.TextEditor.implementation.enrichHTML(
+              `@UUID[${BLINDED_UUID}]{Blinded}`
+            );
+          } else if (tier >= 4) {
+            link = await foundry.applications.ux.TextEditor.implementation.enrichHTML(
+              `@UUID[${DAZZLED_UUID}]{Dazzled}`
+            );
+          } else {
+            link = `<span style="color:#999;font-size:11px;">Tier ${tier}</span>`;
+          }
+        } else {
+          const key  = `cumflation${hole.charAt(0).toUpperCase() + hole.slice(1)}`;
+          const uuid = AFLP.items[key]?.[tier - 1];
+          link = uuid
+            ? await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${uuid}]{Tier ${tier}}`)
+            : `Tier ${tier}`;
+        }
       }
 
       return `
@@ -1063,7 +1092,15 @@ AFLP.UI.SheetTab = {
       if (isComplete) {
         gestationCell = `<td style="text-align:center">Complete</td>`;
       } else {
-        gestationCell = `<td>${p.gestationRemaining}/${p.gestationTotal}</td>`;
+        const pct     = Math.round(((p.gestationTotal - p.gestationRemaining) / p.gestationTotal) * 100);
+        const barFill = `background:linear-gradient(90deg,#c9a96e ${pct}%,rgba(201,169,110,0.15) ${pct}%)`;
+        gestationCell = `<td>
+          <div title="${p.gestationRemaining} days remaining of ${p.gestationTotal}"
+               style="display:flex;align-items:center;gap:5px;">
+            <div style="flex:1;height:6px;border-radius:3px;border:1px solid #c9a96e44;${barFill};min-width:40px;"></div>
+            <span style="font-size:11px;color:#aaa;white-space:nowrap;">${p.gestationRemaining}d</span>
+          </div>
+        </td>`;
       }
 
       const deliverBtn = !isComplete
@@ -1102,7 +1139,7 @@ AFLP.UI.SheetTab = {
   _renderHistory(history, editMode = false) {
     if (!history.length) return `<div class="aflp-none">No history yet.</div>`;
     return `<div class="aflp-history-list">` + history.map((entry, idx) => {
-      const holes   = (entry.holes ?? []).map(h => h.charAt(0).toUpperCase() + h.slice(1)).join(", ") || "—";
+      const holes   = (entry.holes ?? []).map(h => h.charAt(0).toUpperCase() + h.slice(1)).join(", ") || "-";
       const mlR     = (entry.mlReceived ?? 0).toLocaleString();
       const mlG     = (entry.mlGiven    ?? 0).toLocaleString();
 
@@ -1115,7 +1152,7 @@ AFLP.UI.SheetTab = {
         : "";
 
       const pregChip = entry.pregnancyResult
-        ? `<span class="aflp-history-chip aflp-history-preg">🥚 Impregnated — ${entry.pregnancyResult.offspring} ${entry.pregnancyResult.deliveryType === "egg" ? "eggs" : "offspring"}</span>`
+        ? `<span class="aflp-history-chip aflp-history-preg">🥚 Impregnated: ${entry.pregnancyResult.offspring} ${entry.pregnancyResult.deliveryType === "egg" ? "eggs" : "offspring"}</span>`
         : "";
 
       const holeTag = entry.holes?.length
@@ -1293,9 +1330,7 @@ AFLP.UI.SheetTab = {
       }
       if (btn.classList.contains("aflp-lovense-btn")) {
         if (window.AFLP_Lovense) {
-          const hasConfig = !!game.user.getFlag(AFLP.FLAG_SCOPE, "lovense")?.mode;
-          if (hasConfig) AFLP_Lovense.openSettings();
-          else           AFLP_Lovense.openWizard();
+          AFLP_Lovense.openWizard(); // always open wizard — handles setup and reconnection
         }
         return;
       }
@@ -1571,7 +1606,7 @@ AFLP.UI.SheetTab = {
           await AFLP.UI.SheetTab._refreshPanel(html, actor, true);
         } catch(err) {
           console.error("AFLP | Pregnancy remove failed:", err);
-          ui.notifications?.error("AFLP: Failed to remove pregnancy — see console for details.");
+          ui.notifications?.error("AFLP: Failed to remove pregnancy; see console for details.");
         }
         return;
       }
@@ -1740,7 +1775,7 @@ AFLP.UI.SheetTab = {
                 p.title = "Committed permanent Horny";
               } else if (idx < newStaged) {
                 p.classList.add("staged-perm");
-                p.title = "Staged permanent — click Save to commit";
+                p.title = "Staged permanent (click Save to commit)";
               } else if (idx < total) {
                 p.classList.add("filled");
                 p.title = "Temp Horny";
@@ -1758,6 +1793,26 @@ AFLP.UI.SheetTab = {
           }
         });
       });
+
+      // Cumflation pips — click to set hole tier directly (GM/owner only, view mode)
+      if (!isEditMode) {
+        panelRoot.querySelectorAll(".aflp-cumflation-pip[data-pip-type='cumflation']").forEach(pip => {
+          pip.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            if (!actor.isOwner && !game.user?.isGM) return;
+            const hole     = pip.dataset.hole;
+            const pipIndex = parseInt(pip.dataset.pipIndex, 10);
+            if (!hole || isNaN(pipIndex)) return;
+            const cumflation = structuredClone(actor.getFlag(FLAG, "cumflation") ?? { oral: 0, vaginal: 0, anal: 0, facial: 0 });
+            const cur = cumflation[hole] ?? 0;
+            // Click within filled → reduce to pipIndex; click at/beyond → set to pipIndex+1
+            cumflation[hole] = (pipIndex < cur) ? pipIndex : Math.min(pipIndex + 1, 8);
+            await actor.setFlag(FLAG, "cumflation", cumflation);
+            await AFLP_Cumflation.applyCumflationEffects(actor);
+            await AFLP.UI.SheetTab._refreshPanel(html, actor, false);
+          });
+        });
+      }
     }
     const procBtn = html.querySelector(".aflp-process-preg-btn");
     if (procBtn) {

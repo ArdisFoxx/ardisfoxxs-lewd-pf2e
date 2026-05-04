@@ -20,22 +20,17 @@ Hooks.once("init", async () => {
 Hooks.once("ready", async () => {
   if (!window.AFLP) return;
 
-  // Check for dev flag file — if present, show Lovense sheet button.
-  // Delete deletethis.md from the module folder before shipping to repo.
-  AFLP._lovenseDevMode = await fetch(
-    "modules/ardisfoxxs-lewd-pf2e/deletethis.md",
-    { method: "HEAD", cache: "no-store" }
-  ).then(r => r.ok).catch(() => false);
-
   await import("./ui/sexual-stats-dialog.js");
   await import("./ui/cumflation.js");
   await import("./ui/sheet-tab.js");
   await import("./ui/aflp-hscene.js");
   await import("./ui/aflp-arousal.js");
   await import("./ui/aflp-titles.js");
+  await import("./ui/aflp-messages.js");
   await import("./ui/aflp-kinks.js");
   await import("./ui/aflp-bitchsuit.js");
   await import("./ui/aflp-sentient-items.js");
+  await import("./ui/aflp-alcumist.js");
 
   // Register actor sheet tab
   AFLP.UI.SheetTab.register();
@@ -103,6 +98,38 @@ Hooks.once("ready", async () => {
       console.log("AFLP | Token HUD: could not find right column, using fallback placement. HUD HTML:", html.innerHTML);
     }
   });
+
+  // ── Register AFLP homebrew traits ───────────────────────────────────────
+  // Ensures Sexual, Bondage, and Aphrodisiac traits are present in all
+  // relevant PF2e trait categories. Safe to call on every load — only adds
+  // entries that are not already present.
+  if (game.user.isGM) {
+    const AFLP_TRAITS = [
+      { id: "sexual",      value: "Sexual" },
+      { id: "bondage",     value: "Bondage" },
+      { id: "aphrodisiac", value: "Aphrodisiac" },
+      { id: "alcumical",   value: "Alcumical" },
+    ];
+    const TRAIT_CATEGORIES = [
+      "homebrew.creatureTraits",
+      "homebrew.featTraits",
+      "homebrew.equipmentTraits",
+      "homebrew.weaponTraits",
+      "homebrew.spellTraits",
+      "homebrew.classTraits",
+      "homebrew.shieldTraits",
+    ];
+    for (const category of TRAIT_CATEGORIES) {
+      let current;
+      try { current = game.settings.get("pf2e", category) ?? []; }
+      catch { continue; }
+      const existing = new Set(current.map(t => t.id));
+      const toAdd = AFLP_TRAITS.filter(t => !existing.has(t.id));
+      if (toAdd.length) {
+        await game.settings.set("pf2e", category, [...current, ...toAdd]);
+      }
+    }
+  }
 
   console.log("AFLP | Ready");
 });

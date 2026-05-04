@@ -17,7 +17,20 @@
   const targets = Array.from(game.user.targets);
   if (targets.length !== 1) return ui.notifications.warn("Target exactly one token.");
 
-  const targetActor = targets[0].actor?.getWorldActor?.() ?? targets[0].actor;
+  // If _onArousalMax pre-set an authoritative target token ID, validate that
+  // game.user.targets matches it. If not (race with another scene), correct it.
+  const _intendedTargetId = window._aflpCumTargetTokenId ?? null;
+  let resolvedTargetToken = targets[0];
+  if (_intendedTargetId && resolvedTargetToken.id !== _intendedTargetId) {
+    const corrected = canvas.tokens.get(_intendedTargetId);
+    if (corrected) {
+      resolvedTargetToken = corrected;
+      console.warn(`AFLP | Cum macro: corrected target from ${targets[0].id} to ${_intendedTargetId} (multi-scene race)`);
+    }
+  }
+  window._aflpCumTargetTokenId = null; // consume
+
+  const targetActor = resolvedTargetToken.actor?.getWorldActor?.() ?? resolvedTargetToken.actor;
   await AFLP.ensureCoreFlags(targetActor);
   const hasPussy = targetActor.getFlag(FLAG, "pussy") === true;
   const targetHasCock = targetActor.getFlag(FLAG, "cock") === true;
@@ -93,13 +106,17 @@
   // Hole selection dialog (fallback / bothHaveCocks)
   // Returns { sourceHoles, targetHoles }
   // -----------------------------------------------
-  dialogResult = await new Promise(resolve => {
+  {
     // Holes available to cum INTO the target
+    const targetHasPaizuri = targetActor?.getFlag(FLAG, "myBodyIsAWeapon") === true;
     const targetHoleOptions = [
       { value: "oral",   label: "Mouth" },
       ...(hasPussy ? [{ value: "vaginal", label: "Pussy" }] : []),
       { value: "anal",   label: "Ass" },
-      { value: "facial", label: "Facial" }
+      { value: "facial", label: "Facial" },
+      ...(targetHasPaizuri ? [{ value: "paizuri", label: "Paizuri" }] : []),
+      { value: "ground", label: "Ground", special: true },
+      { value: "vial",   label: "Into a Vial", special: true },
     ];
     // Holes available to cum INTO the source (when target also has a cock)
     const sourceActor0Pussy = sourceActor0?.getFlag(FLAG, "pussy") === true;
@@ -120,12 +137,12 @@
 
     const makeHoleBtn = (h, prefix) =>
       `<label style="display:flex;align-items:center;gap:8px;
-                     background:rgba(255,255,255,0.06);
-                     border:1px solid rgba(200,160,80,0.25);
+                     background:${h.special ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.06)"};
+                     border:1px solid ${h.special ? "rgba(200,160,80,0.12)" : "rgba(200,160,80,0.25)"};
                      border-radius:4px;padding:5px 10px;
                      margin-bottom:4px;cursor:pointer;
                      font-size:12px;font-family:var(--font-primary,serif);
-                     color:#f0e8d0;">
+                     color:${h.special ? "#888" : "#f0e8d0"};">
         <input type="checkbox" name="${prefix}${h.value}" value="${h.value}"
                style="accent-color:#c8a050;width:13px;height:13px;flex-shrink:0;"/>
         ${h.label}
@@ -173,7 +190,7 @@
           ${targetPortraitImg(targetActorImg, targetActor.name)}
           <div>
             <div style="font-size:12px;font-weight:bold;color:#f0e8d0;">${sourceActor0Name}</div>
-            <div style="font-size:10px;color:#aaa;">is cumming — where?</div>
+            <div style="font-size:10px;color:#aaa;">is cumming. Choose a hole:</div>
           </div>
         </div>
         ${holeOptions.map(h => makeHoleBtn(h, "hole-")).join("")}`;
@@ -186,7 +203,7 @@
           ${targetPortraitImg(targetActorImg, targetActor.name)}
           <div>
             <div style="font-size:12px;font-weight:bold;color:#f0e8d0;">${targetActor.name}</div>
-            <div style="font-size:10px;color:#aaa;">${sourceCount} partners — assign each to a hole</div>
+            <div style="font-size:10px;color:#aaa;">${sourceCount} partners. Assign each to a hole:</div>
             <div style="font-size:10px;color:rgba(200,160,80,0.6);">${srcNamesShort}</div>
           </div>
         </div>
@@ -226,8 +243,14 @@
         <div id="aflp-assign-error" style="color:#e05050;margin-top:4px;font-size:11px;display:none;"></div>`;
     }
 
-    const d = new Dialog({
-      title: "Select Holes",
+    // ── Hole selector (DialogV2) ──────────────────────────────────────
+    // Validation is done inline in render; resolve is only called on valid input.
+    let resolveDialog;
+    const dialogPromise = new Promise(r => { resolveDialog = r; });
+
+    foundry.applications.api.DialogV2.wait({
+      window:   { title: "Select Holes" },
+      position: { width: 340 },
       content: `
         <style>
           .aflp-cum-dialog label:hover {
@@ -239,83 +262,100 @@
              class="aflp-cum-dialog">
           <form id="aflp-hole-form">${formContent}</form>
         </div>`,
-      buttons: {
-        ok: {
-          label: "Cum",
-          callback: html => {
+      buttons: [
+        { action: "cum",    label: "Cum",    default: true, callback: async () => {} },
+        { action: "cancel", label: "Cancel",               callback: async () => resolveDialog(null) },
+      ],
+      close: async () => resolveDialog(null),
+      render(ev, dlg) {
+        const el = dlg.element;
+
+        // Wire up live total tracking for multi-source
+        if (isMultiSource) {
+          const updateTotal = () => {
+            let total = 0;
+            holeOptions.forEach(h => {
+              const cb = el.querySelector(`input[name="hole-${h.value}"]`);
+              const ct = parseInt(el.querySelector(`input[name="count-${h.value}"]`)?.value || "0", 10);
+              if (cb?.checked && ct > 0) total += ct;
+            });
+            const totalEl = el.querySelector("#aflp-assign-total");
+            const errEl   = el.querySelector("#aflp-assign-error");
+            if (totalEl) totalEl.textContent = `Partners assigned: ${total} / ${sourceCount}`;
+            if (errEl)   errEl.style.display = "none";
+          };
+          el.querySelectorAll(".aflp-hole-check").forEach(cb => {
+            cb.addEventListener("change", function() {
+              const countInput = el.querySelector(`input[name="count-${this.dataset.hole}"]`);
+              if (countInput) { countInput.value = this.checked ? 1 : 0; }
+              updateTotal();
+            });
+          });
+          el.querySelectorAll("input[type=number]").forEach(inp => {
+            inp.addEventListener("input", updateTotal);
+          });
+        }
+
+        // Intercept the Cum button to run validation before resolving
+        const cumBtn = el.closest(".application.dialog")
+          ?.querySelector("button[data-action='cum']");
+        if (cumBtn) {
+          cumBtn.addEventListener("click", async (e) => {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+
             if (!isMultiSource && bothHaveCocks) {
               const srcHoles = {};
               const tgtHoles = {};
-              html[0].querySelectorAll("input[type=checkbox][name^='src-']:checked").forEach(el => {
-                srcHoles[el.value] = 1;
-              });
-              html[0].querySelectorAll("input[type=checkbox][name^='tgt-']:checked").forEach(el => {
-                tgtHoles[el.value] = 1;
-              });
+              el.querySelectorAll("input[type=checkbox][name^='src-']:checked").forEach(cb => { srcHoles[cb.value] = 1; });
+              el.querySelectorAll("input[type=checkbox][name^='tgt-']:checked").forEach(cb => { tgtHoles[cb.value] = 1; });
               if (!Object.keys(srcHoles).length && !Object.keys(tgtHoles).length) {
                 ui.notifications.warn("Select at least one hole for at least one actor.");
-                return false;
+                return;
               }
-              resolve({ sourceHoles: srcHoles, targetHoles: tgtHoles });
+              resolveDialog({ sourceHoles: srcHoles, targetHoles: tgtHoles });
+              dlg.close();
               return;
             }
+
             const result = {};
             if (!isMultiSource) {
-              html[0].querySelectorAll("input[type=checkbox]:checked").forEach(el => {
-                result[el.name.replace("hole-", "")] = 1;
+              el.querySelectorAll("input[type=checkbox]:checked").forEach(cb => {
+                result[cb.name.replace("hole-", "")] = 1;
               });
-              if (!Object.keys(result).length) { ui.notifications.warn("Select at least one hole."); return false; }
+              if (!Object.keys(result).length) {
+                ui.notifications.warn("Select at least one hole.");
+                return;
+              }
             } else {
               let total = 0;
               holeOptions.forEach(h => {
-                const cb    = html[0].querySelector(`input[name="hole-${h.value}"]`);
-                const count = parseInt(html[0].querySelector(`input[name="count-${h.value}"]`)?.value ?? "0", 10) || 0;
+                const cb    = el.querySelector(`input[name="hole-${h.value}"]`);
+                const count = parseInt(el.querySelector(`input[name="count-${h.value}"]`)?.value ?? "0", 10) || 0;
                 if (cb?.checked && count > 0) { result[h.value] = count; total += count; }
               });
+              const errEl = el.querySelector("#aflp-assign-error");
               if (!Object.keys(result).length) {
-                const msg = "AFLP | Select at least one hole with at least one partner.";
-                const err = html[0].querySelector("#aflp-assign-error");
-                if (err) { err.textContent = msg; err.style.display = "block"; }
-                ui.notifications.error(msg);
-                console.error(msg);
-                return false;
+                const msg = "Select at least one hole with at least one partner.";
+                if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
+                return;
               }
               if (total !== sourceCount) {
-                const msg = `AFLP | Total partners assigned (${total}) must equal source count (${sourceCount}).`;
-                const err = html[0].querySelector("#aflp-assign-error");
-                if (err) { err.textContent = msg; err.style.display = "block"; }
-                ui.notifications.error(msg);
-                console.error(msg);
-                return false;
+                const msg = `Partners assigned (${total}) must equal source count (${sourceCount}).`;
+                if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
+                return;
               }
             }
-            resolve({ sourceHoles: result, targetHoles: null });
-          }
-        },
-        cancel: { label: "Cancel", callback: () => resolve(null) }
-      },
-      render: html => {
-        if (!isMultiSource) return;
-        html.find(".aflp-hole-check").on("change", function() {
-          html.find(`input[name="count-${this.dataset.hole}"]`).val(this.checked ? 1 : 0).trigger("input");
-        });
-        const updateTotal = () => {
-          let total = 0;
-          holeOptions.forEach(h => {
-            const cb = html.find(`input[name="hole-${h.value}"]`)[0];
-            const ct = parseInt(html.find(`input[name="count-${h.value}"]`).val() || "0", 10);
-            if (cb?.checked && ct > 0) total += ct;
-          });
-          html.find("#aflp-assign-total").text(`Partners assigned: ${total} / ${sourceCount}`);
-          html.find("#aflp-assign-error").hide();
-        };
-        html.find("input[type=number]").on("input", updateTotal);
-        html.find(".aflp-hole-check").on("change", updateTotal);
-      }
-    }, { width: 340 });
 
-    d.render(true);
-  });
+            resolveDialog({ sourceHoles: result, targetHoles: null });
+            dlg.close();
+          }, true);
+        }
+      },
+    });
+
+    dialogResult = await dialogPromise;
+  }
   } // end else (dialog path)
 
   if (!dialogResult) return;
@@ -328,7 +368,58 @@
 
   if (!Object.keys(holeAssignments).length && !Object.keys(targetCumsIntoSource ?? {}).length) return;
 
-  const selectedHoles = Object.keys(holeAssignments);
+  const allSelectedHoles = Object.keys(holeAssignments);
+
+  // ── Ground / Vial special cases ─────────────────────────────────────────
+  // These consume cum from the source but don't affect the target at all.
+  const VIAL_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.rloXTr10gPd7Xh0J";
+  const specialHoles  = allSelectedHoles.filter(h => h === "ground" || h === "vial");
+  const selectedHoles = allSelectedHoles.filter(h => h !== "ground" && h !== "vial");
+
+  if (specialHoles.length) {
+    const src = sourceTokens[0];
+    const srcActor = src?.actor?.getWorldActor?.() ?? src?.actor;
+    if (srcActor) {
+      const cum = srcActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
+      const cumUnitsSpent = Math.ceil(cum.current / 2);
+      if (cumUnitsSpent > 0) {
+        await srcActor.setFlag(FLAG, "cum", { current: cum.current - cumUnitsSpent, max: cum.max });
+      }
+      if (specialHoles.includes("vial")) {
+        // Grant 1 Vial of Cum to the source actor
+        const vialDoc = await fromUuid(VIAL_UUID).catch(() => null);
+        if (vialDoc) {
+          // Check if they already have one and increment quantity, else create
+          const existing = srcActor.items.find(i =>
+            i.slug === "vial-of-cum" ||
+            (i.flags?.core?.sourceId ?? i.sourceId) === VIAL_UUID
+          );
+          if (existing && existing.system?.quantity !== undefined) {
+            await existing.update({ "system.quantity": (existing.system.quantity ?? 1) + 1 });
+          } else {
+            const itemData = vialDoc.toObject();
+            itemData.system.quantity = 1;
+            await srcActor.createEmbeddedDocuments("Item", [itemData]);
+          }
+          await ChatMessage.create({
+            content: `<div class="aflp-chat-card"><p><strong>${srcActor.name}</strong> fills a vial with their cum.</p></div>`,
+            speaker: { alias: "AFLP" },
+          });
+        } else {
+          ui.notifications.warn("AFLP | Vial of Cum item not found in compendium.");
+        }
+      }
+      if (specialHoles.includes("ground")) {
+        await ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p><strong>${srcActor.name}</strong> cums onto the ground.</p></div>`,
+          speaker: { alias: "AFLP" },
+        });
+      }
+    }
+  }
+
+  // If only special holes were selected, we're done
+  if (!selectedHoles.length && !Object.keys(targetCumsIntoSource ?? {}).length) return;
 
   // -----------------------------------------------
   // Build source → hole map
@@ -339,6 +430,7 @@
   } else {
     let idx = 0;
     for (const [hole, count] of Object.entries(holeAssignments)) {
+      if (hole === "ground" || hole === "vial") continue;
       for (let i = 0; i < count; i++) {
         if (idx < sourceTokens.length) { sourceHoleMap.push({ sourceToken: sourceTokens[idx], hole }); idx++; }
       }
@@ -353,6 +445,9 @@
 
   const cumFlags   = AFLP_Cumflation.getCumflation(targetActor);
   const cumOverflow = AFLP_Cumflation.getCumOverflow(targetActor);
+
+  // Snapshot pre-cum cumflation values to compute delta for history entries
+  const cumflationBefore = { anal: cumFlags.anal ?? 0, oral: cumFlags.oral ?? 0, vaginal: cumFlags.vaginal ?? 0, facial: cumFlags.facial ?? 0 };
 
   const POTION_OF_BREEDING_UUID = AFLP.items?.["potion-of-breeding-effect"]?.uuid ?? null;
   const BIRTH_CONTROL_UUID      = AFLP.items?.["birth-control"]?.uuid ?? null;
@@ -385,6 +480,7 @@
   // Without this, a source cumming into multiple holes would re-read a stale flag on the
   // second iteration and overwrite the first hole's write, losing cumGiven and act counts.
   const sourceSexualDeltas = new Map(); // token.id → { sexual (live clone), mlThisShot }
+  const sourceCumDeferred  = new Map(); // token.id → { current, max } — written in one batch after loop
 
   for (const { sourceToken, hole } of sourceHoleMap) {
     const sourceActor = sourceToken.actor?.getWorldActor?.() ?? sourceToken.actor;
@@ -396,9 +492,13 @@
     let cumUnitsSpent = sourceCumSpent.get(sourceToken.id);
     if (cumUnitsSpent === undefined) {
       const cum = sourceActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
-      cumUnitsSpent = Math.floor(cum.current / 2);
+      cumUnitsSpent = Math.ceil(cum.current / 2);
       if (cumUnitsSpent <= 0) continue;
-      await sourceActor.setFlag(FLAG, "cum", { current: cum.current - cumUnitsSpent, max: cum.max });
+      // Infinite cum: NPCs don't deplete when the setting is on
+      const isNPC = sourceActor.type === "npc";
+      if (!isNPC || !AFLP.Settings.infiniteCum) {
+        sourceCumDeferred.set(sourceToken.id, { current: cum.current - cumUnitsSpent, max: cum.max });
+      }
       sourceCumSpent.set(sourceToken.id, cumUnitsSpent);
       sourcePregnancyResult.set(sourceToken.id, null);
     }
@@ -433,8 +533,19 @@
 
     // Apply cumflation (gated by setting)
     if (AFLP.Settings.cumflationInHscene) {
-      AFLP_Cumflation.applyCumflation(targetActor, cumFlags, cumOverflow, sexualStatsDialog, [hole], cumUnitsSpent);
+      AFLP_Cumflation.applyCumflation(targetActor, cumFlags, cumOverflow, sexualStatsDialog, [hole], cumUnitsSpent, sourceActor.name);
+      // Track load in H scene stats
+      if (AFLP.HScene?.incrementSceneLoads) {
+        AFLP.HScene.incrementSceneLoads(targetActor.id, sourceActor.id, hole);
+      }
+      // Alcumist Dedication: auto-grant a typed Vial of Cum to the cumflated actor
+      if (window.AFLP_Alcumist) {
+        AFLP_Alcumist.onCumflation(targetActor, sourceActor).catch(e => console.warn("AFLP | Alcumist vial grant failed:", e));
+      }
     }
+
+    // Track scene loads stat
+    AFLP.HScene?.incrementSceneLoads?.(targetActor.id, sourceActor.id, hole);
 
     // Impregnation
     if (!pregnancyBlocked && hole === "vaginal" && hasPussy && !hasBirthControl) {
@@ -456,12 +567,15 @@
   const targetCumGivenMl = {}; // hole → ml, for source's history entry
   if (targetCumsIntoSource && Object.keys(targetCumsIntoSource).length && bothHaveCocks) {
     const tgtCum = targetActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
-    const tgtCumUnitsSpent = Math.floor(tgtCum.current / 2);
+    const tgtCumUnitsSpent = Math.ceil(tgtCum.current / 2);
 
     if (tgtCumUnitsSpent > 0) {
-      await targetActor.setFlag(FLAG, "cum", { current: tgtCum.current - tgtCumUnitsSpent, max: tgtCum.max });
+      // Defer cum write — batched into final target actor.update() below
+      const _tgtCumDeferred = { current: tgtCum.current - tgtCumUnitsSpent, max: tgtCum.max };
 
-      const tgtSexual = structuredClone(targetActor.getFlag(FLAG, "sexual") ?? {});
+      // Merge tgtSexual changes directly into sexualStatsDialog.sexual to avoid a
+      // double-write (a separate tgtSexual write would be overwritten at the end).
+      const tgtSexual = sexualStatsDialog.sexual;
       if (!tgtSexual.lifetime) tgtSexual.lifetime = {};
       if (!tgtSexual.lifetime.mlGiven) tgtSexual.lifetime.mlGiven = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
       if (!tgtSexual.lifetime.given)   tgtSexual.lifetime.given   = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
@@ -493,7 +607,11 @@
           // SexualStatsDialog needed for cumflation helper
           const srcStatsDialog = new AFLP.UI.SexualStatsDialog(sourceActor0);
           await srcStatsDialog.load();
-          AFLP_Cumflation.applyCumflation(sourceActor0, srcCumFlags, srcCumOverflow, srcStatsDialog, [hole], tgtCumUnitsSpent);
+          AFLP_Cumflation.applyCumflation(sourceActor0, srcCumFlags, srcCumOverflow, srcStatsDialog, [hole], tgtCumUnitsSpent, targetActor.name);
+          // Alcumist Dedication: sourceActor0 is being cumflated by the target
+          if (window.AFLP_Alcumist) {
+            AFLP_Alcumist.onCumflation(sourceActor0, targetActor).catch(e => console.warn("AFLP | Alcumist vial grant failed:", e));
+          }
           await AFLP_Cumflation.saveCumflation(sourceActor0, srcCumFlags, srcCumOverflow);
           await AFLP_Cumflation.applyCumflationEffects(sourceActor0);
           await sourceActor0.setFlag(FLAG, "sexual", srcStatsDialog.sexual);
@@ -518,7 +636,9 @@
       }
 
       tgtSexual.lifetime.cumGiven = (tgtSexual.lifetime.cumGiven ?? 0) + tgtCumUnitsSpent;
-      await targetActor.setFlag(FLAG, "sexual", tgtSexual);
+      // tgtSexual IS sexualStatsDialog.sexual — written in the final batched update below.
+      // Store deferred cum so the final flush can include it.
+      sexualStatsDialog._tgtCumDeferred = _tgtCumDeferred;
     }
   }
 
@@ -527,7 +647,13 @@
     const sourceToken = sourceTokens.find(t => t.id === tokenId);
     if (!sourceToken) continue;
     const sourceActor = sourceToken.actor?.getWorldActor?.() ?? sourceToken.actor;
-    await sourceActor.setFlag(FLAG, "sexual", sexual);
+    // Batch sexual stats + cum deduction into one server round-trip per source.
+    // partnerHistory is folded in below after the history loop builds it.
+    const srcUpdate = { [`flags.${FLAG}.sexual`]: sexual };
+    const srcCum = sourceCumDeferred.get(tokenId);
+    if (srcCum) srcUpdate[`flags.${FLAG}.cum`] = srcCum;
+    sourceSexualDeltas.get(tokenId)._update = srcUpdate; // stash for history merge
+    sourceSexualDeltas.get(tokenId)._actor  = sourceActor;
   }
 
   // -----------------------------------------------
@@ -595,7 +721,24 @@
     if (srcReceivedMl > 0) srcEntry.mlReceived = srcReceivedMl;
     sourcePartnerHistory.unshift(srcEntry);
     if (sourcePartnerHistory.length > 100) sourcePartnerHistory.splice(100);
-    await sourceActor.setFlag(FLAG, "partnerHistory", sourcePartnerHistory);
+
+    // Merge history into the stashed update and flush all source writes in one call
+    const srcDelta = sourceSexualDeltas.get(tokenId);
+    if (srcDelta?._update && srcDelta?._actor) {
+      srcDelta._update[`flags.${FLAG}.partnerHistory`] = sourcePartnerHistory;
+      await srcDelta._actor.update(srcDelta._update);
+      srcDelta._flushed = true;
+    } else {
+      // Fallback if this source wasn't in sexualDeltas (no cock, edge case)
+      await sourceActor.setFlag(FLAG, "partnerHistory", sourcePartnerHistory);
+    }
+  }
+
+  // Flush any source actors that had sexual/cum updates but no history entry
+  for (const [tokenId, delta] of sourceSexualDeltas.entries()) {
+    if (!delta._flushed && delta._update && delta._actor) {
+      await delta._actor.update(delta._update);
+    }
   }
 
   // If target came into source (bothHaveCocks), write that as a separate entry on target's history
@@ -616,34 +759,58 @@
 
   // Cap history at 100 entries
   if (targetPartnerHistory.length > 100) targetPartnerHistory.splice(100);
-  await targetActor.setFlag(FLAG, "partnerHistory", targetPartnerHistory);
 
   // -----------------------------------------------
-  // Save all target state
+  // Save all target state — one batched actor.update() for the whole event.
+  // Collect everything into _tgtUpdate first, then write once.
   // -----------------------------------------------
+  const _tgtUpdate = {};
+
   if (AFLP.Settings.cumflationInHscene) {
     await AFLP_Cumflation.saveCumflation(targetActor, cumFlags, cumOverflow);
     await AFLP_Cumflation.applyCumflationEffects(targetActor);
+
+    // Compute cumflation delta and backfill into the history entries we just wrote.
+    // cumFlags has been mutated in-place by applyCumflation, so it now holds post-cum values.
+    const cumflationAfter = { anal: cumFlags.anal ?? 0, oral: cumFlags.oral ?? 0, vaginal: cumFlags.vaginal ?? 0, facial: cumFlags.facial ?? 0 };
+    const cumflationDelta = {};
+    for (const hole of ["anal", "oral", "vaginal", "facial"]) {
+      const d = cumflationAfter[hole] - cumflationBefore[hole];
+      if (d !== 0) cumflationDelta[hole] = d;
+    }
+    if (Object.keys(cumflationDelta).length) {
+      const addedCount = sourceCumSpent.size + (bothHaveCocks && targetCumsIntoSource ? 1 : 0);
+      for (let i = 0; i < Math.min(addedCount, targetPartnerHistory.length); i++) {
+        targetPartnerHistory[i].cumflationDelta = cumflationDelta;
+      }
+    }
   }
-  await targetActor.setFlag(FLAG, "sexual", sexualStatsDialog.sexual);
 
-  // Check and award any newly-earned titles
-  await AFLP_Titles.checkAndAward(targetActor);
+  _tgtUpdate[`flags.${FLAG}.partnerHistory`] = targetPartnerHistory;
+  _tgtUpdate[`flags.${FLAG}.sexual`]         = sexualStatsDialog.sexual;
 
-  // ── Kink: Cum Slut — Horny 2 when cum lands on/in target ─────────────
+  // Include deferred target cum deduction if target also came (bothHaveCocks path)
+  if (sexualStatsDialog._tgtCumDeferred) {
+    _tgtUpdate[`flags.${FLAG}.cum`] = sexualStatsDialog._tgtCumDeferred;
+  }
+
+  // Cum Slut: +2 Horny when cum lands on/in target — include in same update
   if (AFLP.Settings.automation && AFLP.actorHasKink(targetActor, "cum-slut")) {
     const liveTarget = game.actors?.get(targetActor.id) ?? targetActor;
     const horny = structuredClone(liveTarget.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
-    const current = (horny.temp ?? 0) + (horny.permanent ?? 0);
-    horny.temp = Math.min(6 - (horny.permanent ?? 0), (horny.temp ?? 0) + 2);
-    if (horny.temp > (liveTarget.getFlag(FLAG, "horny")?.temp ?? 0)) {
-      await targetActor.setFlag(FLAG, "horny", horny);
+    const newTemp = Math.min(6 - (horny.permanent ?? 0), (horny.temp ?? 0) + 2);
+    if (newTemp > (horny.temp ?? 0)) {
+      horny.temp = newTemp;
+      _tgtUpdate[`flags.${FLAG}.horny`] = horny;
       await ChatMessage.create({
-        content: `<div class="aflp-chat-card"><p><strong>${targetActor.name}</strong>'s Cum Slut kink triggers — Horny +2.</p></div>`,
+        content: `<div class="aflp-chat-card"><p><strong>${targetActor.name}</strong>'s Cum Slut kink triggers: Horny +2.</p></div>`,
         speaker: { alias: "AFLP" },
       });
     }
   }
+
+  // Single write for all target flag changes
+  await targetActor.update(_tgtUpdate);
 
   // -----------------------------------------------
   // Prose output
@@ -669,5 +836,25 @@
     })
   ];
 
-  ChatMessage.create({ content: sections.join("<br><br>") });
+  // Post hole narrative to scene log; fall back to chat only if no scene is active
+  const proseText = sections.join(" ").replace(/<[^>]+>/g, "").trim();
+  const proseLines = sections.map(s => s.replace(/<[^>]+>/g, "").trim()).filter(Boolean);
+
+  if (game.user.isGM && window.AFLP?.HScene?._scenes) {
+    const sceneEntry = [...AFLP.HScene._scenes.entries()]
+      .find(([, sc]) => sc.targetActorId === targetActor.id);
+    if (sceneEntry) {
+      // Post each line separately so they appear as distinct log entries in order
+      for (const line of proseLines) {
+        AFLP.HScene.addProse(sceneEntry[0], line, "flavor");
+      }
+    } else {
+      // No active scene - fall back to chat
+      ChatMessage.create({ content: sections.join("<br><br>") });
+    }
+  } else if (!game.user.isGM) {
+    // Non-GM clients: skip (GM handles the prose)
+  } else {
+    ChatMessage.create({ content: sections.join("<br><br>") });
+  }
 })();

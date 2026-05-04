@@ -33,7 +33,7 @@ window.AFLP_PROSE = {
 
   gangbangs: {
     "anal-oral": [
-      "Their ass is forcefully filled while their mouth is viciously violated—the brutal duality of the assault driving them into disoriented, degrading submission as they're rocked back and forth by the meaty shafts. A thick double load of cum fills them from both ends.",
+      "Their ass is forcefully filled while their mouth is viciously violated; the brutal duality of the assault driving them into disoriented, degrading submission as they're rocked back and forth by the meaty shafts. A thick double load of cum fills them from both ends.",
       "With every rough thrust that fills their ass and mouth, they are battered into a relentless rhythm that erases all resistance, leaving them degraded and numb. As two powerful loads of hot cum simultaneously force their way inside, their eyes roll back.",
       "Their ass is stretched wide as their mouth-pussy is used like a fleshy onahole, plunging them into raw, degrading submission with cum filling every crevice."
     ],

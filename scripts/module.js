@@ -38,6 +38,10 @@ Hooks.once("init", async function () {
       label: "Sexual",
       description: "This item has the sexual trait, marking it as inherently erotic in nature. Items with this trait interact with AFLP arousal, kink, and scene mechanics."
     },
+    alcumical: {
+      label: "Alcumical",
+      description: "This item bears the alcumical trait, marking it as a compound crafted by an Alcumist using cum as an alchemical ingredient. Only a character with the Alcumist Dedication feat and the appropriate Cumcraft feat can create these items."
+    },
   };
 
   // PF2e stores trait labels in category-specific dicts and descriptions in a shared dict.
