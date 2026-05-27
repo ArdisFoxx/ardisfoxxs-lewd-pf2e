@@ -23,6 +23,7 @@ const cockSubtypes = [
   { key: "cock-electrifying", label: "Electrifying" },
   { key: "cock-fertile",      label: "Fertile" },
   { key: "cock-flared",       label: "Flared" },
+  { key: "cock-girthy",       label: "Girthy" },
   { key: "cock-hemipenis",    label: "Hemipenis" },
   { key: "cock-knot",         label: "Knotted" },
   { key: "cock-ovidepositor", label: "Ovidepositor" },

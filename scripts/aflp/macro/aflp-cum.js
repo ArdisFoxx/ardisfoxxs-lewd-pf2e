@@ -794,11 +794,14 @@
     _tgtUpdate[`flags.${FLAG}.cum`] = sexualStatsDialog._tgtCumDeferred;
   }
 
-  // Cum Slut: +2 Horny when cum lands on/in target — include in same update
+  // Cum Slut: +2 Horny when cum lands on/in target (all levels).
+  // L7: Dazzled/Blinded from facials are suppressed in _applyFacialVision (cumflation.js).
+  // L7: if Exposed 2 and Facial Cumflation >= 6, Escape attempts auto-succeed (reminder).
   if (AFLP.Settings.automation && AFLP.actorHasKink(targetActor, "cum-slut")) {
+    const csLevel    = AFLP.getKinkLevel(targetActor, "cum-slut");
     const liveTarget = game.actors?.get(targetActor.id) ?? targetActor;
-    const horny = structuredClone(liveTarget.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
-    const newTemp = Math.min(6 - (horny.permanent ?? 0), (horny.temp ?? 0) + 2);
+    const horny      = structuredClone(liveTarget.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
+    const newTemp    = Math.min(6 - (horny.permanent ?? 0), (horny.temp ?? 0) + 2);
     if (newTemp > (horny.temp ?? 0)) {
       horny.temp = newTemp;
       _tgtUpdate[`flags.${FLAG}.horny`] = horny;
@@ -806,6 +809,24 @@
         content: `<div class="aflp-chat-card"><p><strong>${targetActor.name}</strong>'s Cum Slut kink triggers: Horny +2.</p></div>`,
         speaker: { alias: "AFLP" },
       });
+    }
+    if (csLevel >= 7) {
+      const EXPOSED_UUID   = AFLP.conditions?.["exposed"]?.uuid ?? "";
+      const EXPOSED_N_UUID = AFLP.conditions?.["exposed-nude"]?.uuid ?? "";
+      const facialCF    = (liveTarget.getFlag(FLAG, "cumflation") ?? {}).facial ?? 0;
+      const exposedItem = liveTarget.items?.find(i =>
+        i.slug === "exposed" || (i.flags?.core?.sourceId ?? i.sourceId) === EXPOSED_UUID
+      );
+      const exposedNude = liveTarget.items?.some(i =>
+        i.slug === "exposed-nude" || (i.flags?.core?.sourceId ?? i.sourceId) === EXPOSED_N_UUID
+      );
+      const exposedLevel = exposedNude ? 2 : (exposedItem?.system?.badge?.value ?? 0);
+      if (exposedLevel >= 2 && facialCF >= 6) {
+        await ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p><strong>${targetActor.name}</strong>'s Cum Slut kink (L7): Exposed 2 and Facial Cumflation ${facialCF} — their body is so slick that <strong>Escape attempts automatically succeed</strong> until they clean up.</p></div>`,
+          speaker: { alias: "AFLP" },
+        });
+      }
     }
   }
 

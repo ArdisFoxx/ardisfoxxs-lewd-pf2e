@@ -443,9 +443,10 @@ window.AFLP_Titles = {
 
   // ── Check and award titles to an actor ────────────────────────────────────
   async checkAndAward(actor) {
-    const sexual = actor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {};
+    const sexual  = structuredClone(actor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {});
     const history = actor.getFlag(AFLP.FLAG_SCOPE, "partnerHistory") ?? [];
-    const earned  = new Set(actor.getFlag(AFLP.FLAG_SCOPE, "titles") ?? []);
+    // Read from sexual.titles to match the sheet tab
+    const earned  = new Set(sexual.titles ?? []);
     const newTitles = [];
 
     for (const title of this.TITLES) {
@@ -468,7 +469,8 @@ window.AFLP_Titles = {
     }
 
     if (newTitles.length) {
-      await actor.setFlag(AFLP.FLAG_SCOPE, "titles", [...earned]);
+      sexual.titles = [...earned];
+      await actor.setFlag(AFLP.FLAG_SCOPE, "sexual", sexual);
     }
 
     return newTitles;

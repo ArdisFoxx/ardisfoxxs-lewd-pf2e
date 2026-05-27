@@ -99,7 +99,9 @@ Object.assign(window.AFLP, {
     "bimbo":             { name: "Bimbo",             uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.mTSsjimziKIcEbLO" },
     "gangslut":          { name: "Gangslut",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fNSwvzZ3ddJmu7yG" },
     "voyeurism":         { name: "Voyeurism",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.NKiO32mIdFJZpwnb" },
-    "ouroboros":         { name: "Ouroboros",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QvwGGnxQotq1giao" }
+    "ouroboros":         { name: "Ouroboros",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QvwGGnxQotq1giao" },
+    "stretch-king":      { name: "Stretch King",      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.2Kth26AcSdPDxkKa" },
+    "hypno-slave":       { name: "Hypno Slave",       uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.naEmpTaaGI3qYAeC" },
   },
 
   // ===============================
@@ -300,6 +302,20 @@ Object.assign(window.AFLP, {
       holeId:    null,
     },
     {
+      id: "riding-vaginal",
+      label:     (p) => `Riding (pussy)`,
+      logPhrase: (a, t, p) => `${a} rides ${t}`,
+      penile:    false,
+      holeId:    "vaginal",
+    },
+    {
+      id: "riding-anal",
+      label:     (p) => `Riding (ass)`,
+      logPhrase: (a, t, p) => `${a} rides ${t}`,
+      penile:    false,
+      holeId:    "anal",
+    },
+    {
       id: "fingering",
       label:     (p) => `Fingering ${p.object}`,
       logPhrase: (a, t, p) => `${a} fingers ${t}`,
@@ -337,9 +353,10 @@ Object.assign(window.AFLP, {
     "cock-electrifying": { name: "Electrifying",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.jkRFNqFtRcKkAZwC", parent: "cock" },
     "cock-fertile":      { name: "Fertile",       uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tUqN9UtQhawLd5Nq", parent: "cock" },
     "cock-flared":       { name: "Flared",        uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.qF8wy9Nz11DyBgRH", parent: "cock" },
+    "cock-girthy":       { name: "Girthy",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.EOo3rbWwAybJFmlv", parent: "cock" },
     "cock-hemipenis":    { name: "Hemipenis",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JTWCaeV5zCKpT7uk", parent: "cock" },
     "cock-knot":         { name: "Knot",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.A8cubySA9aPKmNCF", parent: "cock" },
-    "cock-ovidepositor": { name: "Ovidepositor",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.0sZoe3XFXKv57RJ6", parent: "cock" },
+    "cock-ovidepositor": { name: "Ovidepositor",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Hp4H1QcJiiMM9Gp", parent: "cock" },
     "cock-pacifying":    { name: "Pacifying",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tuc39pbCilMKvYx8", parent: "cock" },
     "cock-paralyzing":   { name: "Paralyzing",    uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.vy3wCGu8tRKwfAP5", parent: "cock" },
     "cock-slime":        { name: "Slime",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.TAfvb2RvjbwcT7Ci", parent: "cock" }

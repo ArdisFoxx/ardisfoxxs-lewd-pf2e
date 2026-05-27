@@ -220,6 +220,30 @@
   await AFLP.ensureCoreFlags(sourceActor);
   await AFLP.ensureCoreFlags(targetActor);
 
+  // ── Guard: source is Submitting → hard stop ───────────────────────────
+  const sourceIsSubmitting = sourceTokenActor.items?.some(c =>
+    c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
+  );
+  if (sourceIsSubmitting) {
+    ui.notifications.error(
+      "You are Submitting. You must free yourself of that condition before you can use Struggle Snuggle.",
+      { permanent: false }
+    );
+    return;
+  }
+
+  // ── Info: source already Dominating → warn but continue ──────────────
+  const sourceIsDominating = sourceTokenActor.items?.some(c =>
+    c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
+  );
+  if (sourceIsDominating) {
+    ui.notifications.info(
+      "Check with your GM if you can Dominate more than one creature at once.",
+      { permanent: false }
+    );
+    // Do not return — allow the action to proceed
+  }
+
   const targetHasMonstrousProwess = AFLP.actorHasMonstrousProwess?.(targetActor) ?? false;
   const currentExposedItem = findExposedAny(targetTokenActor);
   const currentExposed     = currentExposedItem?.system?.badge?.value ?? 0;

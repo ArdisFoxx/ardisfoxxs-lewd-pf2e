@@ -22,9 +22,10 @@ const GENITAL_TYPE_ITEMS = {
   "cock-electrifying": "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.jkRFNqFtRcKkAZwC",
   "cock-fertile":      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tUqN9UtQhawLd5Nq",
   "cock-flared":       "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.qF8wy9Nz11DyBgRH",
+  "cock-girthy":       "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.EOo3rbWwAybJFmlv",
   "cock-hemipenis":    "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JTWCaeV5zCKpT7uk",
   "cock-knot":         "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.A8cubySA9aPKmNCF",
-  "cock-ovidepositor": "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.0sZoe3XFXKv57RJ6",
+  "cock-ovidepositor": "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Hp4H1QcJiiMM9Gp",
   "cock-pacifying":    "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tuc39pbCilMKvYx8",
   "cock-paralyzing":   "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.vy3wCGu8tRKwfAP5",
   "cock-slime":        "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.TAfvb2RvjbwcT7Ci"

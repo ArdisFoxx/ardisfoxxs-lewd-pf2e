@@ -24,12 +24,14 @@ AFLP.HScene = (() => {
   // ── Cumflation status word (for HUD display and sheet) ─────────────────────
   // Based on total tier sum across all holes (max 32).
   // Labels are configurable via Module Settings → Edit Cumflation Labels.
+  // CF_LABEL_DEFAULTS thresholds are per-hole tiers (highest single primary hole, 1-8 scale).
+  // Tier 5 means "facial 8 also at 8" for the top tier (checked separately in _cumflationWord).
   const CF_LABEL_DEFAULTS = [
-    { min: 1,  max: 7,  word: "LEAKING",     color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
-    { min: 8,  max: 15, word: "STRETCHED",   color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
-    { min: 16, max: 23, word: "CUMBUCKET",   color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
-    { min: 24, max: 31, word: "CUMPREGNANT", color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
-    { min: 32, max: 32, word: "CUMTOILET", color: "rgba(255,40,60,1)",     glow: "rgba(255,40,60,0.7)" },
+    { minTier: 2, word: "LEAKING",     color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
+    { minTier: 4, word: "STRETCHED",   color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
+    { minTier: 6, word: "CUMBUCKET",   color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
+    { minTier: 8, word: "CUMPREGNANT", color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
+    { minTier: 9, word: "CUMTOILET",   color: "rgba(255,40,60,1)",     glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
   ];
 
   function _getCFLabels() {
@@ -37,26 +39,35 @@ AFLP.HScene = (() => {
       const raw = game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS) ?? "";
       if (!raw) return CF_LABEL_DEFAULTS;
       const custom = JSON.parse(raw);
-      // Merge: custom labels replace defaults by index
+      // Merge: custom labels replace word only (minTier and colors stay fixed)
       return CF_LABEL_DEFAULTS.map((def, i) => ({
         ...def,
-        word: custom[i]?.word || def.word,
+        word: custom[i]?.w || custom[i]?.word || def.word,
       }));
     } catch { return CF_LABEL_DEFAULTS; }
   }
 
-  function _cumflationWord(totalSum) {
-    if (totalSum <= 0) return null;
+  // _cumflationWord: uses the Overall tier (average of 3 primary holes, floor, capped at 8)
+  // matching the "Total Cumflation" column in the CF Labels module settings editor.
+  // Tier 9 (virtual) = Overall tier 8 AND facial tier 8.
+  function _cumflationWord(cf) {
+    if (!cf) return null;
+    const anal    = cf.anal    ?? 0;
+    const oral    = cf.oral    ?? 0;
+    const vaginal = cf.vaginal ?? 0;
+    const facial  = cf.facial  ?? 0;
+    const overallTier = Math.min(8, Math.floor((anal + oral + vaginal) / 3));
+    if (overallTier <= 0) return null;
+    // Virtual tier 9: overall at 8 AND facial at 8
+    const effectiveTier = (overallTier >= 8 && facial >= 8) ? 9 : overallTier;
     const labels = _getCFLabels();
-    const match = labels.find(l => totalSum >= l.min && totalSum <= l.max)
-                ?? labels[labels.length - 1];
-    return match;
+    const sorted = [...labels].sort((a, b) => b.minTier - a.minTier);
+    return sorted.find(l => effectiveTier >= l.minTier) ?? null;
   }
 
   AFLP.cumflationWord = function(actor) {
     const c = actor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {};
-    const total = (c.anal ?? 0) + (c.oral ?? 0) + (c.vaginal ?? 0) + (c.facial ?? 0);
-    return _cumflationWord(total);
+    return _cumflationWord(c);
   };
 
   // Active scenes keyed by target token ID
@@ -969,6 +980,8 @@ AFLP.HScene = (() => {
       "anal":            "Drilling Ass",
       "oral-receive":    "Fucking Face",
       "facial":          "Prepping Facial",
+      "riding-vaginal":  "Riding (pussy)",
+      "riding-anal":     "Riding (ass)",
       "oral-give":       "Going Down",
       "groping":         "Groping",
       "other":           "Teasing",
@@ -1054,6 +1067,8 @@ AFLP.HScene = (() => {
       "anal":            "Fucked in ass",
       "oral-receive":    "Being face fucked",
       "facial":          "Prepping Facial",
+      "riding-vaginal":  "Being ridden (pussy)",
+      "riding-anal":     "Being ridden (ass)",
       "oral-give":       "Riding face",
       "groping":         "Being groped",
       "licking":         "Being licked",
@@ -1154,7 +1169,8 @@ AFLP.HScene = (() => {
     const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
     const SHORT_LABELS = {
       "vaginal":"Pounding Pussy","anal":"Drilling Ass","oral-receive":"Fucking Face",
-      "facial":"Prepping Facial","oral-give":"Going Down","groping":"Groping","licking":"Licking",
+      "facial":"Prepping Facial","oral-give":"Going Down","riding-vaginal":"Riding (pussy)","riding-anal":"Riding (ass)",
+      "groping":"Groping","licking":"Licking",
       "fingering-pussy":"Fingering Pussy","fingering-anal":"Fingering Ass",
       "toy-pussy":"Toy — Pussy","toy-anal":"Toy — Ass","toy-ass":"Toy — Ass",
     };
@@ -1244,7 +1260,8 @@ AFLP.HScene = (() => {
     const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
     const SHORT_LABELS = {
       "vaginal":"Pounding Pussy","anal":"Drilling Ass","oral-receive":"Fucking Face",
-      "facial":"Prepping Facial","oral-give":"Going Down","groping":"Groping","licking":"Licking",
+      "facial":"Prepping Facial","oral-give":"Going Down","riding-vaginal":"Riding (pussy)","riding-anal":"Riding (ass)",
+      "groping":"Groping","licking":"Licking",
       "fingering-pussy":"Fingering Pussy","fingering-anal":"Fingering Ass",
       "toy-pussy":"Toy — Pussy","toy-anal":"Toy — Ass","toy-ass":"Toy — Ass",
     };
@@ -1370,8 +1387,7 @@ AFLP.HScene = (() => {
     // Cumflation status word — show below airlocked if target has any cumflation
     if (tgtActor) {
       const cf = tgtActor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {};
-      const cfSum = (cf.anal ?? 0) + (cf.oral ?? 0) + (cf.vaginal ?? 0) + (cf.facial ?? 0);
-      const cfWord = _cumflationWord(cfSum);
+      const cfWord = _cumflationWord(cf);
       const existingStatus = tgtDiv.querySelector(".aflp-po-cumflation-status");
       if (cfWord) {
         if (existingStatus) {
@@ -1416,6 +1432,8 @@ AFLP.HScene = (() => {
         "anal":            "Drilling their ass",
         "oral-receive":    "Fucking their face",
         "facial":          "Prepping a facial",
+        "riding-vaginal":  "Riding them (pussy)",
+        "riding-anal":     "Riding them (ass)",
         "oral-give":       "Riding their face",
         "fingering-pussy": "Fingering pussy",
         "fingering-anal":  "Fingering ass",
@@ -3013,15 +3031,25 @@ AFLP.HScene = (() => {
             </div>
           </div>`;
 
-        const penetrationBtns = (hasCock || isSelfScene) ? [
-          (tgtHasPussy || isSelfScene) ? makeBtn("vaginal",      `Pounding ${tgtPronouns.possessive} pussy`) : "",
-          makeBtn("anal",         `Anal drilling`),
-          makeBtn("oral-receive", `Face fuck`),
-          makeBtn("facial",       `Facial tribute`),
-          (!hasCock && isSelfScene && tgtHasCock) ? makeBtn("oral-give", "Going down") : "",
+        // Penetration: show if attacker has cock OR pussy (riding), or self-scene
+        const hasPenetration = hasCock || atkHasPussy || isSelfScene;
+        const penetrationBtns = hasPenetration ? [
+          // Attacker has cock — can pound target's holes
+          ...(hasCock || isSelfScene ? [
+            (tgtHasPussy || isSelfScene) ? makeBtn("vaginal",      `Pounding ${tgtPronouns.possessive} pussy`) : "",
+            makeBtn("anal",         `Anal drilling`),
+            makeBtn("oral-receive", `Face fuck`),
+            makeBtn("facial",       `Facial tribute`),
+          ] : []),
+          // Attacker has pussy — can ride target's cock
+          ...(atkHasPussy && (tgtHasCock || isSelfScene) ? [
+            makeBtn("riding-vaginal", `Riding ${tgtName} (pussy)`),
+            makeBtn("riding-anal",    `Riding ${tgtName} (ass)`),
+          ] : []),
+          (!hasCock && !atkHasPussy && isSelfScene && tgtHasCock) ? makeBtn("oral-give", "Going down") : "",
         ].filter(Boolean).join("") : null;
 
-        const oralGiveExtra = (!hasCock && !isSelfScene && tgtHasCock) ?
+        const oralGiveExtra = (!hasCock && !atkHasPussy && !isSelfScene && tgtHasCock) ?
           makeBtn("oral-give", "Going down") : "";
 
         // Foreplay: groping + licking + fingering merged
@@ -3166,9 +3194,9 @@ AFLP.HScene = (() => {
         await AFLP.ensureCoreFlags(atkActor);
         const targetActor = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId, tokenDoc: scene.targetTokenDoc });
         await AFLP.ensureCoreFlags(targetActor);
-        await AFLP_Arousal.increment(atkActor,    2, "Sexual Advance (H Scene)", atkTokenId);
-        await AFLP_Arousal.increment(targetActor, 2, "Sexual Advance (H Scene)", scene.targetId);
-        ui.notifications.info("AFLP | Sexual Advance fired (no SA macro found; arousal applied directly).");
+        const atkGain    = await AFLP_Arousal.increment(atkActor,    2, "Sexual Advance (H Scene)", atkTokenId);
+        const targetGain = await AFLP_Arousal.increment(targetActor, 2, "Sexual Advance (H Scene)", scene.targetId);
+        await AFLP_Arousal.postSAChat(atkActor, targetActor, atkGain, targetGain);
       }
     },
 

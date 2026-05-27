@@ -79,7 +79,25 @@ for (const { actor } of tokens) {
     await actor.setFlag(FLAG, "horny", horny);
   }
 
-  // Cum refill — use schema values via recalculateCum
+  // Cum refill — use schema values via recalculateCum.
+  // Pineapple Diet feat: coomer floor = 1 + actor level.
+  // If the actor's coomer level has dropped below this floor, restore it first
+  // so recalculateCum uses the correct value.
+  const PD_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QN1LxhSPqdWxgVk4";
+  const hasPineappleDiet = actor.items?.some(i =>
+    i.slug === "pineapple-diet" ||
+    (i.flags?.core?.sourceId ?? i.sourceId) === PD_UUID
+  );
+  if (hasPineappleDiet) {
+    const actorLevel   = actor.system?.details?.level?.value ?? actor.level ?? 1;
+    const pdFloor      = 1 + actorLevel;
+    const coomer       = structuredClone(actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults);
+    if ((coomer.level ?? 0) < pdFloor) {
+      coomer.level = pdFloor;
+      await actor.setFlag(FLAG, "coomer", coomer);
+    }
+  }
+
   await AFLP.recalculateCum(actor);
 
   // -------------------------------
@@ -112,6 +130,13 @@ for (const { actor } of tokens) {
     if (!stillActive) await AFLP.Kinks.removeBroodSowEndurance(actor);
   }
 
+  // Hypno Slave kink: reset once-per-day flags.
+  if (AFLP.actorHasKink?.(actor, "hypno-slave")) {
+    await actor.setFlag(FLAG, "_hypnoSlaveL3Used",            false);
+    await actor.setFlag(FLAG, "_hypnoTriggerConsumed",        false);
+    await actor.setFlag(FLAG, "_hypnoConditionerUnderAttack", false);
+  }
+
   // Alcumist Dedication: calculate and display vial count for today
   // Vials = floor(cum.current / 2), minimum 1
   const ALCUMIST_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.xdklOfDJHXLwZf31";
@@ -134,6 +159,13 @@ for (const { actor } of tokens) {
     const type = b.deliveryType === "egg" ? "eggs" : "offspring";
     const count = b.offspring ?? 1;
     message += `<br>${actor.name} gave birth to ${count} ${type} fathered by <strong>${sourceName}</strong>!`;
+  }
+
+  if (hasPineappleDiet) {
+    const actorLevel = actor.system?.details?.level?.value ?? actor.level ?? 1;
+    const pdFloor    = 1 + actorLevel;
+    const coomerNow  = actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults;
+    message += `<br>Pineapple Diet: Coomer level set to <strong>${coomerNow.level}</strong> (floor: ${pdFloor}).`;
   }
 
   if (hasAlcumist) {

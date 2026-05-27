@@ -167,6 +167,9 @@ window.AFLP_Cumflation = {
 };
 
 async function _applyFacialVision(actor, facialTier) {
+    // Cum Slut L7: immune to Dazzled and Blinded caused by facials
+    if (AFLP.actorHasKink?.(actor, "cum-slut") && (AFLP.getKinkLevel?.(actor, "cum-slut") ?? 0) >= 7) return;
+
     const DAZZLED_UUID = "Compendium.pf2e.conditionitems.Item.TkIyaNPgTZFBCCuh";
     const BLINDED_UUID = "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2";
 

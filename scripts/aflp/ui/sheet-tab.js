@@ -458,6 +458,7 @@ AFLP.UI.SheetTab = {
         <div class="aflp-cumflation-grid">
           ${await AFLP.UI.SheetTab._renderCumflationRows(cumflation, totalTier)}
         </div>
+        ${totalTier > 0 ? `<p class="aflp-cf-status-word" style="font-size:11px;color:#c9a96e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin:2px 0 0 2px;">${AFLP.cumflationWord(actor)?.word ?? ""}</p>` : ""}
       </div>` : ""}
 
       <!-- Pregnancy -->
@@ -1012,9 +1013,10 @@ AFLP.UI.SheetTab = {
     let overallLink = "";
     if (totalTier > 0) {
       const uuid = AFLP.items.cumflationTotal?.[totalTier - 1];
-      overallLink = uuid
+      const rawLink = uuid
         ? await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${uuid}]{Tier ${totalTier}}`)
         : `Tier ${totalTier}`;
+      overallLink = typeof rawLink === "string" ? rawLink : (rawLink?.outerHTML ?? `Tier ${totalTier}`);
     }
     rows.push(`
       <div class="aflp-cum-row aflp-cum-row-overall">

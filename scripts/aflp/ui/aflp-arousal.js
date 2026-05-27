@@ -53,6 +53,27 @@ window.AFLP_Arousal = {
             if (domCount > 1) submittingBonus += (domCount - 1);
           }
         }
+        // Cock (Girthy) or Cock (Flared): +1 additional Submitting arousal.
+        // Stacks on top of the base Submitting +1 bonus.
+        // Scans canvas for any Dominating token with either cock type.
+        const domUUID = AFLP.conditions?.["dominating"]?.uuid ?? "";
+        const FLAG_S  = AFLP.FLAG_SCOPE;
+        const girthyOrFlaredDom = canvas?.tokens?.placeables?.find(t => {
+          if (!t.actor || t.actor.id === (liveActorForBonus.id ?? actor.id)) return false;
+          const isDom = t.actor.items?.some(i =>
+            i.slug === "dominating" ||
+            (i.flags?.core?.sourceId ?? i.sourceId) === domUUID
+          );
+          if (!isDom) return false;
+          const gt = t.actor.getFlag(FLAG_S, "genitalTypes") ?? {};
+          return gt["cock-girthy"] === true || gt["cock-flared"] === true;
+        });
+        if (girthyOrFlaredDom) {
+          submittingBonus += 1;
+          const cockTypeName = (girthyOrFlaredDom.actor.getFlag(FLAG_S, "genitalTypes") ?? {})["cock-girthy"]
+            ? "Girthy" : "Flared";
+          console.log(`AFLP | ${actor.name} Submitting to ${cockTypeName} cock — +1 bonus arousal`);
+        }
         total += submittingBonus;
         console.log(`AFLP | ${actor.name} is Submitting — +${submittingBonus} bonus arousal (total +${total} from ${source})`);
       }
@@ -128,6 +149,20 @@ window.AFLP_Arousal = {
     const sameSimple = noBonuses(sourceGain) && noBonuses(targetGain)
       && (sourceGain?.applied ?? 2) === (targetGain?.applied ?? 2);
 
+    // Girthy / Flared note: shown when source has either cock type and target is Submitting
+    const FLAG = AFLP.FLAG_SCOPE;
+    const sourceGT = sourceActor.getFlag(FLAG, "genitalTypes") ?? {};
+    const targetIsSubmitting = targetActor.items?.some(i =>
+      i.slug === "submitting" ||
+      (i.flags?.core?.sourceId ?? i.sourceId) === (AFLP.conditions?.["submitting"]?.uuid ?? "")
+    );
+    const activeCockType = (sourceGT["cock-girthy"] && targetIsSubmitting) ? "Girthy"
+      : (sourceGT["cock-flared"] && targetIsSubmitting) ? "Flared"
+      : null;
+    const girthyNote = activeCockType
+      ? `<p style="font-size:11px;color:#806040;"><em>Cock (${activeCockType}): +1 bonus Arousal stacked with Submitting bonus.</em></p>`
+      : "";
+
     const content = `<div class="aflp-chat-card">
       <p><strong>${sourceActor.name}</strong> uses <strong>Sexual Advance</strong> on <strong>${targetActor.name}</strong>!</p>
       ${sameSimple
@@ -137,6 +172,7 @@ window.AFLP_Arousal = {
             <li>${targetActor.name} gains ${gainLine(targetGain)}</li>
           </ul>`
       }
+      ${girthyNote}
     </div>`;
 
     await ChatMessage.create({
@@ -148,8 +184,23 @@ window.AFLP_Arousal = {
   // -----------------------------------------------
   // Decrement arousal
   // -----------------------------------------------
-  async decrement(actor, amount, source = "") {
-    if (!actor) return;
+  // -----------------------------------------------
+  // Shared helper: format an arousal gain breakdown string for chat messages.
+  // g = return value from increment() { applied, base, submittingBonus, hornyBonus }
+  // Returns e.g. "+4 Arousal (2 base, +2 Submitting, +1 Horny 1)"
+  // If no bonuses, returns "+N Arousal".
+  // -----------------------------------------------
+  gainBreakdownText(g, baseFallback = 2) {
+    if (!g) return `+${baseFallback} Arousal`;
+    const { applied, base, submittingBonus, hornyBonus } = g;
+    if (!submittingBonus && !hornyBonus) return `+${applied} Arousal`;
+    const parts = [`${base ?? baseFallback} base`];
+    if (submittingBonus > 0) parts.push(`+${submittingBonus} Submitting`);
+    if (hornyBonus      > 0) parts.push(`+${hornyBonus} Horny`);
+    return `+${applied} Arousal (${parts.join(", ")})`;
+  },
+
+  async decrement(actor, amount, source = "") {    if (!actor) return;
     const FLAG = AFLP.FLAG_SCOPE;
 
     await AFLP.ensureCoreFlags(actor);
@@ -530,6 +581,11 @@ window.AFLP_Arousal = {
       await AFLP.Kinks.onCumBroodSow(actor, tokenId);
       // Voyeurism L5: observers must save vs 2 Arousal
       await AFLP.Kinks.onCumVoyeurism(actor, tokenId);
+      // Stretch King: L3/L7 Coomer reminder on cumming inside smaller target
+      await AFLP.Kinks.onCumStretchKing?.(actor, tokenId);
+      // Hypno L3: suppress Afterglow and gain 1 Arousal while Fascinated (once/day)
+      await AFLP.Kinks.onCumHypnoSlave?.(actor, tokenId);
+      // Hypno L7: AoE Will-save Fascinated pulse while Fascinated + Submitting
     }
 
     // ── Sentient item reactions to cum ───────────────────────────────────

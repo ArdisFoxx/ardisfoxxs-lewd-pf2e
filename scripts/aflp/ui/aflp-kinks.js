@@ -192,6 +192,7 @@ AFLP.Kinks = {
       const isMindBreak = item.slug === "mind-break" || (item.flags?.core?.sourceId ?? item.sourceId) === AFLP.conditions?.["mind-break"]?.uuid;
       if (isMindBreak) AFLP.Kinks.onMindBreakEndPurity(item.actor);
       if (isMindBreak) AFLP.Kinks.onMindBreakEndCreatureFetish(item);  // pass full item — badge value read here
+      if (isMindBreak) AFLP.Kinks.onMindBreakEndCumSlut(item);         // L7: long rest reminder
     });
 
     // Party Animal: +1 Horny (max 3) when a drug affliction stage advances
@@ -666,13 +667,18 @@ AFLP.Kinks = {
 
     // ── If skip-dialog is on, roll immediately ──
     if (AFLP.Settings.edgeSkipDialog) {
-      return await AFLP.Kinks._rollEdge(actor, liveActor, tokenId, actorName, actorLevel);
+      const skP = AFLP.Kinks.getStretchKingEdgePenalty?.(actor, tokenId) ?? null;
+      return await AFLP.Kinks._rollEdge(actor, liveActor, tokenId, actorName, actorLevel, skP?.dcModifier ?? 0);
     }
 
     // ── Confirmation dialog ──
-    const dc = AFLP.Kinks._normalDC(actorLevel);
+    const skPenalty = AFLP.Kinks.getStretchKingEdgePenalty?.(actor, tokenId) ?? null;
+    const dc = AFLP.Kinks._normalDC(actorLevel) + (skPenalty?.dcModifier ?? 0);
     const emNote = edgeMasterLevel >= 2
       ? `<p style="font-size:11px;color:#8060a0;"><strong>Edge Master:</strong> Success grants +${edgeMasterLevel >= 7 ? 4 : 2} to weapon and unarmed damage until end of next turn.</p>`
+      : "";
+    const skNote = skPenalty
+      ? `<p style="font-size:11px;color:#a06040;"><strong>Stretch King:</strong> ${skPenalty.label}.</p>`
       : "";
 
     const result = await foundry.applications.api.DialogV2.wait({
@@ -683,7 +689,7 @@ AFLP.Kinks = {
         <p style="font-size:11px;color:#666;margin-top:6px;">
           <em>Edge uses your reaction. Success: Cum does not occur; gain Denied 1.<br>
           Failure: Cum proceeds normally.</em>
-        </p>${emNote}
+        </p>${emNote}${skNote}
       </div>`,
       buttons: [
         { action: "roll", label: "Roll Edge",       icon: "fa-solid fa-dice-d20", default: true, callback: async () => true  },
@@ -693,14 +699,14 @@ AFLP.Kinks = {
     });
 
     if (result === true) {
-      return await AFLP.Kinks._rollEdge(actor, liveActor, tokenId, actorName, actorLevel);
+      return await AFLP.Kinks._rollEdge(actor, liveActor, tokenId, actorName, actorLevel, skPenalty?.dcModifier ?? 0);
     }
     return false;
   },
 
   // Roll Fortitude vs normal DC; apply results. Returns true on success.
-  async _rollEdge(actor, liveActor, tokenId, actorName, actorLevel) {
-    const dc = AFLP.Kinks._normalDC(actorLevel);
+  async _rollEdge(actor, liveActor, tokenId, actorName, actorLevel, dcModifier = 0) {
+    const dc = AFLP.Kinks._normalDC(actorLevel) + dcModifier;
 
     // Use PF2e's built-in save roll
     const rollOptions = ["action:edge"];
@@ -920,42 +926,6 @@ AFLP.Kinks = {
   // -----------------------------------------------
   // -----------------------------------------------
   // Skyclad Idol: Engine — at the start of the actor's turn, while Exposed and
-  // observed by at least one other creature, grant 1 Arousal (2 if Exposed 2
-  // or Exposed Nude). Exposed (Nude) is treated as Exposed 2 throughout.
-  // -----------------------------------------------
-  async onCombatTurnSkycladEngine(actor, tokenId = null) {
-    if (!AFLP.Settings.automation) return;
-    const FLAG = AFLP.FLAG_SCOPE;
-    const worldActor = game.actors?.get(actor.id) ?? actor;
-    if (!worldActor.getFlag(FLAG, "skycladIdolDedication")) return;
-
-    const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor;
-
-    // Determine Exposed level — Exposed (Nude) counts as 2
-    const exposedUUID  = AFLP.conditions?.["exposed"]?.uuid ?? "";
-    const exposedNudeUUID = AFLP.conditions?.["exposed-nude"]?.uuid ?? "";
-    const exposedItem  = liveActor.items?.find(i =>
-      i.slug === "exposed" || (i.flags?.core?.sourceId ?? i.sourceId) === exposedUUID
-    );
-    const exposedNude  = liveActor.items?.some(i =>
-      i.slug === "exposed-nude" || (i.flags?.core?.sourceId ?? i.sourceId) === exposedNudeUUID
-    );
-    const exposedLevel = exposedNude ? 2 : (exposedItem?.system?.badge?.value ?? 0);
-    if (exposedLevel < 1) return;
-
-    // Count observers
-    const token = canvas?.tokens?.get(tokenId) ?? canvas?.tokens?.placeables?.find(t => t.actor?.id === actor.id);
-    if (!token) return;
-    const observers = canvas.tokens.placeables.filter(t =>
-      t.id !== token.id && t.actor && canvas.grid.measureDistance(token, t, {gridSpaces:true}) <= 120
-    ).length;
-    if (observers < 1) return;
-
-    const gain = exposedLevel >= 2 ? 2 : 1;
-    await AFLP.ensureCoreFlags(actor);
-    await AFLP_Arousal.increment(actor, gain, `Skyclad Engine (Exposed ${exposedLevel})`, tokenId);
-  },
-
   // Bimbomancer: Paizuri Aura — while paizuri cumflation >= 4, grant Horny 1
   // to the actor and all tokens within 30ft at the start of their turn.
   // -----------------------------------------------
@@ -1220,6 +1190,18 @@ AFLP.Kinks = {
   // Fires from the deleteItem hook whenever a mind-break condition item is removed.
   // Covers both scene-close removal and early end via ally intervention.
   // -----------------------------------------------
+  // Cum Slut L7: Mind Break 6+ hours while having sex = long rest (GM adjudicates).
+  async onMindBreakEndCumSlut(item) {
+    if (!AFLP.Settings.automation) return;
+    const actor = item.actor;
+    if (!actor || !AFLP.actorHasKink(actor, "cum-slut")) return;
+    if (AFLP.getKinkLevel(actor, "cum-slut") < 7) return;
+    await ChatMessage.create({
+      content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong>'s Cum Slut kink (L7): Mind Break has ended. If they were Mind Broken for 6+ hours and spent most of that time having sex (including during a Bad End), they gain the benefits of a <strong>full night's sleep and long rest</strong>. GM adjudicates.</p></div>`,
+      speaker: { alias: "AFLP" },
+    });
+  },
+
   async onMindBreakEndCreatureFetish(item) {
     if (!AFLP.Settings.automation) return;
     if (!game.user.isGM) return;
@@ -1374,3 +1356,323 @@ AFLP.Kinks = {
     });
   },
 };
+
+// -----------------------------------------------
+// STRETCH KING AUTOMATION
+// slug: stretch-king
+// UUID: Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.2Kth26AcSdPDxkKa
+// -----------------------------------------------
+
+const _SK_SIZE_RANK = { tiny: 0, sm: 1, med: 2, lg: 3, huge: 4, grg: 5 };
+function _skSizeRank(s) { return _SK_SIZE_RANK[s?.toLowerCase()] ?? 2; }
+function _skActorIsLarger(actorSize, targetSize, offset = 0) {
+  return (_skSizeRank(actorSize) + offset) > _skSizeRank(targetSize);
+}
+function _skVirtualOffset(actor) {
+  const lvl = AFLP.getKinkLevel(actor, "stretch-king");
+  if (lvl >= 7) return 2;
+  if (lvl >= 5) return 1;
+  return 0;
+}
+
+Object.assign(AFLP.Kinks, {
+
+  // L1: -2 circumstance on Edge DC when cumming inside smaller target.
+  // Returns { dcModifier, label } or null.
+  getStretchKingEdgePenalty(actor, tokenId = null) {
+    if (!AFLP.actorHasKink(actor, "stretch-king")) return null;
+    const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
+    const actorSize = liveActor.system?.traits?.size?.value ?? "med";
+    const offset    = _skVirtualOffset(actor);
+    let targetActor = null;
+    if (AFLP.Settings.hsceneEnabled && AFLP.HScene._getScene) {
+      const scene = AFLP.HScene._getScene(actor.id);
+      if (scene) {
+        const tToken = canvas?.tokens?.get(scene.targetId);
+        targetActor  = tToken?.actor ?? game.actors?.get(scene.targetActorId);
+      }
+    }
+    if (!targetActor) return null;
+    const targetSize = targetActor.system?.traits?.size?.value ?? "med";
+    if (!_skActorIsLarger(actorSize, targetSize, offset)) return null;
+    return { dcModifier: +2, label: "Stretch King (smaller target, −2 circumstance on Edge)" };
+  },
+
+  // L3: Horny 1 when adjacent to smaller creature at start of turn.
+  async onCombatTurnStretchKing(actor, tokenId = null) {
+    if (!AFLP.Settings.automation) return;
+    if (!AFLP.actorHasKink(actor, "stretch-king")) return;
+    if (AFLP.getKinkLevel(actor, "stretch-king") < 3) return;
+    const token = canvas?.tokens?.get(tokenId)
+      ?? canvas?.tokens?.placeables?.find(t => t.actor?.id === actor.id);
+    if (!token) return;
+    const actorSize    = actor.system?.traits?.size?.value ?? "med";
+    const offset       = _skVirtualOffset(actor);
+    const adjacentSmaller = canvas.tokens.placeables.some(t => {
+      if (t.id === token.id || !t.actor) return false;
+      const dist = canvas.grid.measureDistance(token, t, { gridSpaces: true });
+      if (dist > 5) return false;
+      return _skActorIsLarger(actorSize, t.actor.system?.traits?.size?.value ?? "med", offset);
+    });
+    if (!adjacentSmaller) return;
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    const FLAG       = AFLP.FLAG_SCOPE;
+    const horny      = structuredClone(worldActor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
+    if ((horny.temp ?? 0) >= 3) return;
+    horny.temp = (horny.temp ?? 0) + 1;
+    await worldActor.setFlag(FLAG, "horny", horny);
+    await ChatMessage.create({
+      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Stretch King kink (L3): adjacent to a smaller creature — gains <strong>Horny 1</strong>.</p></div>`,
+      speaker: { alias: "AFLP" },
+    });
+  },
+
+  // Post-cum: Coomer reminder when cumming inside smaller target (L3/L7).
+  async onCumStretchKing(actor, tokenId = null) {
+    if (!AFLP.actorHasKink(actor, "stretch-king")) return;
+    const lvl = AFLP.getKinkLevel(actor, "stretch-king");
+    if (lvl < 3) return;
+    const liveActor  = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
+    const actorSize  = liveActor.system?.traits?.size?.value ?? "med";
+    const offset     = _skVirtualOffset(actor);
+    let targetActor  = null;
+    if (AFLP.Settings.hsceneEnabled && AFLP.HScene._getScene) {
+      const scene = AFLP.HScene._getScene(actor.id);
+      if (scene) {
+        const tToken = canvas?.tokens?.get(scene.targetId);
+        targetActor  = tToken?.actor ?? game.actors?.get(scene.targetActorId);
+      }
+    }
+    if (!targetActor) return;
+    const targetSize = targetActor.system?.traits?.size?.value ?? "med";
+    if (!_skActorIsLarger(actorSize, targetSize, offset)) return;
+    if (lvl >= 7) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Stretch King kink (L7): Coomer 10 should be active via Daily Prep.</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+    } else if (lvl >= 3) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Stretch King kink (L3): cummed inside a smaller creature — ensure Coomer 3 is applied via Daily Prep.</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+    }
+  },
+
+});
+
+// Stretch King combat turn hook
+Hooks.on("combatTurnChange", async (combat, _prior, current) => {
+  if (!game.user.isGM) return;
+  const combatant = combat.combatants.get(current.combatantId);
+  if (!combatant?.actor) return;
+  const actor = game.actors?.get(combatant.actor.id) ?? combatant.actor;
+  await AFLP.Kinks.onCombatTurnStretchKing?.(actor, combatant.tokenId ?? null);
+});
+
+console.log("AFLP | Stretch King automation loaded.");
+
+// -----------------------------------------------
+// HYPNO SLAVE AUTOMATION
+// slug: hypno-slave
+// UUID: Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.naEmpTaaGI3qYAeC
+//
+// Counters live on system.badge.value of the Hypno Slave effect item on the actor.
+// Presence tracked via sexual.kinks["hypno-slave"] = true (set by incrementHypnoSlave).
+// conditionerId stored in world flag "hypnoConditionerId".
+// -----------------------------------------------
+
+const _HS_EH_UUID   = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.mHs3MtxY7CF4Uym9";
+const _HS_FASC_UUID = "Compendium.pf2e.conditionitems.Item.AdPVz7rbaVSRxHFg";
+const _HS_STUP_UUID = "Compendium.pf2e.conditionitems.Item.e1XGnhKNSQIm5IXg";
+const _HS_SLUG      = "hypno-slave";
+const _HS_MAX       = 7;
+
+function _hsItem(actor) {
+  return actor.items?.find(i =>
+    i.slug === _HS_SLUG ||
+    (i.flags?.core?.sourceId ?? i.sourceId) === "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.naEmpTaaGI3qYAeC"
+  ) ?? null;
+}
+function _hsCounters(actor) {
+  return _hsItem(actor)?.system?.badge?.value ?? 0;
+}
+function _hsUnlockLabel(n) {
+  if (n >= 7) return "Counter 7: Full conditioning — protection instinct, Mind Break immunity.";
+  if (n >= 5) return "Counter 5: Trigger word persona state unlocked.";
+  if (n >= 3) return "Counter 3: Stupefied 1 passive, memory suppression.";
+  if (n >= 2) return "Counter 2: Cannot take hostile actions against conditioner.";
+  return "Counter 1: −2 Will vs conditioner, Horny 1 within 60ft.";
+}
+
+Object.assign(AFLP.Kinks, {
+
+  // Increment counter after successful Induction. amount=1 for Failure, 2 for Critical Failure.
+  async incrementHypnoSlave(targetActor, conditionerActorId, amount = 1) {
+    if (!targetActor) return;
+    const FLAG       = AFLP.FLAG_SCOPE;
+    const worldActor = targetActor.getWorldActor?.() ?? targetActor;
+    const liveActor  = canvas?.tokens?.placeables?.find(t => t.actor?.id === targetActor.id)?.actor
+      ?? game.actors?.get(targetActor.id) ?? targetActor;
+
+    // Set kink presence flag
+    const sexual = worldActor.getFlag(FLAG, "sexual") ?? {};
+    if (!sexual.kinks) sexual.kinks = {};
+    sexual.kinks[_HS_SLUG] = true;
+    await worldActor.setFlag(FLAG, "sexual", sexual);
+    if (conditionerActorId) await worldActor.setFlag(FLAG, "hypnoConditionerId", conditionerActorId);
+
+    let hsItem = _hsItem(liveActor);
+    const current = hsItem?.system?.badge?.value ?? 0;
+
+    if (!hsItem) {
+      const hsDoc = await fromUuid("Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.naEmpTaaGI3qYAeC").catch(() => null);
+      if (!hsDoc) { console.error("AFLP | Hypno Slave: kink item not found."); return; }
+      const created = await liveActor.createEmbeddedDocuments("Item", [hsDoc.toObject()]);
+      hsItem = created[0];
+    }
+
+    if (current >= _HS_MAX) {
+      await ChatMessage.create({ content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Hypno Slave conditioning is at maximum (Counter 7).</p></div>`, speaker: { alias: "AFLP" } });
+      return;
+    }
+    const newCount = Math.min(current + amount, _HS_MAX);
+    await hsItem.update({ "system.badge.value": newCount });
+
+    const unlockMsg = (newCount === 2 || newCount === 3 || newCount === 5 || newCount === 7)
+      ? `<br><em style="color:#c9a96e;">${_hsUnlockLabel(newCount)}</em>` : "";
+    await ChatMessage.create({
+      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Hypno Slave counter: <strong>${newCount} / ${_HS_MAX}</strong>.${unlockMsg}</p></div>`,
+      speaker: { alias: "AFLP" },
+    });
+    console.log(`AFLP | ${worldActor.name} Hypno Slave: ${current} → ${newCount}`);
+  },
+
+  // Combat turn: Horny 1 (1+), Stupefied 1 (3+), protection instinct (7+).
+  async onCombatTurnHypnoSlave(actor, tokenId = null) {
+    if (!AFLP.Settings.automation) return;
+    if (!AFLP.actorHasKink(actor, _HS_SLUG)) return;
+    const counters   = _hsCounters(actor);
+    if (counters < 1) return;
+    const FLAG       = AFLP.FLAG_SCOPE;
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    const liveActor  = canvas?.tokens?.get(tokenId)?.actor ?? actor;
+    const condId     = worldActor.getFlag(FLAG, "hypnoConditionerId");
+    const condToken  = condId ? canvas?.tokens?.placeables?.find(t => t.actor?.id === condId) : null;
+    const myToken    = canvas?.tokens?.get(tokenId) ?? canvas?.tokens?.placeables?.find(t => t.actor?.id === actor.id);
+
+    // Counter 1+: Horny 1 within 60ft of conditioner
+    if (condToken && myToken) {
+      const dist = canvas.grid.measureDistance(myToken, condToken, { gridSpaces: true });
+      if (dist <= 60) {
+        const horny = structuredClone(worldActor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
+        if ((horny.temp ?? 0) < 3) {
+          horny.temp = (horny.temp ?? 0) + 1;
+          await worldActor.setFlag(FLAG, "horny", horny);
+          await ChatMessage.create({
+            content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Hypno Slave (counter ${counters}): within 60ft of conditioner — <strong>Horny 1</strong>.</p></div>`,
+            speaker: { alias: "AFLP" },
+          });
+        }
+      }
+    }
+
+    // Counter 3+: Stupefied 1 passive
+    if (counters >= 3) {
+      const hasStup = liveActor.items?.some(i =>
+        i.slug === "stupefied" || (i.flags?.core?.sourceId ?? i.sourceId) === _HS_STUP_UUID
+      );
+      if (!hasStup) {
+        const stupDoc = await fromUuid(_HS_STUP_UUID).catch(() => null);
+        if (stupDoc) {
+          await liveActor.createEmbeddedDocuments("Item",
+            [{ ...stupDoc.toObject(), system: { ...stupDoc.toObject().system, value: 1 } }]
+          ).catch(() => {});
+          await ChatMessage.create({
+            content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s conditioning (counter ${counters}): <strong>Stupefied 1</strong> reapplied.</p></div>`,
+            speaker: { alias: "AFLP" },
+          });
+        }
+      }
+    }
+
+    // Counter 7: Protection instinct
+    if (counters >= 7 && condToken && myToken) {
+      const condUnderAttack = worldActor.getFlag(FLAG, "_hypnoConditionerUnderAttack");
+      if (condUnderAttack) {
+        await worldActor.setFlag(FLAG, "_hypnoConditionerUnderAttack", false);
+        await ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Hypno Slave (counter 7): ${condToken.name} is under attack — <strong>Will DC 22</strong> or spend all actions shielding them.</p></div>`,
+          speaker: { alias: "AFLP" },
+        });
+      }
+    }
+  },
+
+  // GM-called: fires Trigger Word effects (speed 0, Fascinated, 3 Arousal).
+  async onTriggerWordHypnoSlave(actor, trigger) {
+    if (!AFLP.Settings.automation) return;
+    const FLAG       = AFLP.FLAG_SCOPE;
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    const liveActor  = game.actors?.get(actor.id) ?? actor;
+    const counters   = _hsCounters(actor);
+    await worldActor.setFlag(FLAG, "_hypnoTriggerConsumed", true);
+    const fascDoc = await fromUuid(_HS_FASC_UUID).catch(() => null);
+    if (fascDoc) {
+      if (!liveActor.items?.some(i => i.slug === "fascinated")) {
+        await liveActor.createEmbeddedDocuments("Item", [fascDoc.toObject()]).catch(() => {});
+      }
+    }
+    await AFLP.ensureCoreFlags(liveActor);
+    const gain = await AFLP_Arousal.increment(liveActor, 3, "Hypno Trigger Word", null);
+    const condToken = canvas?.tokens?.placeables?.find(t => t.actor?.id === worldActor.getFlag(FLAG, "hypnoConditionerId"));
+    await ChatMessage.create({
+      content: `<div class="aflp-chat-card">
+        <p><strong>${worldActor.name}</strong>'s Hypno Slave conditioning (counter ${counters}): Trigger Word — moved away from ${condToken?.name ?? "conditioner"}!</p>
+        <ul style="margin:4px 0 4px 16px">
+          <li>Speed reduced to 0 for this move <em>(apply manually)</em></li>
+          <li>@UUID[${_HS_FASC_UUID}]{Fascinated} for 1 round</li>
+          <li>${AFLP_Arousal.gainBreakdownText(gain, 3)}</li>
+        </ul>
+        <p><em>Will Save DC 22 to resist. Trigger spent until next daily prep.</em></p>
+      </div>`,
+      speaker: { alias: "AFLP" },
+    });
+  },
+
+  // Post-cum: trance orgasm suppresses Afterglow and grants 1 Arousal (counter 3+, once/day).
+  async onCumHypnoSlave(actor, tokenId = null) {
+    if (!AFLP.actorHasKink(actor, _HS_SLUG)) return;
+    if (_hsCounters(actor) < 3) return;
+    const FLAG       = AFLP.FLAG_SCOPE;
+    const worldActor = actor.getWorldActor?.() ?? actor;
+    const liveActor  = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
+    if (worldActor.getFlag(FLAG, "_hypnoSlaveL3Used")) return;
+    if (!liveActor.items?.some(i => i.slug === "fascinated")) return;
+    const afterglowUUID = AFLP.conditions?.["afterglow"]?.uuid ?? "";
+    const ag = liveActor.items?.find(i =>
+      i.slug === "afterglow" || (i.flags?.core?.sourceId ?? i.sourceId) === afterglowUUID
+    );
+    if (ag) await ag.delete().catch(() => {});
+    await AFLP.ensureCoreFlags(actor);
+    const gain = await AFLP_Arousal.increment(actor, 1, "Hypno Slave (trance orgasm)", tokenId);
+    await worldActor.setFlag(FLAG, "_hypnoSlaveL3Used", true);
+    const counters = _hsCounters(actor);
+    await ChatMessage.create({
+      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s conditioning (counter ${counters}): orgasm within trance — Afterglow suppressed, ${AFLP_Arousal.gainBreakdownText(gain, 1)}.</p></div>`,
+      speaker: { alias: "AFLP" },
+    });
+  },
+
+});
+
+// Hypno Slave combat turn hook
+Hooks.on("combatTurnChange", async (combat, _prior, current) => {
+  if (!game.user.isGM) return;
+  const combatant = combat.combatants.get(current.combatantId);
+  if (!combatant?.actor) return;
+  const actor = game.actors?.get(combatant.actor.id) ?? combatant.actor;
+  await AFLP.Kinks.onCombatTurnHypnoSlave?.(actor, combatant.tokenId ?? null);
+});
+
+console.log("AFLP | Hypno Slave automation loaded (counter-based).");
