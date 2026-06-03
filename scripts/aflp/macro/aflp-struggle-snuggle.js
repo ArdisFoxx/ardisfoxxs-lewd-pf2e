@@ -13,6 +13,14 @@
 //   Sex Toy Snuggle   — Recall Knowledge (highest modifier) vs Will DC
 //
 // All successful variants apply: Dominating (source), Submitting + Exposed 1 (target).
+//
+// ESCAPE MODE — activates automatically when the source has Submitting and is
+// the target of an active H scene. Uses the Struggle Escape action:
+//   Struggle Escape   — Athletics vs Fortitude DC (no Strike required)
+//   Sly Escape        — Diplomacy vs Will DC          (requires Sly Snuggle feat)
+//   Sneaky Escape     — Deception vs Perception DC    (requires Sneaky Snuggle feat)
+//   Sex Toy Escape    — Recall Knowledge vs Will DC   (requires Sex Toy Snuggle feat)
+// Failure while Grabbed: becomes Restrained. Success: exit scene. Crit (1 dom): Escape or Reversal.
 // Pin mode (target already Submitting): skip first action, attempt check to pin.
 
 (async () => {
@@ -220,17 +228,272 @@
   await AFLP.ensureCoreFlags(sourceActor);
   await AFLP.ensureCoreFlags(targetActor);
 
-  // ── Guard: source is Submitting → hard stop ───────────────────────────
+  // ── Detect Snuggle variant feats early (needed for escape mechanic too) ──
+  function actorHasFeat(actor, uuid) {
+    return actor?.items?.some(i =>
+      (i.flags?.core?.sourceId ?? i.sourceId ?? "") === uuid ||
+      i.slug === uuid.split(".").pop().toLowerCase().replace(/[^a-z]/g,"-")
+    );
+  }
+  const hasSlyFeat    = actorHasFeat(sourceActor, UUID_SLY_FEAT)
+    || sourceActor?.items?.some(i => i.slug === "sly-snuggle-technique");
+  const hasSneakyFeat = actorHasFeat(sourceActor, UUID_SNEAKY_FEAT)
+    || sourceActor?.items?.some(i => i.slug === "sneaky-snuggle-technique");
+  const hasSexToyFeat = actorHasFeat(sourceActor, UUID_SEXTOY_FEAT)
+    || sourceActor?.items?.some(i => i.slug === "sex-toy-snuggle-technique" || i.slug === "sex-toy-expertise");
+
+  // ── Guard: source is Submitting ────────────────────────────────────────
+  // If they're in an active H-scene as the target, this becomes an escape attempt.
+  // Otherwise hard-stop (Submitting from another source with no scene context).
   const sourceIsSubmitting = sourceTokenActor.items?.some(c =>
     c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
   );
   if (sourceIsSubmitting) {
-    ui.notifications.error(
-      "You are Submitting. You must free yourself of that condition before you can use Struggle Snuggle.",
-      { permanent: false }
-    );
-    return;
+    // Check if they're the TARGET in an active scene
+    const escapeScene = AFLP.Settings.hsceneEnabled
+      ? AFLP.HScene._getSceneWhereTarget?.(sourceToken.id, sourceActor.id) ?? null
+      : null;
+
+    if (!escapeScene) {
+      ui.notifications.error(
+        "You are Submitting. You must free yourself of that condition before you can use Struggle Snuggle.",
+        { permanent: false }
+      );
+      return;
+    }
+
+    // ── ESCAPE ATTEMPT ─────────────────────────────────────────────────
+    // Resolve the Dominating attackers acting on THIS escapee specifically
+    // (participants whose intentional partner is the source), so escaping one
+    // pairing in a multi-pair scene doesn't pull in unrelated dominators.
+    const domAttackers = (escapeScene.participants ?? [])
+      .filter(p => p.partnerId === sourceToken.id && !p._facing)
+      .map(p => canvas?.tokens?.get(p.tokenId)?.actor
+             ?? game.actors?.get(p.actorId ?? p.tokenId)
+             ?? null)
+      .filter(a => a?.items?.some(c =>
+        c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
+      ));
+
+    // Beat the highest Fortitude DC among all Dominating attackers
+    const escapeTargetActor = domAttackers.reduce((best, a) => {
+      const aFort = a.system?.saves?.fortitude?.value ?? 0;
+      const bFort = best?.system?.saves?.fortitude?.value ?? -99;
+      return aFort >= bFort ? a : best;
+    }, domAttackers[0]);
+
+    if (!escapeTargetActor) {
+      ui.notifications.warn("AFLP | Could not find a Dominating creature to escape from.");
+      return;
+    }
+
+    const escapeDC      = 10 + (escapeTargetActor.system?.saves?.fortitude?.value ?? 0);
+    const escapeWillDC  = 10 + (escapeTargetActor.system?.saves?.will?.value ?? 0);
+    const escapePercDC  = 10 + (escapeTargetActor.system?.perception?.value ?? 0);
+    const isSingleDominator = domAttackers.length === 1;
+
+    // Variant selection for escape (same feats apply)
+    const escapeVariants = [{ id: "ss", label: "Struggle Escape", sub: "Athletics vs Fortitude DC " + escapeDC }];
+    if (hasSlyFeat)    escapeVariants.push({ id: "sly",    label: "Sly Escape",     sub: "Diplomacy vs Will DC " + escapeWillDC });
+    if (hasSneakyFeat) escapeVariants.push({ id: "sneaky", label: "Sneaky Escape",  sub: "Deception vs Perception DC " + escapePercDC });
+    if (hasSexToyFeat) escapeVariants.push({ id: "sextoy", label: "Sex Toy Escape", sub: "Recall Knowledge vs Will DC " + escapeWillDC });
+
+    const gangbangNote = domAttackers.length > 1
+      ? `<p style="font-size:11px;color:#c9a96e;"><em>Gangbang: beat the highest Fortitude DC (${escapeDC}) among all ${domAttackers.length} Dominators. Will-based variants use that creature's Will DC (${escapeWillDC}), Deception uses Perception DC (${escapePercDC}).</em></p>`
+      : "";
+
+    let escapeVariantId = "ss";
+    if (escapeVariants.length > 1) {
+      const variantBtns = escapeVariants.map(v =>
+        `<button type="button" value="${v.id}" style="display:block;width:100%;text-align:left;margin:2px 0;padding:6px 8px;">${v.label}<span style="color:#aaa;font-size:11px;float:right;">${v.sub}</span></button>`
+      ).join("");
+      const escResult = await foundry.applications.api.DialogV2.wait({
+        window: { title: "Escape Attempt — Choose Action" },
+        content: `<div style="padding:4px">
+          <p><strong>${sourceActor.name}</strong> attempts to break free from <strong>${escapeTargetActor.name}</strong>.</p>
+          <p style="font-size:11px;color:#888;">Using the <em>Struggle Escape</em> action.</p>
+          ${gangbangNote}
+          ${variantBtns}
+        </div>`,
+        buttons: [{ action: "cancel", label: "Cancel", default: true }],
+        close: () => null,
+      });
+      if (!escResult || escResult === "cancel") return;
+      escapeVariantId = escResult;
+    }
+
+    // Run the escape roll (same mechanics as regular SS variants)
+    let escapeOutcome = null;
+
+    if (escapeVariantId === "ss") {
+      // Struggle Escape: Athletics check vs Fortitude DC (no Strike required)
+      const checkP = waitForCheckOutcome();
+      const athleticsStat = sourceActor.getStatistic?.("athletics") ?? sourceActor.skills?.athletics;
+      if (athleticsStat?.roll) {
+        athleticsStat.roll({ dc: { value: escapeDC, label: "Escape DC" }, createMessage: true });
+      } else {
+        // Fallback: use PF2e grapple action (Athletics-based) without Strike
+        game.pf2e.actions.get("grapple")?.use?.({ actors: [sourceActor], event: syntheticEvent });
+      }
+      escapeOutcome = await checkP;
+    } else if (escapeVariantId === "sly") {
+      // Sly Escape: Diplomacy check vs Will DC
+      const checkP = waitForCheckOutcome();
+      const diplomacyStat = sourceActor.getStatistic?.("diplomacy") ?? sourceActor.skills?.diplomacy;
+      if (diplomacyStat?.roll) {
+        diplomacyStat.roll({ dc: { value: escapeWillDC, label: "Escape DC (Will)" }, createMessage: true });
+      } else {
+        game.pf2e.actions.get("demoralize")?.use?.({ actors: [sourceActor], event: syntheticEvent });
+      }
+      escapeOutcome = await checkP;
+    } else if (escapeVariantId === "sneaky") {
+      // Sneaky Escape: Deception check vs Perception DC
+      const checkP = waitForCheckOutcome();
+      const deceptionStat = sourceActor.getStatistic?.("deception") ?? sourceActor.skills?.deception;
+      if (deceptionStat?.roll) {
+        deceptionStat.roll({ dc: { value: escapePercDC, label: "Escape DC (Perception)" }, createMessage: true });
+      } else {
+        game.pf2e.actions.get("feint")?.use?.({ actors: [sourceActor], event: syntheticEvent });
+      }
+      escapeOutcome = await checkP;
+    } else if (escapeVariantId === "sextoy") {
+      // Sex Toy Escape: Recall Knowledge check vs Will DC
+      const checkP = waitForCheckOutcome();
+      const rkStat = sourceActor.getStatistic?.("recall-knowledge") ?? null;
+      if (rkStat?.roll) {
+        rkStat.roll({ dc: { value: escapeWillDC, label: "Escape DC (Will)" }, createMessage: true });
+      } else {
+        game.pf2e.actions.get("recall-knowledge")?.use?.({ actors: [sourceActor], event: syntheticEvent });
+      }
+      escapeOutcome = await checkP;
+    }
+
+    if (!escapeOutcome) { ui.notifications.warn("AFLP | Escape roll timed out."); return; }
+
+    const escapeHit = escapeOutcome === "success" || escapeOutcome === "criticalSuccess";
+    if (!escapeHit) {
+      // If currently Grabbed, failure tightens to Restrained
+      if (game.user.isGM) {
+        const isGrabbed = sourceTokenActor.items?.some(c => c.slug === "grabbed");
+        if (isGrabbed) {
+          const grabbedItem = sourceTokenActor.items?.find(c => c.slug === "grabbed");
+          if (grabbedItem) await grabbedItem.delete().catch(() => {});
+          await sourceTokenActor.increaseCondition?.("restrained").catch(() => {});
+        }
+      }
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${sourceActor.name}</strong> tries to escape — and fails (${formatOutcome(escapeOutcome)}). The hold tightens.</p></div>`,
+        speaker: ChatMessage.getSpeaker({ actor: sourceActor }),
+      });
+      return;
+    }
+
+    // ── On success: offer Escape vs Flip (crit + single dominator only) ─
+    let escapeChoice = "escape";
+    if (escapeOutcome === "criticalSuccess" && isSingleDominator) {
+      escapeChoice = await foundry.applications.api.DialogV2.wait({
+        window: { title: "Critical Escape — What Next?" },
+        content: `<div style="padding:4px">
+          <p><strong>${sourceActor.name}</strong> breaks free with overwhelming force.</p>
+          <p>Choose what happens next:</p>
+        </div>`,
+        buttons: [
+          { action: "escape", label: "🏃 Escape — exit scene, move your Speed", default: true },
+          { action: "flip",   label: "🔄 Reversal — seize control, switch Dominating/Submitting" },
+        ],
+        close: () => "escape",
+      }) ?? "escape";
+    }
+
+    // ── Apply escape ────────────────────────────────────────────────────
+    if (escapeChoice === "escape") {
+      if (game.user.isGM) {
+        // Remove Submitting from source
+        const subItem = sourceTokenActor.items?.find(c =>
+          c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
+        );
+        if (subItem) await subItem.delete().catch(() => {});
+        // Remove Grabbed/Restrained from source
+        for (const slug of ["grabbed","restrained"]) {
+          const item = sourceTokenActor.items?.find(c => c.slug === slug);
+          if (item) await item.delete().catch(() => {});
+        }
+        // Remove Dominating from all scene attackers
+        for (const domAtk of domAttackers) {
+          const domItem = domAtk.items?.find(c =>
+            c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
+          );
+          if (domItem) await domItem.delete().catch(() => {});
+        }
+        // End the scene for the source (they leave)
+        AFLP.HScene.removeParticipant?.(escapeScene.targetId, sourceToken.id);
+      }
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card">
+          <p><strong>${sourceActor.name}</strong> breaks free! (${formatOutcome(escapeOutcome)})</p>
+          <ul style="margin:4px 0 0 16px;">
+            <li>${sourceActor.name} removes <strong>Submitting</strong> and all grapple conditions</li>
+            <li>${domAttackers.map(a => a.name).join(", ")} loses <strong>Dominating</strong></li>
+            <li>${sourceActor.name} can move their Speed</li>
+          </ul>
+        </div>`,
+        speaker: ChatMessage.getSpeaker({ actor: sourceActor }),
+      });
+      return;
+    }
+
+    // ── Apply flip ──────────────────────────────────────────────────────
+    if (escapeChoice === "flip") {
+      const flipTarget = domAttackers[0]; // single dominator guaranteed here
+      const flipTargetToken = canvas?.tokens?.placeables?.find(t => t.actor?.id === flipTarget.id);
+
+      if (game.user.isGM) {
+        // Remove Submitting from source; apply Dominating
+        const subItem = sourceTokenActor.items?.find(c =>
+          c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
+        );
+        if (subItem) await subItem.delete().catch(() => {});
+        await applyCondition(sourceTokenActor, "dominating", UUID_DOMINATING);
+
+        // Remove Dominating from former attacker; apply Submitting + Grabbed
+        const domItem = flipTarget.items?.find(c =>
+          c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
+        );
+        if (domItem) await domItem.delete().catch(() => {});
+        // Grabbled/Restrained swap
+        for (const slug of ["grabbed","restrained"]) {
+          const fromSrc = sourceTokenActor.items?.find(c => c.slug === slug);
+          if (fromSrc) await fromSrc.delete().catch(() => {});
+        }
+        if (!flipTarget.items?.some(c => c.slug === "grabbed"))
+          await flipTarget.increaseCondition?.("grabbed").catch(() => {});
+        await applyCondition(flipTarget, "submitting", UUID_SUBMITTING);
+
+        // Flip the pairing in place: the source becomes the performer acting on
+        // flipTarget, who becomes the receiver. Re-points only this pair and
+        // leaves any other pairings on the battlemap intact (no scene close).
+        if (flipTargetToken) {
+          AFLP.HScene.repointPairing?.(escapeScene.id, sourceToken.id, flipTargetToken.id);
+        }
+      }
+
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card">
+          <p><strong>${sourceActor.name}</strong> turns the tables on <strong>${flipTarget.name}</strong>! (${formatOutcome(escapeOutcome)})</p>
+          <ul style="margin:4px 0 0 16px;">
+            <li>${sourceActor.name} gains <strong>Dominating</strong></li>
+            <li>${flipTarget.name} gains <strong>Submitting</strong> and <strong>Grabbed</strong></li>
+            <li>Scene roles reversed — position prompt follows</li>
+          </ul>
+        </div>`,
+        speaker: ChatMessage.getSpeaker({ actor: sourceActor }),
+      });
+      return;
+    }
+
+    return; // safety
   }
+  // ── End escape block ──────────────────────────────────────────────────
 
   // ── Info: source already Dominating → warn but continue ──────────────
   const sourceIsDominating = sourceTokenActor.items?.some(c =>
@@ -255,21 +518,6 @@
   const isAlreadyGrabbed = targetTokenActor.items?.some(c => c.slug === "grabbed");
   const syntheticEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
 
-  // ── Detect available Snuggle variants ────────────────────────────────────
-  function actorHasFeat(actor, uuid) {
-    return actor?.items?.some(i =>
-      (i.flags?.core?.sourceId ?? i.sourceId ?? "") === uuid ||
-      i.slug === uuid.split(".").pop().toLowerCase().replace(/[^a-z]/g,"-")
-    );
-  }
-
-  const hasSlyFeat    = actorHasFeat(sourceActor, UUID_SLY_FEAT)
-    || sourceActor?.items?.some(i => i.slug === "sly-snuggle-technique");
-  const hasSneakyFeat = actorHasFeat(sourceActor, UUID_SNEAKY_FEAT)
-    || sourceActor?.items?.some(i => i.slug === "sneaky-snuggle-technique");
-  const hasSexToyFeat = actorHasFeat(sourceActor, UUID_SEXTOY_FEAT)
-    || sourceActor?.items?.some(i => i.slug === "sex-toy-snuggle-technique" || i.slug === "sex-toy-expertise");
-
   const variants = [{ id: "ss",  label: "Struggle Snuggle",  sub: "Strike → Athletics vs Fortitude" }];
   if (hasSlyFeat)    variants.push({ id: "sly",    label: "Sly Snuggle",    sub: "Stride → Diplomacy vs Will"    });
   if (hasSneakyFeat) variants.push({ id: "sneaky", label: "Sneaky Snuggle", sub: "Sneak → Deception vs Perception" });
@@ -288,20 +536,21 @@
     ).join("");
 
     chosenVariant = await new Promise(resolve => {
-      const dlg = new Dialog({
-        title: "Choose Approach",
+      foundry.applications.api.DialogV2.wait({
+        window: { title: "Choose Approach" },
         content: `<div style="padding:4px 0;">${btns}</div>`,
-        buttons: { cancel: { label: "Cancel", callback: () => resolve(null) } },
-        default: "cancel",
+        buttons: [{ action: "cancel", label: "Cancel", default: true, callback: () => resolve(null) }],
         close: () => resolve(null),
-        render: html => {
-          html.find("[data-choice]").on("click", function() {
-            dlg.close();
-            resolve($(this).data("choice"));
+        rejectClose: false,
+        render: (ev, dlg) => {
+          dlg.element.querySelectorAll("[data-choice]").forEach(b => {
+            b.addEventListener("click", () => {
+              resolve(b.dataset.choice);
+              dlg.close();
+            });
           });
         },
       });
-      dlg.render(true);
     });
 
     if (!chosenVariant) { ui.notifications.info("AFLP | Cancelled."); return; }
@@ -559,8 +808,8 @@
     ).join("");
 
     const toyResult = await new Promise(resolve => {
-      const dlg = new Dialog({
-        title: "Sex Toy Snuggle — Choose Item",
+      foundry.applications.api.DialogV2.wait({
+        window: { title: "Sex Toy Snuggle — Choose Item" },
         content: `
           <div style="padding:6px 0;">
             <p style="font-size:11px;color:#888;margin:0 0 10px;">
@@ -573,19 +822,20 @@
               Deduct gold automatically
             </label>
           </div>`,
-        buttons: { cancel: { label: "Cancel", callback: () => resolve(null) } },
-        default: "cancel",
+        buttons: [{ action: "cancel", label: "Cancel", default: true, callback: () => resolve(null) }],
         close: () => resolve(null),
-        render: (html) => {
-          html.find("[data-toy]").on("click", function() {
-            const toyId  = $(this).data("toy");
-            const deduct = html.find("#sxts-deduct").prop("checked");
-            dlg.close();
-            resolve({ toyId, deduct });
+        rejectClose: false,
+        render: (ev, dlg) => {
+          dlg.element.querySelectorAll("[data-toy]").forEach(b => {
+            b.addEventListener("click", () => {
+              const toyId  = b.dataset.toy;
+              const deduct = dlg.element.querySelector("#sxts-deduct")?.checked ?? false;
+              resolve({ toyId, deduct });
+              dlg.close();
+            });
           });
         },
       });
-      dlg.render(true);
     });
 
     if (!toyResult) { ui.notifications.info("AFLP | Cancelled."); return; }
@@ -603,8 +853,8 @@
           currency.gp -= gpCost;
           await sourceActor.update({ "system.currency": currency });
         } else {
-          const confirm = await Dialog.confirm({
-            title: "Insufficient Gold",
+          const confirm = await foundry.applications.api.DialogV2.confirm({
+            window: { title: "Insufficient Gold" },
             content: `<p>${sourceActor.name} only has ${currency.gp ?? 0} gp but needs ${gpCost} gp. Proceed anyway?</p>`,
           });
           if (!confirm) return;
@@ -614,8 +864,8 @@
           currency.sp -= spCost;
           await sourceActor.update({ "system.currency": currency });
         } else {
-          const confirm = await Dialog.confirm({
-            title: "Insufficient Silver",
+          const confirm = await foundry.applications.api.DialogV2.confirm({
+            window: { title: "Insufficient Silver" },
             content: `<p>${sourceActor.name} only has ${currency.sp ?? 0} sp but needs ${spCost} sp. Proceed anyway?</p>`,
           });
           if (!confirm) return;

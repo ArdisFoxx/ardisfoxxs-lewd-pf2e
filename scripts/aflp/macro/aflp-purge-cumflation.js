@@ -48,7 +48,7 @@ const rollPurge = async () => {
     roll = await actor.saves.fortitude.roll({ dc, flavor });
   } else {
     const fortMod = actor.system.saves.fortitude?.value ?? 0;
-    roll = await new Roll(`1d20 + ${fortMod}`).evaluate({async: true});
+    roll = await new Roll(`1d20 + ${fortMod}`).evaluate();
     roll.toMessage({ flavor });
   }
 

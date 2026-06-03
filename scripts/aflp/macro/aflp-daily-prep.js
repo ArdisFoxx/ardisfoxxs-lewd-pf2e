@@ -34,8 +34,10 @@ for (const { actor } of tokens) {
     await actor.setFlag(FLAG, "denied", { value: 0 });
   }
 
-  // Bimbofied: "When you complete your daily preparations, if you haven't had sex
-  // in the last 24 hours, your Bimbofied level is lowered by 1."
+  // Bimbofied: decays by 1 at daily preparations if no sex in the last in-world day.
+  // When it reaches 0, the condition item is deleted (no minimum).
+  // Bimbomancer Dedication prevents all decay.
+  // Like, Ohmigawd! raises the floor to 2.
   // We track "had sex" via the partnerHistory — if the most recent entry is within
   // the last in-world day (86400 seconds), sex occurred.
   const bimbofiedItem = actor.items?.find(i => i.slug === "bimbofied");

@@ -52,6 +52,12 @@ Hooks.once("setup", () => {
   ]);
 
   const _origPrepareBASEData = WeaponClass.prototype.prepareBASEData;
+  // Guard: if PF2e renames or removes this internal method in a future system
+  // version, skip patching rather than throwing on every weapon data prep.
+  if (typeof _origPrepareBASEData !== "function") {
+    console.warn("AFLP | WeaponClass.prepareBASEData not found; skipping Alcumical trait injection patch.");
+    return;
+  }
   WeaponClass.prototype.prepareBASEData = function () {
     _origPrepareBASEData.call(this);
 
@@ -91,6 +97,13 @@ Hooks.once("ready", async () => {
 
   // Register actor sheet tab
   AFLP.UI.SheetTab.register();
+
+  // Pre-load position descriptions from compendium
+  AFLP._loadPositionDescriptions?.().catch(() => {});
+
+  // Merge any custom positions from world settings into the schema registries
+  const { mergeCustomPositions } = await import("./ui/aflp-position-manager.js");
+  mergeCustomPositions();
 
   // Register kink automation hooks
   AFLP.Kinks.register();

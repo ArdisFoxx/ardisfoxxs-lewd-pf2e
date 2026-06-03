@@ -22,6 +22,34 @@ window.AFLP_Arousal = {
     if (!actor) return;
     const FLAG = AFLP.FLAG_SCOPE;
 
+    // ════════════════════════════════════════════════════════════════════════
+    // FOUNDRY ACTOR-RESOLUTION RULE (read this before touching flag reads/writes)
+    // ────────────────────────────────────────────────────────────────────────
+    // Foundry has TWO kinds of actor instance, and AFLP per-token state
+    // (arousal, cum, cumflation, horny, denied, genitalia) must always be
+    // read AND written on the SAME one, or values silently desync:
+    //
+    //   • LINKED token (PCs, named NPCs): token.actor IS the world actor.
+    //     canvas.tokens.get(id).actor === game.actors.get(actorId) — same object.
+    //
+    //   • UNLINKED token (monster mooks, copy-pasted enemies): each placed token
+    //     has its OWN synthetic actor (token.actor, .isToken === true). Its id
+    //     equals the BASE actor's id, so game.actors.get(actorId) returns the
+    //     shared *template*, NOT this token's instance. They are DIFFERENT
+    //     objects with DIFFERENT flag stores.
+    //
+    // THEREFORE: to get the instance whose flags actually drive this token, use
+    // token-FIRST resolution:
+    //     canvas.tokens.get(tokenId)?.actor ?? actor.token?.actor ?? actor
+    // NEVER `game.actors.get(actor.id)` for per-token state — that grabs the
+    // template and your write vanishes for unlinked mooks (the bug that made
+    // monsters stick at max arousal). `liveActorForBonus` below is the resolved
+    // instance; reuse it for all per-token reads in this function.
+    //
+    // Historical/persistent data (titles, pregnancy, partner history) only ever
+    // lives on linked/named actors — mooks are disposable, so they don't track it.
+    // ════════════════════════════════════════════════════════════════════════
+
     await AFLP.ensureCoreFlags(actor);
     const arousal = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
     const max     = AFLP.HScene.calcArousalMax(actor);
@@ -41,13 +69,22 @@ window.AFLP_Arousal = {
       );
       if (isSubmitting) {
         submittingBonus = 1;
-        // Gangslut L1: +1 per Dominator past the first
-        if (AFLP.actorHasKink(liveActorForBonus, "gangslut")) {
-          const scene = AFLP.Settings.hsceneEnabled ? AFLP.HScene._getScene?.(actor.id) : null;
+        // Gangslut L1: +1 per Dominator past the first (Dominators directed at
+        // this Submitting actor in the unified battlemap scene).
+        if (AFLP.actorHasKink(liveActorForBonus, "gangslut") && AFLP.Settings.hsceneEnabled) {
+          let scene = null;
+          for (const s of (AFLP.HScene._scenes?.values?.() ?? [])) {
+            if ((s.participants ?? []).some(p => p.tokenId === tokenId || p.actorId === actor.id)) { scene = s; break; }
+          }
           if (scene) {
+            const me = scene.participants.find(p => p.tokenId === tokenId || p.actorId === actor.id);
+            const myTok = me?.tokenId;
             let domCount = 0;
-            for (const atk of (scene.attackers ?? [])) {
-              const atkActor = canvas?.tokens?.get(atk.id)?.actor ?? game.actors?.get(atk.actorId ?? atk.id);
+            for (const p of scene.participants) {
+              if (p.tokenId === myTok) continue;
+              const directedAtMe = p.partnerId === myTok || me?.partnerId === p.tokenId;
+              if (!directedAtMe) continue;
+              const atkActor = canvas?.tokens?.get(p.tokenId)?.actor ?? game.actors?.get(p.actorId ?? p.tokenId);
               if (atkActor?.items?.some(c => c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === AFLP.conditions["dominating"]?.uuid)) domCount++;
             }
             if (domCount > 1) submittingBonus += (domCount - 1);
@@ -78,14 +115,16 @@ window.AFLP_Arousal = {
         console.log(`AFLP | ${actor.name} is Submitting — +${submittingBonus} bonus arousal (total +${total} from ${source})`);
       }
 
-      // Horny bonus: add Horny value to arousal increase.
-      // Reads the world flag (temp + permanent). Skipped entirely for actors with Monstrous Prowess.
+      // Horny bonus: add Horny value (temp + permanent) to the arousal increase.
+      // Skipped entirely for actors with Monstrous Prowess.
       if (!hasMonstrousProwess) {
-        // Read Horny from the live game.actors collection entry — this is always
-        // up to date regardless of whether actor or liveActorForBonus is a stale
-        // synthetic token actor reference.
-        const worldActor = game.actors?.get(actor.id) ?? actor;
-        const hornyRaw   = worldActor.getFlag(FLAG, "horny");
+        // Read Horny from liveActorForBonus (token-first resolved instance — see
+        // the FOUNDRY ACTOR-RESOLUTION RULE block at the top of this function).
+        // Previously this used game.actors.get(actor.id), which returns the
+        // shared base template for UNLINKED tokens and so ignored a monster
+        // mook's own per-token Horny value. liveActorForBonus is correct for
+        // both linked PCs and unlinked mooks.
+        const hornyRaw   = liveActorForBonus.getFlag(FLAG, "horny");
         const horny      = (hornyRaw != null) ? hornyRaw : AFLP.hornyDefaults;
         const hornyValue = (horny.temp ?? 0) + (horny.permanent ?? 0);
         if (hornyValue > 0) {
@@ -271,7 +310,7 @@ window.AFLP_Arousal = {
     window[debounceKey] = true;
     setTimeout(() => { delete window[debounceKey]; }, 100);
 
-    const roll    = await new Roll("1d20").evaluate({async: true});
+    const roll    = await new Roll("1d20").evaluate();
     const success = roll.total >= 11;
 
     await roll.toMessage({
@@ -309,6 +348,28 @@ window.AFLP_Arousal = {
   },
 
   // -----------------------------------------------
+  // Decide whether reaching max Arousal should DEFER the cum (showing the
+  // in-card Cum/Edge buttons and waiting for a click) or AUTO-RESOLVE it
+  // immediately (the legacy behavior).
+  //
+  // The interactive button flow applies whenever cum is NOT configured to
+  // fire automatically for this actor:
+  //   - automation must be on (otherwise nothing fires at all)
+  //   - edgeAuto must be on   (edgeAuto off = cum just fires, no choice)
+  //   - edgeSkipDialog must be off (on = auto-roll edge then auto-cum)
+  //   - if the actor is an NPC, edgeIncludeNpc must be on (else NPCs auto-cum)
+  // When any of those fail, cum auto-resolves and the buttons stay hidden.
+  // -----------------------------------------------
+  _shouldDeferCum(actor) {
+    if (!AFLP.Settings.automation) return false;
+    if (!AFLP.Settings.edgeAuto) return false;
+    if (AFLP.Settings.edgeSkipDialog) return false;
+    const isNPC = actor.type === "npc" || actor.type === "hazard";
+    if (isNPC && !AFLP.Settings.edgeIncludeNpc) return false;
+    return true;
+  },
+
+  // -----------------------------------------------
   // Called when arousal hits max — full cum sequence:
   //   1. Chat notice
   //   2. Reset arousal
@@ -317,13 +378,27 @@ window.AFLP_Arousal = {
   //   5. Apply Defeated if a Dominator caused this cum (and not already Defeated)
   //   6. Save flag
   //   7. Fire cum macro (which handles partner history, cumflation, title check)
+  //
+  // `opts.forceResolve` skips the defer gate (used when the player/GM clicks
+  // the in-card Cum button — the cum should resolve immediately).
   // -----------------------------------------------
-  async _onArousalMax(actor, tokenId = null) {
+  async _onArousalMax(actor, tokenId = null, opts = {}) {
     const FLAG = AFLP.FLAG_SCOPE;
+
+    // ── Deferred cum flow ─────────────────────────────────────────────────
+    // If interactive buttons apply and this isn't a forced resolve, mark the
+    // actor as ready-to-cum, light the in-card buttons, log it, and wait.
+    if (!opts.forceResolve && AFLP_Arousal._shouldDeferCum(actor)) {
+      const isMasturbation = !!window._aflpMasturbationActor && window._aflpMasturbationActor === actor.id;
+      AFLP.HScene?.markReadyToCum?.(actor, tokenId, { isMasturbation });
+      return; // wait for an in-card Cum or Edge click
+    }
 
     // ── Edge reaction — attempt before cum resolves ───────────────────────
     // If Edge succeeds the cum is cancelled; return early.
-    if (AFLP.Settings.automation && AFLP.Kinks?.tryEdge) {
+    // Skipped when forceResolve is set (the player already chose Cum, or Edge
+    // was already resolved separately via the in-card Edge button).
+    if (!opts.forceResolve && AFLP.Settings.automation && AFLP.Kinks?.tryEdge) {
       const isMasturbation = !!window._aflpMasturbationActor && window._aflpMasturbationActor === actor.id;
       window._aflpMasturbationActor = null; // consume immediately
       const edged = await AFLP.Kinks.tryEdge(actor, tokenId, { isMasturbation });
@@ -336,24 +411,29 @@ window.AFLP_Arousal = {
     // Find the scene this actor is in, and determine their role.
     // If they're an ATTACKER, the cum goes INTO the scene target (they're the source).
     // If they're the TARGET, the attackers are the sources as normal.
-    let scene = null;
-    let actorIsAttackerInScene = false;
-    if (AFLP.Settings.hsceneEnabled && AFLP.HScene._getScene) {
-      // Check all scenes: prefer the one where this actor is the target.
-      // Fall back to a scene where they're an attacker.
-      const actorTokenId = tokenId;
-      const actorActorId = actor.id;
+    // Find the unified battlemap scene CONTAINING this cummer, and resolve
+    // their current partner from participant.partnerId. The cum routes INTO the
+    // partner (the actor this cummer is directed at right now), regardless of
+    // who projects as the legacy scene target. This is the cross-pair fix:
+    // previously an attacker's cum always went to the projected scene target.
+    let scene = null, cummerP = null, partnerTokenId = null, partnerActorId = null;
+    if (AFLP.Settings.hsceneEnabled) {
       for (const s of (AFLP.HScene._scenes?.values?.() ?? [])) {
-        const isTarget = s.targetId === actorTokenId ||
-          (s.targetActorId ?? s.targetId) === actorActorId;
-        if (isTarget) { scene = s; actorIsAttackerInScene = false; break; }
-        const isAttacker = s.attackers?.some(a =>
-          a.id === actorTokenId || (a.actorId ?? a.id) === actorActorId
-        );
-        if (isAttacker && !scene) { scene = s; actorIsAttackerInScene = true; }
+        const p = (s.participants ?? []).find(pp => pp.tokenId === tokenId || pp.actorId === actor.id);
+        if (p) { scene = s; cummerP = p; break; }
+      }
+      if (cummerP?.partnerId) {
+        partnerTokenId = cummerP.partnerId;
+        const partnerP = scene.participants.find(pp => pp.tokenId === partnerTokenId);
+        partnerActorId = partnerP?.actorId ?? null;
       }
     }
-    const sceneKey = scene?.targetId ?? null;
+    // Pair-specific dedup key for the simultaneous-cum combined message, so two
+    // DIFFERENT couples cumming on the same battlemap are not merged. Both
+    // partners compute the same key (sorted token-id pair).
+    const sceneKey = scene
+      ? (partnerTokenId ? [tokenId, partnerTokenId].sort().join("|") : (tokenId ?? actor.id))
+      : null;
     const liveActorForCock = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
     const actorHasCock = liveActorForCock.getFlag(FLAG, "cock") === true;
 
@@ -376,13 +456,9 @@ window.AFLP_Arousal = {
         const combined = combinedLines[Math.floor(Math.random() * combinedLines.length)];
 
         // Post combined orgasm narrative to scene log only
-        if (game.user.isGM && window.AFLP?.HScene?._scenes) {
-          const sceneEntry = [...AFLP.HScene._scenes.entries()]
-            .find(([, sc]) => sc.targetActorId === actor.id || sc.attackers.some(a => a.actorId === actor.id));
-          if (sceneEntry) {
-            const combinedPlain = combined.replace(/<[^>]+>/g, "");
-            AFLP.HScene.addProse(sceneEntry[0], combinedPlain, "flavor");
-          }
+        if (game.user.isGM && scene) {
+          const combinedPlain = combined.replace(/<[^>]+>/g, "");
+          AFLP.HScene.addProse(scene.id, combinedPlain, "flavor");
         }
       } else {
         // First actor — register and post individual message after brief delay
@@ -405,13 +481,9 @@ window.AFLP_Arousal = {
             ];
             const solo = soloLines[Math.floor(Math.random() * soloLines.length)];
             // Post solo orgasm narrative to scene log only
-            if (game.user.isGM && window.AFLP?.HScene?._scenes) {
-              const sceneEntry = [...AFLP.HScene._scenes.entries()]
-                .find(([, sc]) => sc.targetActorId === actor.id || sc.attackers.some(a => a.actorId === actor.id));
-              if (sceneEntry) {
-                const soloPlain = solo.replace(/<[^>]+>/g, "");
-                AFLP.HScene.addProse(sceneEntry[0], soloPlain, "flavor");
-              }
+            if (game.user.isGM && scene) {
+              const soloPlain = solo.replace(/<[^>]+>/g, "");
+              AFLP.HScene.addProse(scene.id, soloPlain, "flavor");
             }
           }
         }
@@ -443,7 +515,10 @@ window.AFLP_Arousal = {
     }
 
     // ── Clear temp Horny on cum (permanent Horny survives) ────────────────
-    // Reads the world flag; zeros temp, leaves permanent intact.
+    // Reads/writes via `actor`, which is the correctly-resolved per-token
+    // instance (synthetic for unlinked mooks, world actor for linked PCs —
+    // see the FOUNDRY ACTOR-RESOLUTION RULE in increment()). Zeros temp,
+    // leaves permanent intact.
     if (AFLP.Settings.automation) {
       const horny = structuredClone(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
       if ((horny.temp ?? 0) > 0) {
@@ -485,11 +560,14 @@ window.AFLP_Arousal = {
 
       // ── Apply Defeated if a Dominator caused this cum ───────────────
       // Rule: Dominating — "if you cause it to Cum it is Defeated."
-      // Only applies to the scene TARGET (Submitting actor). Mind Break supersedes
-      // Defeated — an actor with Mind Break cannot also be Defeated.
-      const hsceneData = AFLP.Settings.hsceneEnabled ? AFLP.HScene._getScene?.(actor.id) : null;
-      const isSceneTarget = hsceneData
-        && (hsceneData.targetActorId ?? hsceneData.targetId) === actor.id;
+      // Partner-aware: applies when the CUMMER is Submitting and at least one
+      // Dominating participant is directed at them (their dom partner, or any
+      // attacker pointing at them in a gangbang). Mind Break supersedes Defeated.
+      const cummerTok = cummerP?.tokenId ?? tokenId;
+      const cummerIsSubmitting = liveActor.items?.some(c =>
+        c.slug === "submitting" ||
+        c.sourceId?.includes(AFLP.conditions?.["submitting"]?.uuid ?? "NOMATCH")
+      );
       const isAlreadyDefeated = liveActor.items?.some(c =>
         c.slug === "defeated" ||
         c.sourceId?.includes(AFLP.conditions?.["defeated"]?.uuid ?? "NOMATCH")
@@ -499,35 +577,28 @@ window.AFLP_Arousal = {
         c.sourceId?.includes(AFLP.conditions?.["mind-break"]?.uuid ?? "NOMATCH")
       );
 
-      if (isSceneTarget && hsceneData?.attackers?.length && !isAlreadyDefeated && !hasMindBreak) {
-        // Gangslut L5: immune to Defeated while 2+ Dominators in scene (character level 5+)
-        const _actorLevel = actor.system?.details?.level?.value ?? 0;
-        let _gangslutBlock = false;
-        if (_actorLevel >= 5 && AFLP.actorHasKink(actor, "gangslut")) {
-          const _domCount = hsceneData.attackers.reduce((n, atk) => {
-            const a = canvas?.tokens?.get(atk.id)?.actor ?? game.actors.get(atk.actorId ?? atk.id);
-            return n + (a?.items?.some(c => c.slug === "dominating" || c.sourceId?.includes(AFLP.conditions?.["dominating"]?.uuid ?? "NOMATCH")) ? 1 : 0);
-          }, 0);
-          if (_domCount >= 2) {
-            _gangslutBlock = true;
-            console.log(`AFLP | ${actor.name} Gangslut L5: Defeated blocked (${_domCount} Dominators)`);
-          }
+      if (scene && cummerIsSubmitting && !isAlreadyDefeated && !hasMindBreak) {
+        // The cummer's dominators: participants directed at the cummer (or the
+        // cummer's own partner) who currently have the Dominating condition.
+        const isDomActor = (a) => a?.items?.some(c =>
+          c.slug === "dominating" ||
+          c.sourceId?.includes(AFLP.conditions?.["dominating"]?.uuid ?? "NOMATCH"));
+        const dominators = [];
+        for (const p of (scene.participants ?? [])) {
+          if (p.tokenId === cummerTok) continue;
+          const directedAtCummer = p.partnerId === cummerTok || cummerP?.partnerId === p.tokenId;
+          if (!directedAtCummer) continue;
+          const pa = canvas?.tokens?.get(p.tokenId)?.actor ?? game.actors.get(p.actorId ?? p.tokenId);
+          if (isDomActor(pa)) dominators.push(p);
         }
+        let dominatorFound = dominators.length > 0;
 
-        let dominatorFound = false;
-        if (!_gangslutBlock) {
-        for (const atk of hsceneData.attackers) {
-          // atk.id is a token ID; resolve via canvas first, fall back to actorId
-          const atkActor = canvas?.tokens?.get(atk.id)?.actor
-                        ?? game.actors.get(atk.actorId ?? atk.id);
-          if (!atkActor) continue;
-          const isDominating = atkActor.items?.some(c =>
-            c.slug === "dominating" ||
-            c.sourceId?.includes(AFLP.conditions?.["dominating"]?.uuid ?? "NOMATCH")
-          );
-          if (isDominating) { dominatorFound = true; break; }
+        // Gangslut L5: immune to Defeated while 2+ Dominators target them (level 5+).
+        const _actorLevel = actor.system?.details?.level?.value ?? 0;
+        if (dominatorFound && _actorLevel >= 5 && AFLP.actorHasKink(actor, "gangslut") && dominators.length >= 2) {
+          dominatorFound = false;
+          console.log(`AFLP | ${actor.name} Gangslut L5: Defeated blocked (${dominators.length} Dominators)`);
         }
-        } // end !_gangslutBlock
 
         if (dominatorFound) {
           // Mark so createItem hook skips the counter (we're counting here)
@@ -614,9 +685,12 @@ window.AFLP_Arousal = {
 
     // Wrap macro execution in try/finally so globals are always cleaned up
     // even if the macro or token setup throws.
+    // NOTE: the cum macro reads AND clears _aflpCumSourceTokenIds /
+    // _aflpCumTargetTokenId at its very top, so we deliberately do NOT delete
+    // them here. Macro.execute() does not reliably await the macro body before
+    // this finally runs, so deleting them here could race the macro's read.
     const _cleanupCumGlobals = () => {
       delete window._aflpCumMacroActor;
-      delete window._aflpCumTargetTokenId;
       if (window._aflpPendingCum) window._aflpPendingCum.delete(sceneKey);
     };
     try {
@@ -657,35 +731,20 @@ window.AFLP_Arousal = {
 
     const cumMacro = game.macros.find(m => m.name === "AFLP Cum" || m.slug === "aflp-cum");
     if (cumMacro) {
-      // Set up token selection so the cum macro reads the correct source/target.
-      // The cumming actor is the scene target; the attackers are the sources.
-      // Control attacker tokens, target the cumming actor's token.
+      // Hand the cummer (source) and partner (target) to the cum macro via
+      // globals so it can resolve them WITHOUT us changing the GM's on-screen
+      // selection or targets. This keeps the user's UI untouched and avoids any
+      // race between restoring the selection and the macro reading tokens.
       if (game.user.isGM) {
-        let macroSourceTokens, macroTargetToken;
-
-        if (actorIsAttackerInScene) {
-          // Cumming actor is an attacker — they cum INTO the scene's target.
-          // Source = the cumming actor's token; target = scene target token.
-          const cummingToken = canvas.tokens.get(tokenId)
-            ?? canvas.tokens.placeables.find(t => t.actor?.id === actor.id);
-          macroSourceTokens = cummingToken ? [cummingToken] : [];
-          macroTargetToken  = canvas.tokens.get(scene.targetId);
-        } else {
-          // Cumming actor is the target — attackers are the sources.
-          macroSourceTokens = (scene.attackers ?? [])
-            .map(a => canvas.tokens.get(a.id))
-            .filter(Boolean);
-          macroTargetToken = canvas.tokens.get(scene.targetId);
-        }
-
-        if (macroSourceTokens.length && macroTargetToken) {
-          canvas.tokens.releaseAll();
-          for (const t of macroSourceTokens) t.control({ releaseOthers: false });
-          game.user.targets.forEach(t => t.setTarget(false, { user: game.user, releaseOthers: false, groupSelection: false }));
-          macroTargetToken.setTarget(true, { user: game.user, releaseOthers: false, groupSelection: false });
-          // Record the intended target token ID so the cum macro can verify it
-          // even if game.user.targets races with another scene's auto-trigger.
-          window._aflpCumTargetTokenId = macroTargetToken.id;
+        const cummingToken = canvas.tokens.get(tokenId)
+          ?? canvas.tokens.placeables.find(t => t.actor?.id === actor.id);
+        const partnerToken = partnerTokenId
+          ? (canvas.tokens.get(partnerTokenId)
+             ?? canvas.tokens.placeables.find(t => t.actor?.id === partnerActorId))
+          : null;
+        if (cummingToken && partnerToken) {
+          window._aflpCumSourceTokenIds = [cummingToken.id];
+          window._aflpCumTargetTokenId  = partnerToken.id;
         }
       }
       await cumMacro.execute();

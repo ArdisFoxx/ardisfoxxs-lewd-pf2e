@@ -34,6 +34,22 @@ window.AFLP_Titles = {
     return this._cfg(id).name ?? defaultName;
   },
 
+  // Resolve a held title id to { id, name, desc }, honoring name overrides and
+  // custom titles. Returns null if the id matches no known title.
+  resolveTitle(id) {
+    if (!id) return null;
+    const builtin = this.TITLES.find(t => t.id === id);
+    if (builtin) {
+      return { id, name: this._name(id, builtin.name), desc: builtin.desc };
+    }
+    const cfg = this._loadConfig();
+    const custom = (cfg._custom ?? []).find(ct => ct.id === id);
+    if (custom) {
+      return { id, name: custom.name ?? id, desc: custom.desc ?? "Custom title." };
+    }
+    return null;
+  },
+
   // ── Title definitions ──────────────────────────────────────────────────────
   TITLES: [
     {
@@ -597,7 +613,7 @@ class TitlesConfigApp extends foundry.applications.api.ApplicationV2 {
     });
     el.querySelector(".aflp-tc-save")?.addEventListener("click", () => this._save(el));
     el.querySelector(".aflp-tc-reset")?.addEventListener("click", async () => {
-      if (!await Dialog.confirm({ title:"Reset titles config?", content:"<p>Clear all custom threshold and name overrides?</p>" })) return;
+      if (!await foundry.applications.api.DialogV2.confirm({ window: { title:"Reset titles config?" }, content:"<p>Clear all custom threshold and name overrides?</p>" })) return;
       await AFLP_Titles._saveConfig({});
       this._cfg = {};
       this.render();

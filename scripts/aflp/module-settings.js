@@ -23,12 +23,18 @@ AFLP.Settings = {
     HSCENE_LOG_TO_CHAT:  "hsceneLogToChat",
     SCENE_REPORT_VIS:    "sceneReportVisibility",
     POSITION_TRACKING:   "positionTracking",
+    GANGBANG_AUTO_ASSIGN: "gangbangAutoAssign",
+    CUM_HOLE_FROM_POSITION: "cumHoleFromPosition",
+    CUSTOM_POSITIONS:    "customPositions",
     EDGE_AUTO:           "edgeAuto",
     EDGE_SKIP_DIALOG:    "edgeSkipDialog",
     EDGE_INCLUDE_NPC:    "edgeIncludeNpc",
     SHOW_WELCOME:        "showWelcome",
     INFINITE_CUM:        "infiniteCumVolume",
     HSCENE_THEME:        "hsceneTheme",
+    HSCENE_THEME_PC:     "hsceneThemePc",
+    HSCENE_THEME_MON:    "hsceneThemeMon",
+    HSCENE_PLAYER_PICK:  "hscenePlayerPick",
     HSCENE_AROUSAL:      "hsceneArousalStyle",
     HSCENE_DOSSIER_FX:   "hsceneDossierAnimated",
     HSCENE_MESSAGES:     "hsceneCustomMessages",
@@ -64,7 +70,19 @@ AFLP.Settings = {
       restricted: true,
     });
 
-    // ── All Lewd Levels ────────────────────────────────────────────────────
+    // =====================================================================
+    // Settings are grouped logically below (not by the order they were added):
+    //   1. General
+    //   2. H Scene - Cards & Log
+    //   3. H Scene - Appearance
+    //   4. Positions
+    //   5. Titles
+    //   6. Arousal & Climax (Edge)
+    //   7. Cum & Cumflation
+    // Hidden/internal data stores are registered at the end.
+    // =====================================================================
+
+    // ── 1. General ────────────────────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.SHOW_WELCOME, {
       name:    "Show Welcome Message on Load",
@@ -75,7 +93,7 @@ AFLP.Settings = {
       default: true,
     });
 
-    // ── Lewd Level 2+ (H Scenes and consensual sex between humanoids) ──────
+    // ── 2. H Scene — Cards & Log ───────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.HSCENE_ENABLED, {
       name:    "H Scene Cards",
@@ -118,14 +136,178 @@ AFLP.Settings = {
       default: "public",
     });
 
-    game.settings.register(S.ID, S.KEYS.POSITION_TRACKING, {
-      name:    "H Scene - Position Tracking",
-      hint:    "[Lewd 2+] When starting a scene or using Sexual Advance, prompt to select the current position/act. The Cum macro will skip its hole dialog when all cock-having attackers have a position set.",
+    // ── 3. H Scene — Appearance ────────────────────────────────────────────
+
+    // GM default theme for PC/NPC targets
+    game.settings.register(S.ID, S.KEYS.HSCENE_THEME_PC, {
+      name:    "H Scene Default Theme (PC / NPC Target)",
+      hint:    "Default UI theme used when the scene target is a PC or NPC. Applied to all players unless they have chosen their own theme.",
+      scope:   "world",
+      config:  true,
+      type:    String,
+      choices: {
+        "lewd-lite":   "Lewd Lite",
+        "status-strip": "Status Strip",
+        "aflp-classic":        "AFLP Classic",
+        "dossier":      "Dossier File",
+        "fuckamons":    "Fuck a Mon'",
+      },
+      default: "aflp-classic",
+      onChange: () => AFLP.HScene?._applyDefaultThemesToAll?.(),
+    });
+
+    // GM default theme for monster targets
+    game.settings.register(S.ID, S.KEYS.HSCENE_THEME_MON, {
+      name:    "H Scene Default Theme (Monster Target)",
+      hint:    "Default UI theme used when the scene target is a monster (NPC with no player owner). Switches automatically when a monster becomes the target.",
+      scope:   "world",
+      config:  true,
+      type:    String,
+      choices: {
+        "lewd-lite":   "Lewd Lite",
+        "status-strip": "Status Strip",
+        "aflp-classic":        "AFLP Classic",
+        "dossier":      "Dossier File",
+        "fuckamons":    "Fuck a Mon'",
+      },
+      default: "fuckamons",
+      onChange: () => AFLP.HScene?._applyDefaultThemesToAll?.(),
+    });
+
+    // Allow players to pick their own theme
+    game.settings.register(S.ID, S.KEYS.HSCENE_PLAYER_PICK, {
+      name:    "H Scene - Allow Players to Choose Their Own UI",
+      hint:    "When enabled, each player can switch the H scene UI theme via the dropdown on the card. When disabled, all players use the GM's default theme setting and any player-chosen themes are reset.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: (allowed) => {
+        if (!allowed) AFLP.HScene?._resetPlayersToDefaultTheme?.();
+      },
+    });
+
+    game.settings.register(S.ID, S.KEYS.HSCENE_DOSSIER_FX, {
+      name:    "H Scene - Dossier Animated Hologram Effects",
+      hint:    "Enable scan-line and glitch animations for the Dossier File theme.",
       scope:   "world",
       config:  true,
       type:    Boolean,
       default: true,
     });
+
+    // Per-user theme + arousal display (config:false — chosen via card dropdown)
+    game.settings.register(S.ID, S.KEYS.HSCENE_THEME, {
+      name:    "H Scene UI Theme",
+      hint:    "Visual style for H scene cards. Per-user - each player can choose their own.",
+      scope:   "client",
+      config:  false,
+      type:    String,
+      choices: {
+        "lewd-lite":   "Lewd Lite",
+        "status-strip": "Status Strip",
+        "aflp-classic":        "AFLP Classic",
+        "dossier":      "Dossier File",
+        "fuckamons":    "Fuck a Mon'",
+      },
+      default: "aflp-classic",
+      onChange: () => {
+        // Re-inject updated CSS for new theme
+        const styleEl = document.getElementById("aflp-hscene-styles-v2");
+        if (styleEl && AFLP?.HScene?._rebuildStyle) {
+          AFLP.HScene._rebuildStyle();
+        }
+        // Rebuild all active card portraits with the new theme
+        const scenes = AFLP?.HScene?._scenes;
+        if (!scenes) return;
+        for (const [targetId, scene] of scenes) {
+          const card = document.querySelector(`[data-target-id="${targetId}"]`);
+          if (!card) continue;
+          const sceneTheme = AFLP.HScene._effectiveTheme?.(scene) ?? AFLP.Settings.hsceneTheme ?? "aflp-classic";
+          card.className = card.className.replace(/aflp-theme-\S+/, "aflp-theme-" + sceneTheme);
+          AFLP.HScene.refreshScene?.(targetId);
+          const sel = card.querySelector(".aflp-card-theme-select");
+          if (sel) sel.value = sceneTheme;
+        }
+      },
+    });
+
+    game.settings.register(S.ID, S.KEYS.HSCENE_AROUSAL, {
+      name:    "H Scene Arousal Display",
+      hint:    "Bars or pips for arousal. Per-user.",
+      scope:   "client",
+      config:  false,
+      type:    String,
+      choices: {
+        "auto": "Theme default",
+        "bars": "Bars",
+        "pips": "Pips",
+      },
+      default: "auto",
+    });
+
+    // ── 4. Positions ───────────────────────────────────────────────────────
+
+    game.settings.register(S.ID, S.KEYS.POSITION_TRACKING, {
+      name:    "Positions - Track Current Position",
+      hint:    "[Lewd 2+] When starting a scene or using Sexual Advance, prompt to select the current position/act. The position is shown on the H Scene card and used by other position-aware features.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+    });
+
+    game.settings.register(S.ID, S.KEYS.CUM_HOLE_FROM_POSITION, {
+      name:    "Positions - Auto-Choose Cum Hole from Position",
+      hint:    "When enabled, the Cum macro skips its hole-selection dialog and uses the hole implied by each cock-having performer's tracked position (e.g. a vaginal position cums in the pussy). When disabled (default), the hole dialog always appears so you can choose freely. Requires Position Tracking.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
+    game.settings.register(S.ID, S.KEYS.GANGBANG_AUTO_ASSIGN, {
+      name:    "Positions - Auto-Assign Gangbang Slots",
+      hint:    "When a group position is selected, automatically assign performers to slots based on their body type. When off, the GM is shown the slot assignments and can confirm or swap them before applying.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
+    // Custom Positions manager (menu) + its data store
+    const PositionManagerStub = class extends foundry.applications.api.ApplicationV2 {
+      static DEFAULT_OPTIONS = {
+        id: "aflp-position-manager-stub",
+        window: { title: "Custom Positions" },
+      };
+      async _renderHTML() { return document.createElement("div"); }
+      _replaceHTML(result, content) { content.replaceChildren(result); }
+      async _onRender() {
+        setTimeout(() => this.close(), 0);
+        const { AFLPPositionManager } = await import("./ui/aflp-position-manager.js");
+        new AFLPPositionManager().render(true);
+      }
+    };
+
+    game.settings.registerMenu(S.ID, "customPositionsMenu", {
+      name:       "Custom Positions",
+      hint:       "Add your own positions to the H Scene position picker. Stored as world data.",
+      label:      "Manage Custom Positions",
+      icon:       "fas fa-plus-circle",
+      type:       PositionManagerStub,
+      restricted: true,
+    });
+
+    game.settings.register(S.ID, S.KEYS.CUSTOM_POSITIONS, {
+      name:    "Custom Positions Data",
+      scope:   "world",
+      config:  false,
+      type:    String,
+      default: "[]",
+    });
+
+    // ── 5. Titles ──────────────────────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.TITLES_SHOW, {
       name:    "Titles - Show on Character Sheet",
@@ -145,16 +327,45 @@ AFLP.Settings = {
       default: true,
     });
 
-    // ── Lewd Level 3+ (Arousal system, kinks, cumflation) ─────────────────
+    // ── 6. Arousal & Climax ────────────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.AUTOMATION, {
       name:    "Arousal Automation",
-      hint:    "[Lewd 3+] Automatically apply arousal changes from conditions (Submitting bonus, Dominating passive, etc.) and trigger the cum macro when arousal hits max.",
+      hint:    "[Lewd 3+] Automatically apply arousal changes from conditions (Submitting bonus, Dominating passive, etc.) and trigger the cum sequence when arousal hits max.",
       scope:   "world",
       config:  true,
       type:    Boolean,
       default: true,
     });
+
+    game.settings.register(S.ID, S.KEYS.EDGE_AUTO, {
+      name:    "Edge - Offer Edge on Cum",
+      hint:    "[Lewd 3+] When a character reaches max Arousal, present in-card Cum and Edge buttons instead of cumming automatically. The climax waits until Cum (let go) or Edge (Fortitude vs level DC to hold back) is clicked. Turn this off to have characters cum automatically with no Edge option. Requires Arousal Automation.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
+    game.settings.register(S.ID, S.KEYS.EDGE_INCLUDE_NPC, {
+      name:    "Edge - Also Apply to Monsters and NPCs",
+      hint:    "Include non-player characters in the Edge flow, showing them the in-card Cum/Edge buttons too. When off, monsters and NPCs cum automatically. Useful to leave off so monster climaxes resolve without GM clicks during combat.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
+    game.settings.register(S.ID, S.KEYS.EDGE_SKIP_DIALOG, {
+      name:    "Edge - Auto-Roll Edge Instead of Showing Buttons",
+      hint:    "[Lewd 4] Skip the in-card Cum/Edge buttons and immediately roll the Edge Fortitude save when a character would Cum (success cancels the climax, failure cums). Only active when 'Offer Edge on Cum' is also enabled. Best for fast, hands-off monster combat.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
+    // ── 7. Cum & Cumflation ────────────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.CUM_VOLUME_MODE, {
       name:    "Cum Volume - Unit Size",
@@ -169,9 +380,27 @@ AFLP.Settings = {
       default: "fantasy",
     });
 
+    game.settings.register(S.ID, S.KEYS.INFINITE_CUM, {
+      name:    "Cum Volume - Infinite (Monsters)",
+      hint:    "When enabled, monsters' cum volume is not reduced when they cum. It stays at maximum. Useful for high-intensity encounters where tracking depletion is not desired.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
     game.settings.register(S.ID, S.KEYS.CUMFLATION_ENABLED, {
       name:    "Cumflation - Master Toggle",
       hint:    "[Lewd 3+] Enable or disable all Cumflation features as a group. Turning this off overrides the sub-toggles below.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+    });
+
+    game.settings.register(S.ID, S.KEYS.CUMFLATION_HSCENE, {
+      name:    "Cumflation - Apply Cumflation in H Scene Actions",
+      hint:    "[Lewd 3+] When the Cum macro fires during an H Scene, apply Cumflation tiers to the target. Disable to track cum volume and history without causing Cumflation.",
       scope:   "world",
       config:  true,
       type:    Boolean,
@@ -196,112 +425,9 @@ AFLP.Settings = {
       default: true,
     });
 
-    game.settings.register(S.ID, S.KEYS.CUMFLATION_HSCENE, {
-      name:    "Cumflation - Apply Cumflation in H Scene Actions",
-      hint:    "[Lewd 3+] When the Cum macro fires during an H Scene, apply Cumflation tiers to the target. Disable to track cum volume and history without causing Cumflation.",
-      scope:   "world",
-      config:  true,
-      type:    Boolean,
-      default: true,
-    });
+    // ── Hidden / internal data stores (config:false) ───────────────────────
 
-    game.settings.register(S.ID, S.KEYS.EDGE_AUTO, {
-      name:    "Edge - Prompt to Attempt on Cum",
-      hint:    "[Lewd 3+] When a character reaches max Arousal and would Cum, show a dialog asking whether to attempt the Edge reaction (Fortitude vs level DC). If declined, the Cum proceeds normally. Requires Arousal Automation to be on.",
-      scope:   "world",
-      config:  true,
-      type:    Boolean,
-      default: false,
-    });
-
-    game.settings.register(S.ID, S.KEYS.EDGE_INCLUDE_NPC, {
-      name:    "Edge - Also Apply to Monsters and NPCs",
-      hint:    "[Lewd 4+] Include non-player characters in Edge automation. Enable at Lewd 4 when monsters engage sexually in combat.",
-      scope:   "world",
-      config:  true,
-      type:    Boolean,
-      default: false,
-    });
-
-    // ── Lewd Level 4+ (Monster sexual combat, full automation) ────────────
-
-    game.settings.register(S.ID, S.KEYS.EDGE_SKIP_DIALOG, {
-      name:    "Edge - Automatically Attempt Without Prompting",
-      hint:    "[Lewd 4+] Skip the confirmation dialog and immediately roll the Edge Fortitude save when a character would Cum. Only active when Edge - Prompt to Attempt on Cum is also enabled.",
-      scope:   "world",
-      config:  true,
-      type:    Boolean,
-      default: false,
-    });
-
-    game.settings.register(S.ID, S.KEYS.INFINITE_CUM, {
-      name:    "Infinite Cum Volume (Monsters)",
-      hint:    "When enabled, monsters' cum volume is not reduced when they cum. It stays at maximum. Useful for high-intensity encounters where tracking depletion is not desired.",
-      scope:   "world",
-      config:  true,
-      type:    Boolean,
-      default: false,
-    });
-
-    game.settings.register(S.ID, S.KEYS.HSCENE_THEME, {
-      name:    "H Scene UI Theme",
-      hint:    "Visual style for H scene cards. Per-user - each player can choose their own.",
-      scope:   "client",
-      config:  false,
-      type:    String,
-      choices: {
-        "combat-hud":   "Combat HUD",
-        "status-strip": "Status Strip",
-        "porno":        "Porno Scene",
-        "dossier":      "Dossier File",
-      },
-      default: "porno",
-      onChange: () => {
-        // Re-inject updated CSS for new theme
-        const styleEl = document.getElementById("aflp-hscene-styles-v2");
-        if (styleEl && AFLP?.HScene?._rebuildStyle) {
-          AFLP.HScene._rebuildStyle();
-        }
-        // Drag handle text is refreshed via refreshScene calls below
-        // Rebuild all active card portraits with the new theme
-        const scenes = AFLP?.HScene?._scenes;
-        if (!scenes) return;
-        const newTheme = AFLP.Settings.hsceneTheme ?? "porno";
-        for (const [targetId, scene] of scenes) {
-          const card = document.querySelector(`[data-target-id="${targetId}"]`);
-          if (!card) continue;
-          // Swap theme class
-          card.className = card.className.replace(/aflp-theme-\S+/, "aflp-theme-" + newTheme);
-          // Full rebuild via AFLP public API
-          AFLP.HScene.refreshScene?.(targetId);
-        }
-      },
-    });
-
-    game.settings.register(S.ID, S.KEYS.HSCENE_AROUSAL, {
-      name:    "H Scene Arousal Display",
-      hint:    "Bars or pips for arousal. Per-user.",
-      scope:   "client",
-      config:  false,
-      type:    String,
-      choices: {
-        "auto": "Theme default",
-        "bars": "Bars",
-        "pips": "Pips",
-      },
-      default: "auto",
-    });
-
-    game.settings.register(S.ID, S.KEYS.HSCENE_DOSSIER_FX, {
-      name:    "Dossier: Animated Hologram Effects",
-      hint:    "Enable scan-line and glitch animations for the Dossier File theme.",
-      scope:   "world",
-      config:  true,
-      type:    Boolean,
-      default: true,
-    });
-
-    // Internal - stores active H scene state for reload persistence. Not shown in settings UI.
+    // Stores active H scene state for reload persistence.
     game.settings.register(S.ID, "hsceneActiveScenes", {
       name:   "Active H Scenes (persist)",
       scope:  "world",
@@ -347,6 +473,8 @@ AFLP.Settings = {
   get hsceneLogToChat()      { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_LOG_TO_CHAT); },
   get sceneReportVisibility(){ return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SCENE_REPORT_VIS) ?? "public"; },
   get positionTracking()     { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.POSITION_TRACKING); },
+  get cumHoleFromPosition()  { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_HOLE_FROM_POSITION) ?? false; },
+  get gangbangAutoAssign()   { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.GANGBANG_AUTO_ASSIGN); },
 
   get cumVolumeMode()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_VOLUME_MODE); },
   /** ml per unit of cum — 250 (fantasy) or 4 (realistic) */
@@ -368,7 +496,10 @@ AFLP.Settings = {
   get edgeIncludeNpc()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.EDGE_INCLUDE_NPC); },
   get showWelcome()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SHOW_WELCOME); },
   get infiniteCum()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.INFINITE_CUM); },
-  get hsceneTheme()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME) ?? "combat-hud"; },
+  get hsceneTheme()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME) ?? "aflp-classic"; },
+  get hsceneThemePc()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME_PC) ?? "aflp-classic"; },
+  get hsceneThemeMon()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME_MON) ?? "fuckamons"; },
+  get hscenePlayerPick()     { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_PLAYER_PICK) ?? true; },
   get hsceneArousalStyle()   { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_AROUSAL) ?? "auto"; },
   get hsceneDossierFx()      { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_DOSSIER_FX) ?? false; },
 };

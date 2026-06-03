@@ -11,6 +11,8 @@ if (!window.AFLP.UI) window.AFLP.UI = {};
 const _aflpTabWasActive = new Map();
 // Staged pregnancy additions survive panel rebuilds by living here rather than on the DOM node
 const _aflpPregAdditions = new Map(); // actorId → Array of newPreg objects
+// Active AFLP sub-tab per actor, so it persists across panel rebuilds/refreshes.
+const _aflpActiveSubtab = new Map(); // actorId → "status" | "pregnancy" | "history"
 
 AFLP.UI.SheetTab = {
 
@@ -37,14 +39,28 @@ AFLP.UI.SheetTab = {
       Hooks.on(hookName, _handler);
     }
 
-    // Catch-all for AppV2: fires for every Application render.
-    // Guard against double-injection is handled inside _inject via .aflp-tab-btn check.
-    Hooks.on("renderApplication", (app, html, data) => {
+    // Catch-all for AppV2 actor sheets: renderApplicationV2 fires for every
+    // ApplicationV2 render in Foundry v13+/v14. We filter to actor sheets via
+    // the app.actor guard; dialogs, sidebars, and item sheets have no .actor and
+    // are skipped. This covers any PF2e actor sheet not in the named list above
+    // (e.g. Loot/Party) plus any future sheet classes. Double-injection is
+    // prevented inside _inject via the .aflp-tab-btn / _aflpInjecting guards.
+    Hooks.on("renderApplicationV2", (app, html, data) => {
       if (!app.actor) return;
+      // Only inject into the actor's OWN sheet. Other ApplicationV2 windows also
+      // expose an .actor (notably TokenConfig / PrototypeTokenConfig), and those
+      // were getting the AFLP tab injected over their Appearance tab. The actor's
+      // real sheet satisfies actor.sheet === app; a token config does not.
+      if (app.actor.sheet !== app) return;
       _handler(app, html, data);
     });
 
-    // Legacy fallback for any non-AppV2 sheets
+    // Legacy fallbacks for any non-AppV2 sheets (harmless no-ops under v14).
+    Hooks.on("renderApplication", (app, html, data) => {
+      if (!app.actor) return;
+      if (app.actor.sheet !== app) return; // same scope guard as the AppV2 path
+      _handler(app, html, data);
+    });
     Hooks.on("renderActorSheet", _handler);
   },
 
@@ -273,6 +289,15 @@ AFLP.UI.SheetTab = {
     const history      = actor.getFlag(FLAG, "partnerHistory")              ?? [];
     const titlesHeld   = new Set(sexual.titles ?? []);
 
+    // Ordered list of held title ids (insertion order = acquisition order, so
+    // the last entry is the most recently earned). Used by the title banner.
+    const heldTitleIds = (sexual.titles ?? []).filter(id => AFLP_Titles.resolveTitle(id));
+    // The title the player has chosen to display, falling back to most recent.
+    const mostRecentTitleId = heldTitleIds.length ? heldTitleIds[heldTitleIds.length - 1] : null;
+    let displayTitleId = sexual.displayTitle ?? null;
+    if (!displayTitleId || !titlesHeld.has(displayTitleId)) displayTitleId = mostRecentTitleId;
+    const displayTitle = displayTitleId ? AFLP_Titles.resolveTitle(displayTitleId) : null;
+
     if (!sexual.lifetime.mlGiven)    sexual.lifetime.mlGiven    = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
     if (!sexual.lifetime.mlReceived) sexual.lifetime.mlReceived = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
     if (!sexual.lifetime.given)      sexual.lifetime.given      = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
@@ -317,6 +342,20 @@ AFLP.UI.SheetTab = {
     <div class="aflp-panel${editMode ? " aflp-edit-mode" : ""}">
 
       ${AFLP.UI.SheetTab._css()}
+
+      <!-- Title banner (always visible, above sub-tabs) -->
+      ${AFLP.Settings.titlesShow ? AFLP.UI.SheetTab._renderTitleBanner(displayTitle, heldTitleIds.length) : ""}
+
+      <!-- Sub-tab navigation -->
+      <nav class="aflp-subtabs">
+        <a class="aflp-subtab" data-subtab="status">Sexual Status</a>
+        ${hasPussy ? `<a class="aflp-subtab" data-subtab="pregnancy">Pregnancy</a>` : ""}
+        <a class="aflp-subtab" data-subtab="history">Partner History${history.length ? ` <span class="aflp-subtab-count">${history.length}</span>` : ""}</a>
+        ${AFLP.Settings.titlesShow ? `<a class="aflp-subtab" data-subtab="titles">Titles${heldTitleIds.length ? ` <span class="aflp-subtab-count">${heldTitleIds.length}</span>` : ""}</a>` : ""}
+      </nav>
+
+      <!-- ═══ Sexual Status pane ═══ -->
+      <section class="aflp-subtab-pane" data-subtab-pane="status">
 
       <!-- Header row: Cum / Coomer / Edit button -->
       <div class="aflp-header">
@@ -461,41 +500,49 @@ AFLP.UI.SheetTab = {
         ${totalTier > 0 ? `<p class="aflp-cf-status-word" style="font-size:11px;color:#c9a96e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin:2px 0 0 2px;">${AFLP.cumflationWord(actor)?.word ?? ""}</p>` : ""}
       </div>` : ""}
 
-      <!-- Pregnancy -->
+      </section>
+
+      <!-- ═══ Pregnancy pane ═══ -->
       ${hasPussy ? `
-      <div class="aflp-section">
-        <h3 class="aflp-section-header">Pregnancy</h3>
-        ${AFLP.UI.SheetTab._renderPregnancy(pregnancy, editMode)}
-        <button type="button" class="aflp-btn aflp-process-preg-btn" style="margin-top:6px">
-          Advance Gestation Day
-        </button>
-      </div>` : ""}
-
-      <!-- Partner History -->
-      <div class="aflp-section">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
-          <h3 class="aflp-section-header" style="margin:0;border-bottom:none;">Partner History</h3>
-          ${editMode && history.length
-            ? `<button type="button" class="aflp-btn aflp-history-clear-btn" style="font-size:11px;padding:2px 8px;background:rgba(160,60,40,0.1);border-color:#a03c28;">✕ Clear All</button>`
-            : `<span></span>`}
+      <section class="aflp-subtab-pane" data-subtab-pane="pregnancy">
+        <div class="aflp-section">
+          <h3 class="aflp-section-header">Pregnancy</h3>
+          ${AFLP.UI.SheetTab._renderPregnancy(pregnancy, editMode)}
+          <button type="button" class="aflp-btn aflp-process-preg-btn" style="margin-top:6px">
+            Advance Gestation Day
+          </button>
         </div>
-        <div style="border-bottom:1px solid var(--color-border-dark-tertiary,#c9a96e);margin-bottom:6px;"></div>
-        ${AFLP.UI.SheetTab._renderHistory(history, editMode)}
-      </div>
+      </section>` : ""}
 
+      <!-- ═══ Partner History pane ═══ -->
+      <section class="aflp-subtab-pane" data-subtab-pane="history">
+        <div class="aflp-section">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+            <h3 class="aflp-section-header" style="margin:0;border-bottom:none;">Partner History</h3>
+            ${editMode && history.length
+              ? `<button type="button" class="aflp-btn aflp-history-clear-btn" style="font-size:11px;padding:2px 8px;background:rgba(160,60,40,0.1);border-color:#a03c28;">✕ Clear All</button>`
+              : `<span></span>`}
+          </div>
+          <div style="border-bottom:1px solid var(--color-border-dark-tertiary,#c9a96e);margin-bottom:6px;"></div>
+          ${AFLP.UI.SheetTab._renderHistory(history, editMode)}
+        </div>
+      </section>
 
-      <!-- Titles -->
+      <!-- ═══ Titles pane ═══ -->
       ${AFLP.Settings.titlesShow ? `
-      <div class="aflp-section">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
-          <h3 class="aflp-section-header" style="margin:0;border-bottom:none;">Titles</h3>
+      <section class="aflp-subtab-pane" data-subtab-pane="titles">
+        <div class="aflp-section">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+            <h3 class="aflp-section-header" style="margin:0;border-bottom:none;">Titles</h3>
+            ${!editMode && heldTitleIds.length ? `<span class="aflp-title-hint">★ sets your displayed title</span>` : `<span></span>`}
+          </div>
+          <div style="border-bottom:1px solid var(--color-border-dark-tertiary,#c9a96e);margin-bottom:6px;"></div>
+          ${editMode
+            ? AFLP.UI.SheetTab._renderTitlesEdit(titlesHeld)
+            : AFLP.UI.SheetTab._renderTitlesView(titlesHeld, displayTitleId)
+          }
         </div>
-        <div style="border-bottom:1px solid var(--color-border-dark-tertiary,#c9a96e);margin-bottom:6px;"></div>
-        ${editMode
-          ? AFLP.UI.SheetTab._renderTitlesEdit(titlesHeld)
-          : AFLP.UI.SheetTab._renderTitlesView(titlesHeld)
-        }
-      </div>` : ""}
+      </section>` : ""}
 
     </div>`;
   },
@@ -840,7 +887,58 @@ AFLP.UI.SheetTab = {
       .aflp-cancel-btn { background: rgba(160,60,40,0.1); border-color: #a03c28; }
       .aflp-cancel-btn:hover { background: rgba(160,60,40,0.2); }
 
+      /* Sub-tabs */
+      .aflp-subtabs {
+        display: flex; gap: 2px; margin-bottom: 10px;
+        border-bottom: 2px solid var(--color-border-dark-tertiary, #c9a96e);
+      }
+      .aflp-subtab {
+        flex: 1; text-align: center; padding: 6px 8px; cursor: pointer;
+        font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+        color: var(--color-text-dark-secondary, #999);
+        border: 1px solid transparent; border-bottom: none;
+        border-radius: 5px 5px 0 0; margin-bottom: -2px;
+        transition: background 0.15s ease, color 0.15s ease;
+        white-space: nowrap;
+      }
+      .aflp-subtab:hover { color: var(--color-text-dark-primary, #f0e8d0); background: rgba(201,169,110,0.08); }
+      .aflp-subtab.active {
+        color: var(--color-text-dark-primary, #f0e8d0);
+        background: linear-gradient(180deg, rgba(201,169,110,0.18), rgba(201,169,110,0.06));
+        border-color: var(--color-border-dark-tertiary, #c9a96e);
+        border-bottom: 2px solid var(--color-bg, #1b1b23);
+      }
+      .aflp-subtab-count {
+        display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 2px;
+        font-size: 10px; line-height: 15px; border-radius: 8px;
+        background: rgba(201,169,110,0.25); color: var(--color-text-dark-primary, #f0e8d0);
+        vertical-align: middle;
+      }
+      .aflp-subtab-pane { display: none; }
+      .aflp-subtab-pane.active { display: block; }
+
       /* Titles */
+      .aflp-title-banner {
+        margin-bottom: 8px; padding: 10px 12px; border-radius: 6px; text-align: center;
+        background: linear-gradient(135deg, rgba(201,169,110,0.22), rgba(150,40,80,0.14));
+        border: 1px solid var(--color-border-dark-tertiary, #c9a96e);
+        box-shadow: inset 0 0 18px rgba(201,169,110,0.12);
+      }
+      .aflp-title-banner-empty { opacity: 0.6; }
+      .aflp-title-banner-main {
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+      }
+      .aflp-title-banner-crown { font-size: 18px; line-height: 1; }
+      .aflp-title-banner-name {
+        font-size: 21px; font-weight: 700; letter-spacing: 0.02em;
+        color: var(--color-text-dark-primary, #f0e8d0);
+        text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+      }
+      .aflp-title-banner-desc {
+        display: block; margin-top: 2px; font-size: 11px; font-style: italic;
+        color: var(--color-text-dark-secondary, #888);
+      }
+      .aflp-title-hint { font-size: 10px; font-style: italic; color: var(--color-text-dark-secondary, #888); }
       .aflp-title-list { display: flex; flex-direction: column; gap: 4px; }
       .aflp-title-chip {
         background: linear-gradient(135deg, rgba(201,169,110,0.1), rgba(201,169,110,0.04));
@@ -848,6 +946,19 @@ AFLP.UI.SheetTab = {
         border-radius: 4px; padding: 4px 8px;
         font-size: 12px; display: flex; flex-direction: column; gap: 1px;
       }
+      .aflp-title-chip.aflp-title-active {
+        background: linear-gradient(135deg, rgba(201,169,110,0.28), rgba(150,40,80,0.12));
+        box-shadow: inset 0 0 10px rgba(201,169,110,0.18);
+      }
+      .aflp-title-chip-head { display: flex; align-items: center; gap: 6px; }
+      .aflp-title-star {
+        flex-shrink: 0; background: none; border: none; cursor: pointer;
+        font-size: 15px; line-height: 1; padding: 0; width: 18px;
+        color: var(--color-text-dark-secondary, #888);
+        transition: color 0.15s ease, transform 0.1s ease;
+      }
+      .aflp-title-star:hover { color: #e8c46a; transform: scale(1.15); }
+      .aflp-title-star.active { color: #f0c040; text-shadow: 0 0 6px rgba(240,192,64,0.6); }
       .aflp-title-desc { font-size: 11px; color: var(--color-text-dark-secondary, #666); font-style: italic; }
     </style>`;
   },
@@ -1185,17 +1296,49 @@ AFLP.UI.SheetTab = {
   },
 
   // -----------------------------------------------
-  // Render titles — view mode
+  // Render the large title banner at the top of the tab.
+  // Shows the player's chosen display title (set via the star toggle on the
+  // Titles tab), defaulting to the most recently earned title.
   // -----------------------------------------------
-  _renderTitlesView(titlesHeld) {
+  _renderTitleBanner(displayTitle, heldCount) {
+    if (!displayTitle) {
+      return `<div class="aflp-title-banner aflp-title-banner-empty">
+        <span class="aflp-title-banner-name">No Title Yet</span>
+        <span class="aflp-title-banner-desc">Earn titles through play</span>
+      </div>`;
+    }
+    return `<div class="aflp-title-banner" data-title-id="${displayTitle.id}">
+      <div class="aflp-title-banner-main">
+        <span class="aflp-title-banner-crown">🏆</span>
+        <span class="aflp-title-banner-name">${displayTitle.name}</span>
+      </div>
+      <span class="aflp-title-banner-desc">${displayTitle.desc}</span>
+    </div>`;
+  },
+
+  // Render titles — view mode
+  // Each title has a star toggle; clicking sets it as the display title shown
+  // in the banner. The active display title shows a filled star.
+  // -----------------------------------------------
+  _renderTitlesView(titlesHeld, displayTitleId = null) {
     if (!titlesHeld.size) return `<div class="aflp-none">No titles earned yet.</div>`;
     const items = AFLP_Titles.TITLES
       .filter(t => titlesHeld.has(t.id))
-      .map(t => `
-        <div class="aflp-title-chip" title="🏆 ${t.name}">
-          🏆 <strong>${t.name}</strong>
+      .map(t => {
+        const isActive = t.id === displayTitleId;
+        const star = isActive ? "★" : "☆";
+        const starTitle = isActive ? "Currently displayed title" : "Set as displayed title";
+        const name = AFLP_Titles._name(t.id, t.name);
+        return `
+        <div class="aflp-title-chip${isActive ? " aflp-title-active" : ""}" title="🏆 ${name}">
+          <div class="aflp-title-chip-head">
+            <button type="button" class="aflp-title-star${isActive ? " active" : ""}"
+              data-title-id="${t.id}" title="${starTitle}">${star}</button>
+            🏆 <strong>${name}</strong>
+          </div>
           <span class="aflp-title-desc">${t.desc}</span>
-        </div>`).join("");
+        </div>`;
+      }).join("");
     return `<div class="aflp-title-list">${items}</div>`;
   },
 
@@ -1219,6 +1362,36 @@ AFLP.UI.SheetTab = {
   // -----------------------------------------------
   _activateListeners(html, actor, sheet) {
     const FLAG = AFLP.FLAG_SCOPE;
+
+    // ── Sub-tabs ──────────────────────────────────────────────────────────
+    // Switching panes is a pure DOM toggle — no panel rebuild — so the heavy
+    // Partner History DOM is never re-rendered just to change tabs. The active
+    // tab is stored per-actor so it survives panel refreshes (arousal clicks,
+    // edit toggles, etc.).
+    const subtabBar = html.querySelector(".aflp-subtabs");
+    if (subtabBar) {
+      const panes = html.querySelectorAll(".aflp-subtab-pane");
+      const tabs  = html.querySelectorAll(".aflp-subtab");
+      const validTabs = new Set([...tabs].map(t => t.dataset.subtab));
+
+      const applySubtab = (which) => {
+        if (!validTabs.has(which)) which = "status";
+        _aflpActiveSubtab.set(actor.id, which);
+        tabs.forEach(t => t.classList.toggle("active", t.dataset.subtab === which));
+        panes.forEach(p => p.classList.toggle("active", p.dataset.subtabPane === which));
+      };
+
+      // Restore the previously-active tab (default "status").
+      applySubtab(_aflpActiveSubtab.get(actor.id) ?? "status");
+
+      tabs.forEach(tab => {
+        tab.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          applySubtab(tab.dataset.subtab);
+        });
+      });
+    }
 
     // Note: v13 uses native addEventListener — no jQuery .off() needed.
     // Re-entry is prevented by the panel-level handler cleanup below.
@@ -1297,6 +1470,9 @@ AFLP.UI.SheetTab = {
       // Re-entry guard: prevent double-fire if two listeners somehow coexist.
       if (panelRoot._aflpBtnProcessing) return;
       panelRoot._aflpBtnProcessing = true;
+      // Current edit-mode state, read from the panel (carries .aflp-edit-mode).
+      // Several handlers below pass this to _refreshPanel to preserve the mode.
+      const isEditMode = panelRoot.classList.contains("aflp-edit-mode");
       try {
 
       if (btn.classList.contains("aflp-denied-inc")) {
@@ -1315,9 +1491,17 @@ AFLP.UI.SheetTab = {
         await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
         return;
       }
-      if (btn.classList.contains("aflp-arousal-inc")) {
-        await AFLP_Arousal.increment(actor, 1, "Sheet +");
-        await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+      if (btn.classList.contains("aflp-title-star")) {
+        const FLAG   = AFLP.FLAG_SCOPE;
+        const titleId = btn.dataset.titleId;
+        const sexual = structuredClone(actor.getFlag(FLAG, "sexual") ?? {});
+        const held = new Set((sexual.titles ?? []).filter(id => AFLP_Titles.resolveTitle(id)));
+        // Only allow selecting a title the actor actually holds.
+        if (titleId && held.has(titleId) && sexual.displayTitle !== titleId) {
+          sexual.displayTitle = titleId;
+          await actor.setFlag(FLAG, "sexual", sexual);
+          await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+        }
         return;
       }
       if (btn.classList.contains("aflp-arousal-dec")) {
@@ -1364,8 +1548,8 @@ AFLP.UI.SheetTab = {
 
         if (anyReset) {
           const labels = Object.entries(resetSections).filter(([,v]) => v).map(([k]) => k).join(", ");
-          const ok = await Dialog.confirm({
-            title: "Reset Selected Sections",
+          const ok = await foundry.applications.api.DialogV2.confirm({
+            window: { title: "Reset Selected Sections" },
             content: `Reset <strong>${labels}</strong> for <strong>${actor.name}</strong>?`
           });
           if (!ok) {
@@ -1586,8 +1770,8 @@ AFLP.UI.SheetTab = {
       if (btn.classList.contains("aflp-deliver-btn")) {
         const pregId = btn.dataset.pregId;
         if (!pregId) return;
-        const ok = await Dialog.confirm({
-          title: "Deliver",
+        const ok = await foundry.applications.api.DialogV2.confirm({
+          window: { title: "Deliver" },
           content: `Manually deliver this pregnancy for <strong>${actor.name}</strong>?`
         });
         if (!ok) return;
@@ -1690,8 +1874,8 @@ AFLP.UI.SheetTab = {
         return;
       }
       if (btn.classList.contains("aflp-history-clear-btn")) {
-        const ok = await Dialog.confirm({
-          title: "Clear Partner History",
+        const ok = await foundry.applications.api.DialogV2.confirm({
+          window: { title: "Clear Partner History" },
           content: `Clear <strong>all</strong> partner history for <strong>${actor.name}</strong>? This cannot be undone.`
         });
         if (!ok) return;

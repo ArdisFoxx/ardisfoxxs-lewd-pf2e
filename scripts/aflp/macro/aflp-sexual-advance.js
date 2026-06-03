@@ -116,100 +116,76 @@
 
   const targetId = targetToken.id;  // scene key is token ID, not world actor ID
 
-  // ── Auto-start or join H scene if hscene is enabled ─────────────────────
-  // If the target is already in a scene, add this attacker to it.
-  // If neither actor is in any scene, start a new one.
-  // _aflpMacroHandlingPosition suppresses startScene/addAttacker's own position prompts
-  // so SA can await it in the right order (before arousal, not as a fire-and-forget).
+  // ── Auto-start / join / re-point H scene (unified model) ────────────────
+  // startScene resolves the ONE battlemap scene and create-or-joins-or-repoints:
+  // it ensures both participants and sets the SOURCE's partnerId to the TARGET
+  // (the re-point). This single call replaces the old start/join/skip branching
+  // and fixes the cases where a source advancing on a new partner - or the
+  // projected target SA'ing its own attacker - failed to re-point partnerId.
+  // _aflpMacroHandlingPosition suppresses startScene's own role/position prompts
+  // so SA can drive them here in the right order.
   let saHandledScene = false;
   if (AFLP.Settings.hsceneEnabled) {
-    const attackerScene  = AFLP.HScene._getScene?.(sourceActor.id);
-    const targetScene    = AFLP.HScene._getSceneWhereTarget?.(targetToken.id, targetActor.id);
-    const existingScene  = targetScene ?? attackerScene;
-
     window._aflpMacroHandlingPosition = true;
-    if (existingScene) {
-      // Target (or attacker) is already in a scene. Add this attacker if not already there.
-      const alreadyIn = existingScene.attackers?.some(a =>
-        a.id === sourceToken.id || (a.actorId ?? a.id) === sourceActor.id
-      );
-      if (!alreadyIn) {
-        AFLP.HScene.addAttacker(existingScene.targetId, {
-          id: sourceToken.id, actorId: sourceActor.id,
-          name: sourceActor.name, img: sourceActor.img,
-          tokenDoc: sourceToken.document ?? null,
-        });
-        saHandledScene = true;
-      }
-    } else {
-      // No scene yet — check if we need a role prompt (willing target: no conditions set).
-      // SS sets conditions automatically; SA on a willing target needs to ask.
-      const atkHasRole = sourceActor.hasCondition?.("dominating") || sourceActor.hasCondition?.("submitting");
-      const tgtHasRole = targetActor.hasCondition?.("dominating") || targetActor.hasCondition?.("submitting");
-      if (!atkHasRole && !tgtHasRole && game.user.isGM && AFLP.HScene._promptRoleSelection && !window._aflpSSInProgress) {
-        // Await so roles are set before the scene card renders
+
+    // Establish/keep scene roles. AFLP roles (dominating/submitting) are CUSTOM
+    // items, not PF2e core conditions, so they must be detected by item slug -
+    // hasCondition() never sees them and would re-prompt on every SA. Rule:
+    //  - Brand-new pairing, nobody has a role -> PROMPT once (who's in control).
+    //  - Joining an already-controlled scene (target roled, newcomer not) ->
+    //    default the newcomer to Dominating, no prompt (legacy addAttacker behavior).
+    //  - Roles already established, or a consensual scene (exists, no roles) -> do nothing.
+    // Only the SS struggle-escape changes control after it is established.
+    const hasRole = (a) => { const l = a?.token?.actor ?? a; return !!l?.items?.some(c => c.slug === "dominating" || c.slug === "submitting"); };
+    const srcRoled = hasRole(sourceActor);
+    const tgtRoled = hasRole(targetActor);
+    const preexisting = AFLP.HScene.getSceneForToken?.(targetToken.id, targetActor.id)
+                     ?? AFLP.HScene.getSceneForToken?.(sourceToken.id, sourceActor.id);
+    if (!srcRoled && !tgtRoled && !preexisting) {
+      if (game.user.isGM && AFLP.HScene._promptRoleSelection && !window._aflpSSInProgress) {
         await AFLP.HScene._promptRoleSelection(sourceActor, targetActor);
       }
+    } else if (!srcRoled && tgtRoled && game.user.isGM && !window._aflpSSInProgress) {
+      // Newcomer joining an established scene - inherit the Dominating role.
+      await AFLP.HScene.establishRole?.(sourceActor, "dominating");
+    }
 
-      // Start a fresh scene.
-      const sourceData = {
-        id: sourceToken.id, actorId: sourceActor.id,
-        name: sourceActor.name, img: sourceActor.img,
-        tokenDoc: sourceToken.document ?? null,
-      };
-      const targetData = {
-        id: targetToken.id, actorId: targetActor.id,
-        name: targetActor.name, img: targetActor.img,
-        tokenDoc: targetToken.document ?? null,
-      };
-      AFLP.HScene.startScene(sourceData, targetData);
-      if (AFLP.Settings.proseFlavor) {
-        AFLP.HScene.generateAndShowProse(targetToken.id, "sexual-advance", sourceActor, targetActor);
-      }
-      saHandledScene = true;
+    AFLP.HScene.startScene(
+      { id: sourceToken.id, actorId: sourceActor.id, name: sourceActor.name, img: sourceActor.img, tokenDoc: sourceToken.document ?? null },
+      { id: targetToken.id, actorId: targetActor.id, name: targetActor.name, img: targetActor.img, tokenDoc: targetToken.document ?? null }
+    );
+    if (AFLP.Settings.proseFlavor) {
+      AFLP.HScene.generateAndShowProse(targetToken.id, "sexual-advance", sourceActor, targetActor);
     }
     window._aflpMacroHandlingPosition = false;
+    saHandledScene = true;
   }
 
-  // ── Position prompt — BEFORE arousal so hole can be derived from position ─
-  // Covers: new scene, joining existing scene, or attacker already in scene with no position set.
+  // ── Position prompt — for the SOURCE (the one advancing) ─────────────────
+  // Uses participantHandle so the source's position is set whether they project
+  // as target or attacker. Hole is derived from this position at cum time.
   if (AFLP.Settings.positionTracking && AFLP.Settings.hsceneEnabled) {
-    const hscene = AFLP.HScene._getScene?.(sourceActor.id)
-                ?? AFLP.HScene._getSceneWhereTarget?.(targetToken.id, targetActor.id);
-    if (hscene) {
-      const atkData = hscene.attackers?.find(a =>
-        a.id === sourceToken.id || (a.actorId ?? a.id) === sourceActor.id
-      );
-      if (atkData && !atkData.position) {
-        const hasCock = !!sourceActor.getFlag(FLAG, "cock");
-        const targetPronouns = AFLP.getPronouns(targetActor);
-        const positionId = await AFLP.HScene._showPositionDialog(sourceActor, targetActor, hasCock, targetPronouns);
-        if (!positionId) {
-          // User dismissed — reveal card anyway so the scene is visible, then cancel SA
-          AFLP.HScene.revealCard?.(hscene.targetId);
+    const hscene = AFLP.HScene.getSceneForToken?.(sourceToken.id, sourceActor.id);
+    const handle = AFLP.HScene.participantHandle?.(sourceToken.id);
+    if (hscene && handle) {
+      if (!handle.position) {
+        await AFLP.HScene._promptGroupPosition(hscene, handle);
+        if (!handle.position) {
+          // Dismissed without picking — reveal card anyway, cancel SA
+          AFLP.HScene.revealCard?.(hscene.id);
           return;
         }
-        atkData.position = positionId;
-        atkData._prevPosition = positionId;
-
-        // Post to scene log
-        const posEntry = AFLP.getPosition(positionId);
-        if (posEntry) {
-          const phrase = posEntry.logPhrase(atkData.name, hscene.targetName, targetPronouns);
-          AFLP.HScene.addProse(hscene.targetId, phrase, "action");
-        }
-        // Refresh card so position pill + portraits update
-        AFLP.HScene.refreshScene?.(hscene.targetId);
+        // Position prose is posted by _promptGroupPosition / _promptAndSetPosition,
+        // named against the source's actual partner (partner-aware), so we do not
+        // re-log it here (doing so used hscene.targetName, the projected target).
+        AFLP.HScene.refreshScene?.(hscene.id);
         AFLP.HScene.refreshArousalForActor(sourceActor.id);
       }
-      // Reveal the H Scenes card now that position is resolved
-      AFLP.HScene.revealCard?.(hscene.targetId);
+      AFLP.HScene.revealCard?.(hscene.id);
     }
   } else if (AFLP.Settings.hsceneEnabled) {
-    // No position tracking — still reveal the card
-    const hscene = AFLP.HScene._getScene?.(sourceActor.id)
-                ?? AFLP.HScene._getSceneWhereTarget?.(targetToken.id, targetActor.id);
-    if (hscene) AFLP.HScene.revealCard?.(hscene.targetId);
+    const hscene = AFLP.HScene.getSceneForToken?.(sourceToken.id, sourceActor.id);
+    if (hscene) AFLP.HScene.revealCard?.(hscene.id);
   }
 
   // ── H Scene card prose ──

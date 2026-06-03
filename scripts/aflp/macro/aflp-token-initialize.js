@@ -94,6 +94,16 @@ for (const { actor } of tokens) {
   await worldActor.setFlag(FLAG, "genitalTypes", genitalTypes);
 
   // --------------------------------------------------
+  // Position trait — detect from creature traits if not already set.
+  // Stored as a simple flag so GMs can override per creature.
+  // --------------------------------------------------
+  const existingPositionTrait = worldActor.getFlag(FLAG, "positionTrait");
+  if (!existingPositionTrait) {
+    const detected = AFLP._detectPositionTrait?.(worldActor) ?? "biped";
+    await worldActor.setFlag(FLAG, "positionTrait", detected);
+  }
+
+  // --------------------------------------------------
   // Kink item → flag migration
   // --------------------------------------------------
   const sexual = structuredClone(worldActor.getFlag(FLAG, "sexual") ?? {});

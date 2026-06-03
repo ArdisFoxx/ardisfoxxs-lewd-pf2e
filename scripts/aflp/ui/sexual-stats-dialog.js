@@ -60,7 +60,7 @@ window.AFLP_Pregnancy = {
     if (autoSuccess) {
       success = true;
     } else {
-      roll = await new Roll("1d20").evaluate({async: true});
+      roll = await new Roll("1d20").evaluate();
       success = roll.total >= dc;
     }
 
@@ -117,7 +117,7 @@ window.AFLP_Pregnancy = {
     }
 
     while (true) {
-      const roll = await new Roll("1d6").evaluate({async: true});
+      const roll = await new Roll("1d6").evaluate();
       const explode =
         roll.total === 6 ||
         (hasBroodSow && roll.total >= 5) ||
@@ -133,7 +133,7 @@ window.AFLP_Pregnancy = {
     let dice = 2;
     let result = [];
     while (true) {
-      const r = await new Roll(`${dice}d4`).evaluate({async: true});
+      const r = await new Roll(`${dice}d4`).evaluate();
       const faces = r.dice[0].results.map(x => x.result);
       result.push(...faces);
       if (faces.every(x => x === 4)) dice += 2;
@@ -247,7 +247,7 @@ AFLP.UI.SexualStatsDialog.prototype.render = async function() {
     content,
     buttons:  [{ action: "close", label: "Close", default: true, callback: async () => {} }],
     close:    async () => {},
-    render(ev, dlg) { self._activateListeners($(dlg.element), dlg); },
+    render(ev, dlg) { self._activateListeners(dlg.element, dlg); },
   });
 };
 
@@ -336,9 +336,9 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
           if (slug === "creature-fetish") {
             const note = this.kinkNotes?.[slug];
             const extra = note ? `: <em>${note}</em>` : "";
-            return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)  }${extra}</li>`;
+            return `<li>${await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)  }${extra}</li>`;
           }
-          return `<li>${await TextEditor.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}</li>`;
+          return `<li>${await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${kink.uuid}]{${kink.name}}`)}</li>`;
         }
         if (slug === "creature-fetish") {
           const note = this.kinkNotes?.[slug] ?? "";
@@ -366,21 +366,21 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
     if (this.hasPussy) {
       const pEntry = AFLP.genitalTypes["pussy"];
       if (pEntry?.uuid) {
-        genitals.push(`<li>${await TextEditor.enrichHTML(`@UUID[${pEntry.uuid}]{${pEntry.name}}`)}</li>`);
+        genitals.push(`<li>${await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${pEntry.uuid}]{${pEntry.name}}`)}</li>`);
       }
     }
 
     if (this.hasCock) {
       const cEntry = AFLP.genitalTypes["cock"];
       if (cEntry?.uuid) {
-        genitals.push(`<li>${await TextEditor.enrichHTML(`@UUID[${cEntry.uuid}]{${cEntry.name}}`)}</li>`);
+        genitals.push(`<li>${await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${cEntry.uuid}]{${cEntry.name}}`)}</li>`);
       }
       const subtypes = await Promise.all(
         Object.entries(AFLP.genitalTypes)
           .filter(([slug, data]) => data.parent === "cock" && this.genitalTypes[slug])
           .sort((a, b) => a[1].name.localeCompare(b[1].name))
           .map(async ([slug, data]) =>
-            `<li style="margin-left:14px">${await TextEditor.enrichHTML(`@UUID[${data.uuid}]{${data.name}}`)}</li>`
+            `<li style="margin-left:14px">${await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${data.uuid}]{${data.name}}`)}</li>`
           )
       );
       genitals.push(...subtypes.filter(Boolean));
@@ -471,16 +471,19 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
 // =======================
 // _activateListeners
 // =======================
+// `html` is the raw DialogV2 element (HTMLElement) in Foundry v13+/v14.
 AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) {
-  html.find("[data-action=adjust]").click(() => { this.view = "adjust"; dialog.close(); this.render(); });
-  html.find("[data-action=display]").click(() => { this.view = "display"; dialog.close(); this.render(); });
+  html.querySelector("[data-action=adjust]")?.addEventListener("click", () => { this.view = "adjust"; dialog.close(); this.render(); });
+  html.querySelector("[data-action=display]")?.addEventListener("click", () => { this.view = "display"; dialog.close(); this.render(); });
 
-  html.find("#aflp-cock-checkbox").on("change", function() {
-    html.find("#aflp-cock-subtypes").toggle(this.checked);
+  const cockCheckbox = html.querySelector("#aflp-cock-checkbox");
+  cockCheckbox?.addEventListener("change", () => {
+    const subtypes = html.querySelector("#aflp-cock-subtypes");
+    if (subtypes) subtypes.style.display = cockCheckbox.checked ? "" : "none";
   });
 
-  html.find("[data-action=reset]").click(async () => {
-    const ok = await Dialog.confirm({ title: "Reset Sexual Stats", content: "Reset all sexual stats and clear pregnancies?" });
+  html.querySelector("[data-action=reset]")?.addEventListener("click", async () => {
+    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: "Reset Sexual Stats" }, content: "Reset all sexual stats and clear pregnancies?" });
     if (!ok) return;
     await this.actor.setFlag(this.FLAG, "sexual", structuredClone(AFLP.sexualDefaults));
     await this.actor.unsetFlag(this.FLAG, "pregnancy");
@@ -489,7 +492,7 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
     dialog.close();
   });
 
-  html.find("#aflp-sexual-stats").on("submit", async ev => {
+  html.querySelector("#aflp-sexual-stats")?.addEventListener("submit", async ev => {
     ev.preventDefault();
     const fd = new FormData(ev.currentTarget);
 

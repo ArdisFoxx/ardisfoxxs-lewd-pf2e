@@ -27,11 +27,11 @@ AFLP.HScene = (() => {
   // CF_LABEL_DEFAULTS thresholds are per-hole tiers (highest single primary hole, 1-8 scale).
   // Tier 5 means "facial 8 also at 8" for the top tier (checked separately in _cumflationWord).
   const CF_LABEL_DEFAULTS = [
-    { minTier: 2, word: "LEAKING",     color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
-    { minTier: 4, word: "STRETCHED",   color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
-    { minTier: 6, word: "CUMBUCKET",   color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
-    { minTier: 8, word: "CUMPREGNANT", color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
-    { minTier: 9, word: "CUMTOILET",   color: "rgba(255,40,60,1)",     glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
+    { minTier: 2, word: "Oozing Out",         color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
+    { minTier: 4, word: "Stretched Belly",    color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
+    { minTier: 6, word: "Full Cum Bucket",    color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
+    { minTier: 8, word: "Public Cum Dump",    color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
+    { minTier: 9, word: "Splattered Cum Toilet", color: "rgba(255,40,60,1)",  glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
   ];
 
   function _getCFLabels() {
@@ -86,15 +86,18 @@ AFLP.HScene = (() => {
       const data = [];
       for (const scene of _scenes.values()) {
         data.push({
-          targetId:      scene.targetId,
-          targetActorId: scene.targetActorId,
-          targetName:    scene.targetName,
-          targetImg:     scene.targetImg,
-          attackers:     (scene.attackers ?? []).map(a => ({
-            id: a.id, actorId: a.actorId, name: a.name, img: a.img, position: a.position ?? null,
+          // Unified model: scene.id is the battlemap key; participants are the
+          // source of truth. We DO NOT persist the legacy target*/attackers
+          // fields — those are derived getters and would be stale/duplicative.
+          id:            scene.id,
+          participants:  (scene.participants ?? []).map(p => ({
+            tokenId: p.tokenId, actorId: p.actorId, name: p.name, img: p.img,
+            partnerId: p.partnerId ?? null, position: p.position ?? null, role: p.role ?? null,
+            _facing: p._facing ?? false,
           })),
           orgasms:          scene.orgasms ?? {},
           manualHoles:      scene.manualHoles ?? {},
+          readyToCum:       scene.readyToCum ?? {},
           damageTaken:      scene.damageTaken ?? 0,
           damageDealt:      scene.damageDealt ?? 0,
           bondageRounds:    scene.bondageRounds ?? 0,
@@ -103,6 +106,7 @@ AFLP.HScene = (() => {
           loadsReceived:    scene.loadsReceived ?? 0,
           loadsByHole:      scene.loadsByHole ?? {},
           creaturesFucked:  [...(scene.creaturesFucked ?? [])],
+          orgasmsByAttacker: scene.orgasmsByAttacker ?? {},
         });
       }
       game.settings.set(AFLP.Settings.ID, "hsceneActiveScenes", JSON.stringify(data)).catch(() => {});
@@ -120,56 +124,67 @@ AFLP.HScene = (() => {
 
     _ensureContainer();
     for (const sc of saved) {
-      if (!sc.targetId || !sc.attackers?.length) continue;
-      // Skip if already open (e.g. restored by socket from another client first)
-      if (_scenes.has(sc.targetId)) continue;
+      // Accept both the new participant format and any legacy save (targetId +
+      // attackers) so a state written by the pre-unified build still restores.
+      let participants, sceneId;
+      if (Array.isArray(sc.participants)) {
+        participants = sc.participants.map(p => ({
+          tokenId: p.tokenId, actorId: p.actorId, name: p.name, img: p.img, tokenDoc: null,
+          partnerId: p.partnerId ?? null, position: p.position ?? null, role: p.role ?? null,
+          ...(typeof p._facing === "boolean" ? { _facing: p._facing } : {}),
+        }));
+        sceneId = sc.id ?? _battlemapId(sc.participants[0]?.tokenId);
+      } else if (sc.targetId && Array.isArray(sc.attackers)) {
+        // Legacy migration: target first (projection invariant), attackers after,
+        // each attacker paired to the target.
+        participants = [
+          { tokenId: sc.targetId, actorId: sc.targetActorId ?? sc.targetId, name: sc.targetName,
+            img: sc.targetImg, tokenDoc: null, partnerId: sc.attackers[0]?.id ?? null, position: null, role: null },
+          ...sc.attackers.map(a => ({
+            tokenId: a.id, actorId: a.actorId ?? a.id, name: a.name, img: a.img, tokenDoc: null,
+            partnerId: sc.targetId, position: a.position ?? null, role: null,
+          })),
+        ];
+        sceneId = _battlemapId(sc.targetId);
+      } else {
+        continue;
+      }
+      if (!participants.length) continue;
+      if (_scenes.has(sceneId)) continue; // already open (e.g. restored elsewhere first)
+      _inferFacingFlags(participants); // fill _facing on legacy saves; no-op if present
+
       const scene = {
-        targetId:         sc.targetId,
-        targetActorId:    sc.targetActorId,
-        targetName:       sc.targetName,
-        targetImg:        sc.targetImg,
-        targetTokenDoc:   null,
-        attackers:        sc.attackers.map(a => ({
-          id: a.id, actorId: a.actorId, name: a.name, img: a.img,
-          position: a.position ?? null, tokenDoc: null,
-        })),
-        log:              [],
+        id:               sceneId,
+        participants,
+        ..._freshSceneStats(),
         orgasms:          sc.orgasms ?? {},
         manualHoles:      sc.manualHoles ?? {},
+        readyToCum:       sc.readyToCum ?? {},
         damageTaken:      sc.damageTaken ?? 0,
         damageDealt:      sc.damageDealt ?? 0,
         bondageRounds:    sc.bondageRounds ?? 0,
         restrainedRounds: sc.restrainedRounds ?? 0,
         airlockRounds:    sc.airlockRounds ?? 0,
         loadsReceived:    sc.loadsReceived ?? 0,
-        loadsByHole:      sc.loadsByHole ?? {},
+        loadsByHole:      sc.loadsByHole ?? { anal: 0, oral: 0, vaginal: 0, facial: 0 },
         creaturesFucked:  new Set(sc.creaturesFucked ?? []),
+        orgasmsByAttacker: sc.orgasmsByAttacker ?? {},
       };
-      _scenes.set(sc.targetId, scene);
+      _defineLegacyView(scene);
+      _scenes.set(sceneId, scene);
       const card = _buildCard(scene);
       _container.appendChild(card);
       _container.style.display = "flex";
-      AFLP.HScene.revealCard(sc.targetId);
+      AFLP.HScene.revealCard(sceneId);
     }
     _updateContainerWidth();
 
-    // Re-broadcast all restored scenes so any already-connected clients catch up
+    // Re-broadcast restored scenes as full participant syncs so any
+    // already-connected clients rebuild the same unified scene.
     for (const scene of _scenes.values()) {
-      for (let i = 0; i < scene.attackers.length; i++) {
-        const atk = scene.attackers[i];
-        const type = i === 0 ? "hscene-start" : "hscene-add-attacker";
-        if (i === 0) {
-          game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
-            type,
-            attacker: atk,
-            target: { id: scene.targetId, actorId: scene.targetActorId, name: scene.targetName, img: scene.targetImg },
-          });
-        } else {
-          game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type, targetId: scene.targetId, attacker: atk });
-        }
-      }
+      game.socket.emit("module.ardisfoxxs-lewd-pf2e", _sceneSyncPayload(scene));
     }
-  } // targetId -> reveal fn, for SA to call
+  } // (restore complete)
 
   // Resolve the live actor for a scene participant.
   // Prefers tokenDoc (set on the launching client); falls back to canvas token
@@ -190,6 +205,491 @@ AFLP.HScene = (() => {
       img:      token.actor?.img  ?? token.document?.texture?.src ?? "",
       tokenDoc: token.document ?? null,   // client-local reference; not sent over socket
     };
+  }
+
+  // ===========================================================================
+  // UNIFIED SCENE MODEL  (Phase 1 — model layer, WIRED IN)
+  // ---------------------------------------------------------------------------
+  // "ONE scene per Foundry battlemap" keyed by battlemap id (scene.id) with a
+  // flat scene.participants[] list. Each participant records partnerId (the
+  // tokenId it is directed at right now), position, and role. Pairings derive
+  // from partnerId, set by each actor's most recent SA / SS.
+  //
+  // STRATEGY: keep ALL existing renderers (~55 read sites that read
+  // scene.attackers / scene.targetActorId / scene.targetName ...) working
+  // UNCHANGED by projecting the legacy view from participants via getters
+  // (_defineLegacyView). Only the write/resolution sites are rewired.
+  //
+  // PHASE 1 STATUS: model + keying + participants + persistence + the GM-path
+  // write sites (startScene / addAttacker / removeParticipant / position) +
+  // full-scene socket sync are wired. SA/SS/cum RESOLUTION routing (Section C,
+  // in the macros + arousal.js) is the remaining Phase 1 work. The card stays
+  // visually identical (driven by the legacy getters).
+  // ===========================================================================
+
+  // The battlemap key for the unified scene map. A TokenDocument's .parent is
+  // its Scene (Foundry's battlemap). Accept either a TokenDocument or a raw
+  // token id; fall back to the active canvas scene, then a literal "default"
+  // so the map key is NEVER null/undefined (which would collide silently).
+  function _battlemapId(tokenDocOrId) {
+    let tokenDoc = tokenDocOrId;
+    if (typeof tokenDocOrId === "string") {
+      tokenDoc = canvas?.tokens?.get(tokenDocOrId)?.document ?? null;
+    }
+    return tokenDoc?.parent?.id ?? canvas?.scene?.id ?? "default";
+  }
+
+  // Pick the projected legacy "target" from a participant list.
+  // Rule: the participant the MOST others point their partnerId at wins
+  // (incoming partner count). Tie-break 1: role === "sub". Tie-break 2:
+  // earliest insertion order in participants[].
+  //
+  // IMPORTANT ORDERING DEPENDENCY: in a balanced 1v1 (mutual partnerId, no
+  // roles) the incoming counts tie 1-1 and the result falls through to
+  // insertion order. startScene MUST therefore insert the SA/SS *target*
+  // participant FIRST so the 1v1 projection reproduces the legacy target.
+  // Do not reorder participant insertion without revisiting this.
+  function _projectTarget(participants) {
+    const list = participants ?? [];
+    if (!list.length) return null;
+
+    // incoming[tokenId] = how many OTHER participants aim partnerId at it.
+    const incoming = new Map();
+    for (const p of list) incoming.set(p.tokenId, 0);
+    for (const p of list) {
+      if (p.partnerId && incoming.has(p.partnerId)) {
+        incoming.set(p.partnerId, incoming.get(p.partnerId) + 1);
+      }
+    }
+
+    let best = null, bestCount = -1, bestIndex = Infinity;
+    list.forEach((p, idx) => {
+      const count   = incoming.get(p.tokenId) ?? 0;
+      const isSub   = p.role === "sub";
+      const curSub  = best?.role === "sub";
+      const wins =
+        count > bestCount ||                                   // more incoming
+        (count === bestCount && isSub && !curSub) ||           // tie -> prefer sub
+        (count === bestCount && isSub === curSub && idx < bestIndex); // tie -> earliest
+      if (wins) { best = p; bestCount = count; bestIndex = idx; }
+    });
+    return best;
+  }
+
+  // ── Balanced-layout topology grouping ──────────────────────────────────────
+  // Generalizes _projectTarget (which picks ONE target) into the full set of
+  // pairings present in a scene. Returns an ORDERED array of groups:
+  //   { type:"mutual", id, members:[pA, pB] }
+  //       A and B each aim partnerId at the other (reversal / "entangled").
+  //   { type:"group",  id, receiver:p, perfs:[p,...] }
+  //       one receiver with >=1 performers aiming partnerId at it (gangbang,
+  //       or a 1:1 with a clear bottom). The traditional "many vs one" layout
+  //       is simply the group case with a single receiver.
+  // An actor may appear in more than one group (e.g. a chain X->Y->Z, where Y
+  // both receives from X and performs on Z; or a mutual pair where one side is
+  // ALSO gangbanged by a third party). That is intended: each pairing renders.
+  // Participants with no partner who are nobody's partner are idle and omitted.
+  function _buildSceneGroups(scene) {
+    const list = (scene?.participants ?? []).filter(p => p && p.tokenId);
+    if (!list.length) return [];
+    const byId = new Map(list.map(p => [p.tokenId, p]));
+    // An INTENTIONAL edge a->b is a aiming partnerId at b that is NOT just a's
+    // cosmetic "facing" default (set when a was made someone's target; see
+    // startScene). Facing-only back-edges are ignored so a gangbang receiver
+    // who faces one of its attackers is not mistaken for a reversal. A true
+    // mutual/reversal is a<->b where BOTH directions are intentional (each
+    // actor ran their own SA/SS at the other).
+    const edge = (p) => (p && p.partnerId && byId.has(p.partnerId) && !p._facing) ? p.partnerId : null;
+    const edgeUsed = new Set();
+    const groups = [];
+
+    // 1) mutual pairs (both directions intentional)
+    for (const p of list) {
+      const a = p.tokenId, b = edge(p);
+      if (!b) continue;
+      if (edge(byId.get(b)) === a) {
+        if (edgeUsed.has(a + "|" + b) || edgeUsed.has(b + "|" + a)) continue;
+        edgeUsed.add(a + "|" + b); edgeUsed.add(b + "|" + a);
+        groups.push({ type: "mutual", id: "m-" + [a, b].sort().join("-"),
+                      members: [byId.get(a), byId.get(b)] });
+      }
+    }
+
+    // 2) receiver-groups from remaining intentional edges
+    const incoming = new Map();
+    for (const p of list) {
+      const b = edge(p);
+      if (!b) continue;
+      if (edgeUsed.has(p.tokenId + "|" + b)) continue;
+      if (!incoming.has(b)) incoming.set(b, []);
+      incoming.get(b).push(p);
+    }
+    for (const [recvId, perfs] of incoming) {
+      if (!perfs.length || !byId.has(recvId)) continue;
+      groups.push({ type: "group", id: "rg-" + recvId, receiver: byId.get(recvId), perfs });
+    }
+    return groups;
+  }
+
+  // ── Per-client focus (camera, NOT synced scene state) ──────────────────────
+  // Which group sits in the "Talent" slot is a per-viewer preference, so it is
+  // stored client-side only and never written to the scene or sent over the
+  // socket. Default focus is the viewer's own PC's group (so a player's card
+  // foregrounds their own character when it joins); the GM (no assigned PC)
+  // falls back to the projected-target group, preserving current behavior. A
+  // manual pin overrides until the scene closes or the viewer clears it.
+  const _focusPins = new Map();      // scene.id -> pinned group id
+
+  function _ownPcParticipant(scene) {
+    const charId = game.user?.character?.id;
+    if (!charId) return null;
+    return (scene?.participants ?? []).find(p => p.actorId === charId) ?? null;
+  }
+  function _groupContaining(groups, tokenId) {
+    if (!tokenId) return null;
+    return groups.find(g => g.type === "mutual"
+      ? g.members.some(m => m.tokenId === tokenId)
+      : (g.receiver?.tokenId === tokenId || g.perfs.some(p => p.tokenId === tokenId))) ?? null;
+  }
+  function _resolveFocusGroup(scene, groups) {
+    if (!groups || !groups.length) return null;
+    const pin = _focusPins.get(scene.id);
+    if (pin) { const g = groups.find(x => x.id === pin); if (g) return g; }
+    const ownPc = _ownPcParticipant(scene);
+    if (ownPc) { const g = _groupContaining(groups, ownPc.tokenId); if (g) return g; }
+    const tgt = _projectTarget(scene.participants);
+    if (tgt) { const g = _groupContaining(groups, tgt.tokenId); if (g) return g; }
+    return groups[0];
+  }
+  function _setFocusPin(sceneId, groupId) { if (sceneId && groupId) _focusPins.set(sceneId, groupId); }
+  function _clearFocusPin(sceneId) { _focusPins.delete(sceneId); }
+
+  // Resolve the receiver a source attacker is acting on (their partner), and the
+  // co-performers sharing that receiver. Makes position prompts partner-aware so
+  // separate nearby pairings on one battlemap stay independent. `atk` may be a
+  // raw participant or a legacy-attacker proxy (both expose .partnerId).
+  function _receiverParticipant(scene, atk) {
+    const pid = atk?.partnerId;
+    if (!pid) return null;
+    return (scene?.participants ?? []).find(p => p.tokenId === pid) ?? null;
+  }
+  function _coPerformerParticipants(scene, recvId) {
+    if (!recvId) return [];
+    return (scene?.participants ?? []).filter(p => p.partnerId === recvId && !p._facing);
+  }
+
+  // Manual hole overrides are stored per-receiver: scene.manualHoles is keyed by
+  // the receiver's token id, each value a flat { pussy, mouth, ass } object. This
+  // keeps a GM's manual marks on one receiver from bleeding onto another receiver
+  // in a multi-pairing scene. Legacy flat saves (top-level pussy/mouth/ass) are
+  // simply ignored — manual marks are a transient override, not persisted intent.
+  function _manualHolesFor(scene, recvId) {
+    if (!scene.manualHoles || typeof scene.manualHoles !== "object") scene.manualHoles = {};
+    let mh = scene.manualHoles[recvId];
+    if (!mh || typeof mh !== "object") { mh = {}; scene.manualHoles[recvId] = mh; }
+    return mh;
+  }
+
+  // Migration: infer the _facing flag on a participant list that predates it
+  // (legacy persisted scenes and syncs from an older client). Without _facing,
+  // a receiver's cosmetic back-edge is indistinguishable from an intentional SA
+  // edge, so a plain receiver+performer pair would wrongly group as a mutual.
+  // Legacy reciprocal edges were NEVER genuine reversals (that concept is new),
+  // so for any reciprocal pair we mark the receiver side as facing: the side with
+  // more incoming edges, tie broken toward the submitting role, then toward the
+  // earlier list position (the old "target first" save invariant). Directed-only
+  // edges are always intentional. No-ops if the list is already migrated.
+  function _inferFacingFlags(participants) {
+    if (!Array.isArray(participants) || !participants.length) return;
+    if (participants.some(p => typeof p._facing === "boolean")) {
+      participants.forEach(p => { if (typeof p._facing !== "boolean") p._facing = false; });
+      return;
+    }
+    const byId     = new Map(participants.map(p => [p.tokenId, p]));
+    const idx      = new Map(participants.map((p, i) => [p.tokenId, i]));
+    const incoming = new Map(participants.map(p => [p.tokenId, 0]));
+    for (const p of participants) {
+      if (p.partnerId && incoming.has(p.partnerId)) incoming.set(p.partnerId, incoming.get(p.partnerId) + 1);
+    }
+    const subLike = r => r === "sub" || r === "submitting";
+    for (const p of participants) {
+      p._facing = false;
+      const q = p.partnerId ? byId.get(p.partnerId) : null;
+      if (!q || q.partnerId !== p.tokenId) continue; // only reciprocal edges can be cosmetic
+      const inP = incoming.get(p.tokenId) ?? 0, inQ = incoming.get(q.tokenId) ?? 0;
+      if (inP > inQ) p._facing = true;
+      else if (inP === inQ) {
+        if (subLike(p.role) && !subLike(q.role)) p._facing = true;
+        else if (subLike(p.role) === subLike(q.role) && (idx.get(p.tokenId) ?? 0) < (idx.get(q.tokenId) ?? 0)) p._facing = true;
+      }
+    }
+  }
+
+  // The single authoritative GM. In a multi-GM table, only this user should act
+  // on player->GM requests (resolve cum/edge, SS apply, hole toggle, position
+  // change); otherwise every connected GM processes the same request and it is
+  // applied N times - a hole toggle flipped twice nets zero, a cum resolves
+  // twice, two position dialogs open. Foundry designates one active GM as
+  // game.users.activeGM (v11+); fall back to plain isGM if it is unavailable.
+  function _isPrimaryGM() {
+    const primary = game.users?.activeGM ?? null;
+    return primary ? primary === game.user : !!game.user.isGM;
+  }
+
+  // Wrap a participant so legacy code that expects an "attacker" object keeps
+  // working. Legacy reads .id (== token id); writes .position (and .id).
+  // A Proxy reflects every read/write through to the underlying participant so
+  // there is exactly ONE source of truth. NOTE: the attackers getter below
+  // creates a fresh proxy per read, so DO NOT rely on identity (===) of proxy
+  // objects across reads; rely on the participant they wrap (atk.__participant).
+  function _legacyAttackerProxy(p) {
+    return new Proxy(p, {
+      get(target, prop) {
+        if (prop === "id") return target.tokenId;     // legacy .id === token id
+        if (prop === "__participant") return target;   // escape hatch to the real object
+        return target[prop];
+      },
+      set(target, prop, value) {
+        if (prop === "id") { target.tokenId = value; return true; }
+        target[prop] = value;                          // .position et al. reflect through
+        return true;
+      },
+    });
+  }
+
+  // Install the legacy projection getters over scene.participants. Idempotent
+  // (guarded by a non-enumerable flag so re-calling on a restored/socketed
+  // scene is safe). After this, legacy reads of scene.targetId / .targetActorId
+  // / .targetName / .targetImg / .targetTokenDoc / .attackers all derive LIVE
+  // from participants. _target is the internal projected-target participant.
+  function _defineLegacyView(scene) {
+    if (scene._legacyViewDefined) return scene;
+    Object.defineProperties(scene, {
+      _legacyViewDefined: { value: true, enumerable: false, writable: false },
+      _target: {
+        enumerable: false, configurable: true,
+        get() { return _projectTarget(this.participants); },
+      },
+      targetId: {
+        enumerable: true, configurable: true,
+        get() { return this._target?.tokenId ?? null; },
+      },
+      targetActorId: {
+        enumerable: true, configurable: true,
+        get() { return this._target?.actorId ?? null; },
+      },
+      targetName: {
+        enumerable: true, configurable: true,
+        get() { return this._target?.name ?? ""; },
+      },
+      targetImg: {
+        enumerable: true, configurable: true,
+        get() { return this._target?.img ?? ""; },
+      },
+      targetTokenDoc: {
+        enumerable: true, configurable: true,
+        get() { return this._target?.tokenDoc ?? null; },
+      },
+      // Everyone who is NOT the projected target, each wrapped as a legacy atk.
+      // Returns a NEW array of NEW proxies per read (see _legacyAttackerProxy).
+      // Legacy push/splice on this array are no-ops by design; Phase 1 Section B
+      // rewrites those write sites to mutate scene.participants directly.
+      attackers: {
+        enumerable: true, configurable: true,
+        get() {
+          const tgt = this._target;
+          return (this.participants ?? [])
+            .filter(p => p !== tgt)
+            .map(p => _legacyAttackerProxy(p));
+        },
+      },
+    });
+    return scene;
+  }
+
+  // Find-or-create a participant on a scene by tokenId. New participants start
+  // unpaired (partnerId null), positionless, roleless. Existing participants
+  // get their display fields refreshed if the descriptor carries fresher data.
+  function _ensureParticipant(scene, desc) {
+    scene.participants ??= [];
+    const tokenId = desc.tokenId ?? desc.id;
+    let p = scene.participants.find(x => x.tokenId === tokenId);
+    if (!p) {
+      p = {
+        tokenId,
+        actorId:   desc.actorId ?? tokenId,
+        name:      desc.name ?? "",
+        img:       desc.img ?? "",
+        tokenDoc:  desc.tokenDoc ?? null,
+        partnerId: null,
+        position:  null,
+        role:      null,
+      };
+      scene.participants.push(p);
+    } else {
+      if (desc.name)     p.name     = desc.name;
+      if (desc.img)      p.img      = desc.img;
+      if (desc.tokenDoc) p.tokenDoc = desc.tokenDoc;
+      if (desc.actorId)  p.actorId  = desc.actorId;
+    }
+    return p;
+  }
+
+  // ── Unified-scene runtime resolution (Phase 1 wiring) ────────────────────
+  // _scenes is keyed by battlemap id (scene.id). External/legacy callers still
+  // pass a TOKEN id (the projected target's, or any participant's). These
+  // helpers bridge that: resolve the scene CONTAINING a token rather than
+  // recomputing the battlemap from the token (which is unreliable when the
+  // token is not on the viewing client's canvas). A token lives on exactly one
+  // battlemap, so the containing scene is unique.
+
+  // Find the active scene that contains a given participant token (or actor).
+  function _sceneForToken(tokenId, actorId = null) {
+    for (const scene of _scenes.values()) {
+      const ps = scene.participants ?? [];
+      if (ps.some(p => p.tokenId === tokenId || (actorId && p.actorId === actorId))) return scene;
+    }
+    return null;
+  }
+
+  // Resolve a scene by EITHER its battlemap key (scene.id) OR a contained token
+  // id. Lets legacy call sites that pass a token id keep working unchanged.
+  function _sceneByAnyId(id) {
+    return _scenes.get(id) ?? _sceneForToken(id);
+  }
+
+  // The card DOM element for a scene. DOM is keyed by the stable scene.id
+  // (battlemap id), NOT the projected target token id, so the card key never
+  // shifts when partnerId re-pointing changes which participant projects as
+  // the legacy target.
+  function _cardFor(scene) {
+    if (!scene?.id) return null;
+    return _container?.querySelector(`[data-target-id="${scene.id}"]`) ?? null;
+  }
+
+  // Derive a participant's H-scene role from its live conditions.
+  // "sub" if Submitting, "dom" if Dominating, else null (consensual).
+  function _roleFromActor(actor) {
+    if (!actor) return null;
+    const has = (slug) => actor.items?.some(c => c.slug === slug) || actor.hasCondition?.(slug);
+    if (has("submitting")) return "sub";
+    if (has("dominating")) return "dom";
+    return null;
+  }
+
+  // Build a scene-stats fields shared by startScene and _restoreSceneState.
+  function _freshSceneStats() {
+    return {
+      log:               [],
+      orgasms:           {},   // tokenId -> count for this scene
+      damageTaken:       0,
+      damageDealt:       0,
+      bondageRounds:     0,
+      restrainedRounds:  0,
+      airlockRounds:     0,
+      loadsReceived:     0,
+      loadsByHole:       { anal: 0, oral: 0, vaginal: 0, facial: 0 },
+      creaturesFucked:   new Set(),
+      orgasmsByAttacker: {},
+    };
+  }
+
+  // Full-scene socket payload for the unified model. One "hscene-sync" replaces
+  // the old piecemeal start/add/remove events: it carries the whole participant
+  // list + stable scene.id so a receiver rebuilds an identical scene regardless
+  // of which battlemap it is currently viewing. tokenDoc is intentionally
+  // omitted (not serializable / client-local); receivers resolve actors via
+  // canvas token lookup by tokenId.
+  function _sceneSyncPayload(scene) {
+    return {
+      type: "hscene-sync",
+      sceneId: scene.id,
+      participants: (scene.participants ?? []).map(p => ({
+        tokenId: p.tokenId, actorId: p.actorId, name: p.name, img: p.img,
+        partnerId: p.partnerId ?? null, position: p.position ?? null, role: p.role ?? null,
+        _facing: p._facing ?? false,
+      })),
+      orgasms:      scene.orgasms ?? {},
+      manualHoles:  scene.manualHoles ?? {},
+      readyToCum:   scene.readyToCum ?? {},
+      loadsByHole:  scene.loadsByHole ?? {},
+    };
+  }
+
+  // Apply an incoming hscene-sync payload on a RECEIVER client: create or
+  // reconcile the battlemap scene, then refresh its card. Foundry does not echo
+  // emits to the sender, so this only runs on other clients (where scene stats
+  // are display-only). tokenDoc is rebuilt as null; actors resolve via canvas
+  // token lookup by tokenId.
+  function _applySceneSync(data) {
+    if (!AFLP.Settings.hsceneEnabled) return;
+    const sceneId = data.sceneId;
+    if (!sceneId) return;
+    const participants = (data.participants ?? []).map(p => ({
+      tokenId: p.tokenId, actorId: p.actorId, name: p.name, img: p.img, tokenDoc: null,
+      partnerId: p.partnerId ?? null, position: p.position ?? null, role: p.role ?? null,
+      ...(typeof p._facing === "boolean" ? { _facing: p._facing } : {}),
+    }));
+    _inferFacingFlags(participants); // older GM may not send _facing; infer if absent
+    if (!participants.length) {
+      // Empty sync = scene gone; close if we have it.
+      const gone = _scenes.get(sceneId);
+      if (gone) AFLP.HScene.closeScene(sceneId);
+      return;
+    }
+    _ensureContainer();
+    let scene = _scenes.get(sceneId);
+    const isNew = !scene;
+    if (isNew) {
+      scene = { id: sceneId, participants, ..._freshSceneStats() };
+      _defineLegacyView(scene);
+      _scenes.set(sceneId, scene);
+    } else {
+      scene.participants = participants; // wholesale replace (source of truth is the GM)
+    }
+    // Display-only stats from the payload.
+    scene.orgasms     = data.orgasms     ?? scene.orgasms ?? {};
+    scene.manualHoles = data.manualHoles ?? scene.manualHoles ?? {};
+    scene.readyToCum  = data.readyToCum  ?? scene.readyToCum ?? {};
+    scene.loadsByHole = data.loadsByHole ?? scene.loadsByHole ?? {};
+
+    let card = _cardFor(scene);
+    if (!card) {
+      card = _buildCard(scene);
+      _container.appendChild(card);
+    } else {
+      _refreshPortraits(card, scene);
+      _refreshArousalBars(card, scene);
+    }
+    card.style.display = "";
+    _container.style.display = "flex";
+    _updateContainerWidth();
+  }
+
+  // ── Scene mode detection ───────────────────────────────────────────────
+  // "dominated"  — target has Submitting condition (result of Struggle Snuggle)
+  // "consensual" — no Submitting condition; scene started via Sexual Advance
+  function _sceneMode(scene) {
+    const tgtActor = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId });
+    if (!tgtActor) return "consensual";
+    const submittingUUID = AFLP.conditions?.["submitting"]?.uuid ?? "";
+    return tgtActor.items?.some(c =>
+      c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === submittingUUID
+    ) ? "dominated" : "consensual";
+  }
+
+  // Can this user change positions or hole chips for this scene?
+  // Dominated: only owners of a Dominating attacker, or GM.
+  // Consensual: any participant owner, or GM.
+  function _userCanControl(scene, mode) {
+    if (game.user.isGM) return true;
+    const candidates = mode === "dominated"
+      ? (scene.attackers ?? []).map(_resolveActor).filter(Boolean)
+      : [
+          _resolveActor({ id: scene.targetId, actorId: scene.targetActorId }),
+          ...(scene.attackers ?? []).map(_resolveActor),
+        ].filter(Boolean);
+    return candidates.some(a => a.isOwner);
   }
 
   // Root container injected once into #ui-top
@@ -298,16 +798,86 @@ AFLP.HScene = (() => {
   // -----------------------------------------------
   // Ensure container exists in the DOM
   // -----------------------------------------------
+  // ─── Theme resolution helpers ────────────────────────────────────────────
+
+  // Returns the effective theme for a scene, accounting for:
+  // 1. Player-pick override (per-user HSCENE_THEME setting)
+  // 2. GM default (HSCENE_THEME_PC or HSCENE_THEME_MON based on target type)
+  function _effectiveTheme(scene) {
+    const playerPickAllowed = AFLP.Settings.hscenePlayerPick ?? true;
+    if (playerPickAllowed) {
+      const userTheme = AFLP.Settings.hsceneTheme;
+      if (userTheme) return userTheme;
+    }
+    // Fall back to GM default based on target type
+    return _defaultThemeForScene(scene);
+  }
+
+  // GM default theme based on whether target is a monster
+  function _defaultThemeForScene(scene) {
+    const tgtActor = _resolveActor({ id: scene?.targetId, actorId: scene?.targetActorId });
+    const isMon = tgtActor && tgtActor.type === "npc" && !tgtActor.hasPlayerOwner;
+    return isMon
+      ? (AFLP.Settings.hsceneThemeMon ?? "fuckamons")
+      : (AFLP.Settings.hsceneThemePc  ?? "aflp-classic");
+  }
+
+  // Reset all players' per-user theme to whatever the GM default dictates for each scene.
+  // Called when HSCENE_PLAYER_PICK is turned off or GM default changes.
+  function _applyDefaultThemesToAll() {
+    const scenes = AFLP.HScene._scenes;
+    if (!scenes?.size) return;
+    for (const [targetId, scene] of scenes) {
+      const defTheme = _defaultThemeForScene(scene);
+      const card = document.querySelector(`[data-target-id="${targetId}"]`);
+      if (!card) continue;
+      card.className = card.className.replace(/aflp-theme-\S+/, "aflp-theme-" + defTheme);
+      AFLP.HScene.refreshScene?.(targetId);
+    }
+    // Sync all dropdowns if player pick is still allowed
+    document.querySelectorAll(".aflp-card-theme-select").forEach(sel => {
+      const card = sel.closest("[data-target-id]");
+      if (!card) return;
+      const scene = AFLP.HScene._scenes?.get(card.dataset.targetId);
+      if (scene) sel.value = _effectiveTheme(scene);
+    });
+  };
+
+  // Called when player-pick is disabled: reset user theme to empty so GM default applies
+  function _resetPlayersToDefaultTheme() {
+    if (game.user.isGM) return; // GM sets defaults, doesn't reset themselves
+    // Clear the per-user theme override so _effectiveTheme falls back to GM default
+    game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME, "");
+    // Rebuild all cards
+    _applyDefaultThemesToAll();
+  };
+
   // Module-level helper: apply current theme to the drag handle bar
-  function _applyDragHandleTheme(handle, container) {
-    const th = AFLP.Settings.hsceneTheme ?? "combat-hud";
+  function _applyDragHandleTheme(handle, container, mode, scene = null) {
+    const th = scene ? _effectiveTheme(scene) : (AFLP.Settings.hsceneTheme ?? "lewd-lite");
+    // mode: "dominated" | "consensual" | undefined (no scene or unknown)
+    const modeLabel = mode === "dominated" ? "🔒 Noncon" : mode === "consensual" ? "💗 Consensual" : null;
     const themes = {
-      "combat-hud":   { text: "⠿ H SCENE ACTIVE ⠿",        color: "rgba(200,160,80,0.75)", bg: "rgba(200,160,80,0.10)", border: "rgba(200,160,80,0.3)",  font: "inherit" },
-      "status-strip": { text: "⠿ H SCENE ACTIVE ⠿",        color: "rgba(200,160,80,0.75)", bg: "rgba(200,160,80,0.08)", border: "rgba(200,160,80,0.25)", font: "inherit" },
-      "porno":        { text: "★ SCENE IN PROGRESS ★",      color: "rgba(220,100,130,0.9)", bg: "rgba(200,50,80,0.15)",  border: "rgba(200,50,80,0.4)",  font: "inherit" },
+      "lewd-lite":   { text: "⠿ LEWD LITE ⠿",        color: "rgba(200,160,80,0.75)", bg: "rgba(200,160,80,0.10)", border: "rgba(200,160,80,0.3)",  font: "inherit" },
+      "status-strip": { text: "⠿ H SCENE ACTIVE ⠿",  color: "rgba(100,170,255,0.85)", bg: "rgba(8,12,28,0.96)",  border: "rgba(80,140,220,0.5)", font: "inherit" },
+      "aflp-classic":        { text: "★ SCENE IN PROGRESS ★",      color: "rgba(220,100,130,0.9)", bg: "rgba(200,50,80,0.15)",  border: "rgba(200,50,80,0.4)",  font: "inherit" },
       "dossier":      { text: "// ENCOUNTER FILE — ACTIVE", color: "rgba(80,180,80,0.85)",  bg: "rgba(5,15,8,0.9)",     border: "rgba(30,80,40,0.5)",   font: "'Courier New',monospace" },
+      "fuckamons":    { text: "! A WILD ENCOUNTER APPEARED !", color: "#f5e642", bg: "rgba(220,20,60,0.85)", border: "rgba(255,80,80,0.8)", font: "inherit" },
     };
-    const t = themes[th] ?? themes["combat-hud"];
+    let t = themes[th] ?? themes["lewd-lite"];
+    // For porno theme, embed mode label in the banner text
+    if (th === "aflp-classic" && modeLabel) {
+      t = { ...t, text: `★ ${modeLabel} H Scene in Progress ★` };
+    }
+    // For gangbang-hud and status-strip, show consensual banner when consensual
+    // All themes except lewd-lite: show consensual vs noncon banner
+    const nonLewdLite = th !== "lewd-lite";
+    if (nonLewdLite && mode === "consensual") {
+      // Keep theme colour - only swap the text to show consensual state
+      t = { ...t, text: "♥ CONSENSUAL H SCENE IN PROGRESS ♥" };
+    } else if (nonLewdLite && mode === "dominated") {
+      t = { ...t, color: "rgba(200,60,60,0.8)", border: "rgba(200,60,60,0.3)" };
+    }
     if (handle) {
       handle.textContent = t.text;
       handle.style.color = t.color;
@@ -325,7 +895,7 @@ AFLP.HScene = (() => {
     _container.style.cssText = `
       position: fixed;
       top: 50px;
-      left: 50%;
+      left: calc(50% - 95px);
       transform: translateX(-50%);
       z-index: 100;
       display: flex;
@@ -333,7 +903,7 @@ AFLP.HScene = (() => {
       gap: 0;
       pointer-events: none;
       min-width: 280px;
-      max-width: calc(100vw - 80px);
+      max-width: calc(100vw - 420px);
       width: 280px;
       max-height: 580px;
       overflow-y: auto;
@@ -374,7 +944,7 @@ AFLP.HScene = (() => {
     document.getElementById("aflp-hscene-styles")?.remove();
     const styleEl = document.createElement("style");
     styleEl.id = STYLE_ID;
-    styleEl.textContent = _cardCSS() + _statusStripCSS() + _pornoSceneCSS() + _dossierCSS();
+    styleEl.textContent = _cardCSS() + _statusStripCSS() + _aflpClassicCSS() + _dossierCSS() + _fuckamonCSS();
     document.head.appendChild(styleEl);
 
     document.body.appendChild(_container);
@@ -385,10 +955,13 @@ AFLP.HScene = (() => {
   // Build a scene card DOM element
   // -----------------------------------------------
   function _buildCard(scene) {
-    const theme = AFLP.Settings.hsceneTheme ?? "combat-hud";
+    const theme = _effectiveTheme(scene);
     const card = document.createElement("div");
     card.className = "aflp-hscene-card aflp-theme-" + theme;
-    card.dataset.targetId = scene.targetId;
+    // DOM key is the STABLE scene.id (battlemap id), not the projected target
+    // token id. Attribute name kept as data-target-id to avoid churning ~30
+    // selectors; its VALUE is now scene.id. Use _cardFor(scene) to look it up.
+    card.dataset.targetId = scene.id;
     card.style.cssText = `
       pointer-events: all;
       background: transparent;
@@ -410,16 +983,12 @@ AFLP.HScene = (() => {
             <div class="aflp-card-controls">
               <button type="button" class="aflp-card-btn aflp-card-minimize" title="Minimise">−</button>
               <button type="button" class="aflp-card-btn aflp-card-log-toggle" title="Show/hide scene log">📋</button>
-              <select class="aflp-card-theme-select" title="UI Theme">
-                <option value="combat-hud"${(AFLP.Settings.hsceneTheme==="combat-hud")?" selected":""}>Combat HUD</option>
+              <select class="aflp-card-theme-select" title="UI Theme" ${(!game.user.isGM && !(AFLP.Settings.hscenePlayerPick??true)) ? 'disabled style="opacity:0.4;pointer-events:none;"' : ""}>
+                <option value="lewd-lite"${(AFLP.Settings.hsceneTheme==="lewd-lite")?" selected":""}>Lewd Lite</option>
                 <option value="status-strip"${(AFLP.Settings.hsceneTheme==="status-strip")?" selected":""}>Status Strip</option>
-                <option value="porno"${(AFLP.Settings.hsceneTheme==="porno")?" selected":""}>Porno Scene</option>
+                <option value="aflp-classic"${(AFLP.Settings.hsceneTheme==="aflp-classic")?" selected":""}>AFLP Classic</option>
                 <option value="dossier"${(AFLP.Settings.hsceneTheme==="dossier")?" selected":""}>Dossier File</option>
-              </select>
-              <select class="aflp-card-arousal-select" title="Arousal display">
-                <option value="auto"${(AFLP.Settings.hsceneArousalStyle==="auto")?" selected":""}>Auto</option>
-                <option value="bars"${(AFLP.Settings.hsceneArousalStyle==="bars")?" selected":""}>Bars</option>
-                <option value="pips"${(AFLP.Settings.hsceneArousalStyle==="pips")?" selected":""}>Pips</option>
+                <option value="fuckamons"${(AFLP.Settings.hsceneTheme==="fuckamons")?" selected":""}>Fuck a Mon'</option>
               </select>
               <button type="button" class="aflp-card-btn aflp-card-close" title="Close scene">✕</button>
             </div>
@@ -445,7 +1014,9 @@ AFLP.HScene = (() => {
     `;
 
     _refreshPortraits(card, scene);
-    _refreshArousalBars(card, scene);
+    // Porno theme has inline bars in each performer card - skip the shared bottom bar area
+    const _skipBars = ["aflp-classic","lewd-lite","status-strip","dossier","fuckamons"].includes(_effectiveTheme(scene));
+    if (!_skipBars) _refreshArousalBars(card, scene);
     _bindCardListeners(card, scene);
 
     return card;
@@ -492,20 +1063,70 @@ AFLP.HScene = (() => {
         width:100%; gap:0; overflow:visible;
       }
       /* Column-direction themes: stretch alignment so children fill full width */
-      .aflp-theme-porno .aflp-card-portraits,
+      .aflp-theme-aflp-classic .aflp-card-portraits,
       .aflp-theme-status-strip .aflp-card-portraits,
       .aflp-theme-dossier .aflp-card-portraits { align-items:stretch; justify-content:flex-start; }
+      /* Lewd Lite: PF2e tracker-style rows */
+      .aflp-theme-lewd-lite .aflp-card-portraits {
+        flex-direction: column; align-items: stretch; gap: 0; padding: 0;
+        border-bottom: 1px solid rgba(120,90,40,0.25);
+      }
+      /* Lewd Lite row */
+      .aflp-ll-row {
+        display: flex; align-items: center; gap: 6px;
+        padding: 5px 8px; border-bottom: 1px solid rgba(120,90,40,0.15);
+        min-height: 0;
+      }
+      .aflp-ll-row.is-target {
+        background: rgba(200,50,80,0.06); border-bottom: 2px solid rgba(200,50,80,0.25);
+      }
+      .aflp-ll-row:last-child { border-bottom: none; }
+      /* Portrait in row */
+      .aflp-ll-port {
+        width: 36px; height: 36px; border-radius: 3px; overflow: hidden;
+        flex-shrink: 0; border: 1px solid rgba(180,140,40,0.35);
+      }
+      .aflp-ll-row.is-target .aflp-ll-port { border-color: rgba(200,50,80,0.45); }
+      .aflp-ll-port img { width:36px;height:36px;max-width:36px;max-height:36px;object-fit:cover;object-position:top;display:block; }
+      /* Name + info column */
+      .aflp-ll-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .aflp-ll-name { font-size: 11px; font-weight: bold; color: #c9a96e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .aflp-ll-row.is-target .aflp-ll-name { color: #e08090; }
+      .aflp-ll-pos  { font-size: 9px; color: rgba(180,140,60,0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* Arousal bar */
+      .aflp-ll-aro-lbl { font-size:8px; color:rgba(180,140,60,0.55); flex-shrink:0; }
+      .aflp-ll-aro-track {
+        width: 100%; height: 6px; background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(180,140,40,0.2); border-radius: 3px; overflow: hidden; margin-top: 1px;
+      }
+      .aflp-ll-aro-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+      .aflp-ll-aro-fill.low  { background: linear-gradient(90deg, #4a9e58, #5ec46a); }
+      .aflp-ll-aro-fill.mid  { background: linear-gradient(90deg, #b07830, #d4a040); }
+      .aflp-ll-aro-fill.high { background: linear-gradient(90deg, #a02020, #d03040); }
+      /* Conditions and right-side elements */
+      .aflp-ll-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+      .aflp-ll-aro-val { font-size: 9px; color: rgba(180,140,60,0.6); white-space: nowrap; }
+      /* Lewd Lite: vertical gauge bars beside attacker portraits */
+      .aflp-ch-vbars { display:flex; flex-direction:column; gap:2px; margin-left:3px; flex-shrink:0; }
+      .aflp-ch-vbar-wrap { width:5px; flex:1; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; }
+      .aflp-ch-vbar-fill { width:100%; border-radius:2px; transition:height 0.3s ease; }
+      .aflp-ch-vbar-cum { background:linear-gradient(180deg,#c090e0,#8060a0); }
+      .aflp-ch-vbar-aro { background:linear-gradient(180deg,#ff5070,#c02828); }
+      /* Lewd Lite: horizontal bars under target */
+      .aflp-ch-tgt-bars { width:100%; margin-top:4px; display:flex; flex-direction:column; gap:2px; }
+      .aflp-ch-hbar-row { display:flex; align-items:center; gap:3px; }
+      .aflp-ch-hbar-lbl { font-size:8px; color:rgba(200,160,80,0.5); width:20px; flex-shrink:0; letter-spacing:0.04em; }
+      .aflp-ch-hbar-track { flex:1; height:5px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; }
+      .aflp-ch-hbar-fill  { height:100%; border-radius:2px; transition:width 0.3s ease; }
       .aflp-combatant {
         display:flex; flex-direction:column; align-items:center;
-        gap:2px; flex:1; min-width:0; cursor:default;
+        gap:2px; cursor:default;
       }
-      .aflp-combatant.is-target   { flex:0 0 auto; padding:0 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
       .aflp-combatant.is-attacker { cursor:pointer; }
       .aflp-combatant-portrait {
-        position:relative; border-radius:4px; overflow:hidden; flex-shrink:0;
+        position:relative; overflow:hidden; flex-shrink:0;
       }
       .aflp-combatant-portrait img {
-        width:100%; height:100%; object-fit:cover; object-position:top;
         display:block; pointer-events:none;
       }
       .aflp-role-overlay {
@@ -514,19 +1135,53 @@ AFLP.HScene = (() => {
       }
       .aflp-role-overlay.dom { background:rgba(201,169,110,0.92); color:#0a0800; }
       .aflp-role-overlay.sub { background:rgba(200,60,60,0.92); color:#fff; }
-      .aflp-leave-btn { display:block; margin-top:3px; padding:1px 4px; font-size:9px; line-height:1.4;
+      .aflp-leave-btn { align-self: flex-start; display:block; margin-top:2px; padding:1px 4px; font-size:8px; line-height:1.4;
         background:rgba(180,40,40,0.75); color:#fff; border:1px solid rgba(200,80,80,0.5);
         border-radius:2px; cursor:pointer; text-align:center; letter-spacing:0.05em;
         white-space:nowrap; transition:background 0.15s; }
       .aflp-leave-btn:hover { background:rgba(220,50,50,0.95); }
+
+      /* ── Cum / Edge buttons ─────────────────────────────────────────────
+         Dim and disabled until the participant is ready to cum, then the row
+         gains .ready and the buttons light up + pulse to draw the eye. */
+      .aflp-cumedge-row { display:flex; gap:5px; box-sizing:border-box; }
+      .aflp-cumedge-row.block  { width:100%; margin-top:4px; }
+      .aflp-cumedge-row.inline { margin-top:0; }
+      .aflp-ce-btn {
+        flex:1 1 0; min-width:0; padding:3px 6px; font-size:10px; font-weight:700;
+        letter-spacing:0.06em; text-transform:uppercase; border-radius:3px;
+        cursor:pointer; transition:all 0.18s ease; line-height:1.3;
+        font-family:var(--font-primary,serif); white-space:nowrap;
+        background:rgba(255,255,255,0.05); color:rgba(240,232,208,0.4);
+        border:1px solid rgba(200,160,80,0.25);
+      }
+      .aflp-cumedge-row.inline .aflp-ce-btn { padding:2px 8px; font-size:9px; flex:0 0 auto; }
+      .aflp-ce-btn:disabled { cursor:default; opacity:0.55; }
+      .aflp-cumedge-row.ready .aflp-ce-cum {
+        background:linear-gradient(180deg,rgba(220,60,90,0.95),rgba(180,40,70,0.95));
+        color:#fff; border-color:rgba(255,120,150,0.8);
+        box-shadow:0 0 10px rgba(220,60,90,0.55); animation:aflp-ce-pulse 1.4s ease-in-out infinite;
+      }
+      .aflp-cumedge-row.ready .aflp-ce-cum:hover { background:linear-gradient(180deg,rgba(240,80,110,1),rgba(200,50,80,1)); }
+      .aflp-cumedge-row.ready .aflp-ce-edge {
+        background:linear-gradient(180deg,rgba(128,96,192,0.9),rgba(96,72,150,0.9));
+        color:#fff; border-color:rgba(168,136,224,0.8);
+        box-shadow:0 0 8px rgba(128,96,192,0.45);
+      }
+      .aflp-cumedge-row.ready .aflp-ce-edge:hover { background:linear-gradient(180deg,rgba(150,116,214,1),rgba(112,86,170,1)); }
+      @keyframes aflp-ce-pulse {
+        0%,100% { box-shadow:0 0 8px rgba(220,60,90,0.45); }
+        50%     { box-shadow:0 0 16px rgba(220,60,90,0.85); }
+      }
+
       .aflp-combatant-name {
-        font-size:11px; color:#c9a96e; text-align:center;
-        max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:bold;
+        font-size:10px; color:#c9a96e; text-align:center;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:bold;
       }
       .aflp-combatant-name.sub { color:#e08080; }
       .aflp-combatant-conditions { display:flex; flex-wrap:wrap; gap:2px; justify-content:center; margin-top:1px; }
       .aflp-cond-badge {
-        display:inline-block; font-size:10px; padding:2px 5px; border-radius:3px;
+        display:inline-block; font-size:9px; padding:1px 4px; border-radius:3px;
         line-height:14px; font-weight:700; white-space:nowrap;
       }
       .aflp-cond-badge.horny   { background:rgba(192,80,128,0.2); border:1px solid rgba(192,80,128,0.5); color:#d07090; }
@@ -537,10 +1192,11 @@ AFLP.HScene = (() => {
       .aflp-pos-chip {
         display:inline-block; padding:1px 5px; border-radius:3px;
         background:rgba(201,169,110,0.12); border:1px solid rgba(201,169,110,0.35);
-        font-size:10px; color:#c9a96e; white-space:normal; text-align:center;
-        line-height:1.3; max-width:90px; word-break:break-word;
+        font-size:9px; color:#c9a96e; white-space:nowrap; text-align:center;
+        line-height:1.3; max-width:80px; overflow:hidden; text-overflow:ellipsis;
       }
       .aflp-pos-chip.unset { color:#555; border-color:rgba(255,255,255,0.1); background:none; }
+      /* VS divider kept for status-strip compatibility */
       .aflp-vs-divider {
         display:flex; flex-direction:column; align-items:center;
         padding:0 3px; flex-shrink:0; align-self:stretch; justify-content:center;
@@ -555,6 +1211,11 @@ AFLP.HScene = (() => {
       .aflp-hscene-card.minimized .aflp-card-portraits { display:none !important; }
 
       /* Arousal bars/pips */
+      .aflp-theme-aflp-classic .aflp-card-arousal-bars,
+      .aflp-theme-lewd-lite .aflp-card-arousal-bars,
+      .aflp-theme-status-strip .aflp-card-arousal-bars,
+      .aflp-theme-dossier .aflp-card-arousal-bars,
+      .aflp-theme-fuckamons .aflp-card-arousal-bars { display: none !important; }
       .aflp-card-arousal-bars {
         padding:6px 10px 4px; display:flex; flex-direction:column; gap:4px;
         border-bottom:1px solid rgba(200,160,80,0.12);
@@ -611,11 +1272,13 @@ AFLP.HScene = (() => {
       .aflp-log-time { color:rgba(200,160,80,0.5); font-size:10px; margin-right:8px; flex-shrink:0; }
 
       /* Prose + GM input */
-      .aflp-card-prose-area { padding:6px 10px 4px; position:relative; min-height:28px; }
+      .aflp-card-prose-area { padding:6px 10px 4px; position:relative; min-height:28px; width:100%; box-sizing:border-box; }
       .aflp-card-prose-text {
-        font-size:15px; line-height:1.6; color:#f0e8d0; font-style:italic;
+        font-size:13px; line-height:1.55; color:#f0e8d0; font-style:italic;
         font-family:var(--font-primary,'Palatino Linotype',Palatino,Georgia,serif);
         text-shadow:0 1px 2px rgba(0,0,0,0.6);
+        width:100%; max-width:100%; box-sizing:border-box;
+        overflow:hidden; word-break:break-word; overflow-wrap:anywhere;
       }
       .aflp-card-gm-area { display:flex; gap:4px; padding:4px 8px 5px; border-top:1px solid rgba(200,160,80,0.12); }
       .aflp-card-gm-input {
@@ -637,7 +1300,7 @@ AFLP.HScene = (() => {
     `;
   }
 
-  // ─── Status Strip theme CSS (injected once alongside combat-hud CSS) ────────
+  // ─── Status Strip theme CSS (injected once alongside gangbang-hud CSS) ────────
   function _statusStripCSS() {
     const blue      = "rgba(100,170,255,0.9)";
     const blueDim   = "rgba(80,140,220,0.4)";
@@ -650,8 +1313,8 @@ AFLP.HScene = (() => {
         background: rgba(10,15,30,0.9); color: ${blue};
         border-color: ${blueDim};
       }
-      .aflp-theme-porno .aflp-card-theme-select,
-      .aflp-theme-porno .aflp-card-arousal-select {
+      .aflp-theme-aflp-classic .aflp-card-theme-select,
+      .aflp-theme-aflp-classic .aflp-card-arousal-select {
         background: rgba(40,10,20,0.9); color: rgba(240,160,180,0.95);
         border-color: rgba(200,60,100,0.4);
       }
@@ -670,6 +1333,7 @@ AFLP.HScene = (() => {
       }
       .aflp-theme-status-strip .aflp-card-portraits {
         display: flex; flex-direction: row; gap: 0; width: 100%;
+        overflow-x: auto; scroll-behavior: smooth;
         background: ${bgMid};
         border-bottom: 1px solid ${blueDim};
       }
@@ -717,37 +1381,40 @@ AFLP.HScene = (() => {
       .aflp-ss-trait-sub  { background: rgba(160,30,60,0.25);  color: #e06080; border: 1px solid rgba(200,60,100,0.5); }
       .aflp-ss-trait-dom  { background: ${blueFaint};           color: ${blue}; border: 1px solid ${blueDim}; }
       .aflp-ss-trait-pos  { background: rgba(20,50,120,0.2);   color: rgba(120,180,255,0.8); border: 1px solid rgba(60,100,200,0.35); font-size: 9px; }
+      .aflp-ss-stats { display:flex; gap:6px; align-items:baseline; margin-top:3px; white-space:nowrap; }
+      .aflp-ss-stat-aro { font-size:9px; font-weight:600; color:rgba(210,80,80,0.85); }
+      .aflp-ss-stat-cum { font-size:9px; color:rgba(220,200,160,0.65); }
     `;
   }
 
   // ─── Porno Scene theme CSS ───────────────────────────────────────────────────
-  function _pornoSceneCSS() {
+  function _aflpClassicCSS() {
     return `
-      .aflp-theme-porno .aflp-card-header {
+      .aflp-theme-aflp-classic .aflp-card-header {
         background: linear-gradient(135deg,rgba(42,5,16,0.95),rgba(26,10,8,0.95));
         border-bottom: 1px solid rgba(200,50,80,0.4); padding: 0; gap: 0;
       }
-      .aflp-theme-porno .aflp-card-header-top {
+      .aflp-theme-aflp-classic .aflp-card-header-top {
         padding: 5px 10px;
         background: rgba(200,50,80,0.1);
         border-bottom: 1px solid rgba(200,50,80,0.25);
               display: flex; align-items: center; justify-content: flex-end;
       }
-      .aflp-theme-porno .aflp-scene-status-label {
+      .aflp-theme-aflp-classic .aflp-scene-status-label {
         color: rgba(220,100,130,0.9); text-shadow: 0 0 8px rgba(200,50,80,0.4);
         letter-spacing: 0.2em;
       }
-      .aflp-theme-porno .aflp-card-btn {
+      .aflp-theme-aflp-classic .aflp-card-btn {
         border-color: rgba(200,50,80,0.4); color: rgba(220,100,130,0.85);
         background: rgba(200,50,80,0.1);
       }
-      .aflp-theme-porno .aflp-card-portraits { padding: 8px 10px; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box; }
+      .aflp-theme-aflp-classic .aflp-card-portraits { padding: 8px 10px; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box; }
       .aflp-po-bottom-row { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; box-sizing: border-box; overflow: hidden; }
       .aflp-po-bottom-port {
-        width: 44px; height: 44px; border-radius: 4px; overflow: hidden;
+        width: 60px; height: 60px; border-radius: 4px; overflow: hidden;
         border: 1px solid rgba(200,50,80,0.5); flex-shrink: 0;
       }
-      .aflp-po-bottom-port img { width:100%;height:100%;object-fit:cover;object-position:top;pointer-events:none;display:block; }
+      .aflp-po-bottom-port img { width:60px!important;height:60px!important;max-width:60px!important;max-height:60px!important;object-fit:cover;object-position:top;pointer-events:none;display:block; }
       .aflp-po-bottom-label { font-size: 9px; letter-spacing: 0.18em; color: rgba(200,80,100,0.7); text-transform: uppercase; margin-bottom: 2px; text-align: center; }
       .aflp-po-bottom-name { font-size: 15px; color: #e8b0c0; font-style: italic; font-weight: bold; text-align: center; }
       .aflp-po-bottom-role { font-size: 10px; color: rgba(180,80,100,0.7); margin-top: 1px; text-align: center; }
@@ -767,9 +1434,10 @@ AFLP.HScene = (() => {
         animation: aflp-pulse 1.5s ease-in-out infinite;
       }
       .aflp-po-cumflation-status {
-        padding: 3px 8px; border-radius: 3px; font-size: 9px;
-        letter-spacing: 0.12em; text-align: center; font-weight: bold;
-        text-transform: uppercase; margin-top: 2px;
+        padding: 2px 6px; border-radius: 3px; font-size: 9px;
+        letter-spacing: 0.06em; text-align: center; font-weight: bold;
+        margin-top: 3px; display: block; width: 100%; box-sizing: border-box;
+        white-space: normal; overflow: hidden;
         animation: aflp-pulse 2.5s ease-in-out infinite;
       }
       @keyframes aflp-pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
@@ -777,19 +1445,40 @@ AFLP.HScene = (() => {
         font-size: 9px; color: rgba(150,50,70,0.5); text-align: center;
         padding: 2px 0; letter-spacing: 0.2em;
       }
-      .aflp-po-dom-row { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; box-sizing: border-box; }
-      .aflp-po-dom-col { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; overflow: hidden; }
+      .aflp-po-dom-row { display: flex; gap: 4px; flex-direction: column; width: 100%; box-sizing: border-box; }
+      .aflp-po-dom-col { display: flex; align-items: flex-start; gap: 4px; width: 100%; min-width: 0; overflow: hidden; box-sizing: border-box; }
       .aflp-po-dom-label { font-size: 9px; letter-spacing: 0.15em; color: rgba(180,120,30,0.7); text-transform: uppercase; margin-bottom: 2px; }
       .aflp-po-dom-port {
-        width: 32px; height: 32px; border-radius: 4px; overflow: hidden;
+        width: 60px; height: 60px; border-radius: 4px; overflow: hidden;
         border: 1px solid rgba(180,140,40,0.4); flex-shrink: 0;
       }
-      .aflp-po-dom-port img { width:100%;height:100%;object-fit:cover;object-position:top;pointer-events:none;display:block; }
-      .aflp-po-dom-name { font-size: 12px; color: #d0a860; font-style: italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .aflp-po-dom-pos  { font-size: 10px; color: rgba(160,100,20,0.8); font-style: italic; }
-      .aflp-theme-porno .aflp-arousal-bar-fill.sub-fill { background: linear-gradient(90deg,#c02840,#ff4068); }
-      .aflp-theme-porno .aflp-card-arousal-bars { border-bottom-color: rgba(200,50,80,0.15); }
-      .aflp-theme-porno .aflp-card-gm-area { border-top-color: rgba(200,50,80,0.12); }
+      .aflp-po-dom-port img { width:60px!important;height:60px!important;max-width:60px!important;max-height:60px!important;object-fit:cover;object-position:top;pointer-events:none;display:block; }
+      .aflp-po-dom-name { font-size: 11px; color: #d0a860; font-style: italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .aflp-po-dom-pos  { font-size: 9px; color: rgba(160,100,20,0.8); font-style: italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .aflp-po-cock-chip { display:inline-block; font-size:8px; letter-spacing:0.06em; border-radius:3px; padding:1px 3px; border:1px solid; cursor:default; }
+      .aflp-po-cock-chip.active   { color:#f0e8d0; border-color:rgba(200,160,80,0.7); background:rgba(200,160,80,0.18); }
+      .aflp-po-cock-chip.inactive { color:rgba(150,120,60,0.5); border-color:rgba(150,120,60,0.25); background:transparent; }
+      .aflp-po-atk-chips { display:flex; gap:2px; flex-wrap:wrap; margin-top:2px; }
+      .aflp-po-atk-chip  { font-size:8px; letter-spacing:0.04em; border-radius:3px; padding:1px 3px; border:1px solid; color:#f0e8d0; border-color:rgba(200,160,80,0.6); background:rgba(200,160,80,0.15); }
+      /* Cumflation displayed as text line - no vertical bar */
+      /* Cum bar in arousal area */
+      .aflp-cum-row   { display:flex; align-items:center; gap:6px; margin-bottom:1px; }
+      .aflp-cum-label { font-size:9px; color:rgba(200,160,80,0.6); flex-shrink:0; width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .aflp-cum-track { flex:1 1 0; min-width:0; height:5px; background:rgba(255,255,255,0.06); border:1px solid rgba(200,160,80,0.2); border-radius:2px; overflow:hidden; }
+      .aflp-cum-fill  { height:100%; border-radius:2px; background:linear-gradient(90deg,#8060a0,#c090e0); transition:width 0.3s ease; }
+      .aflp-cum-val   { font-size:9px; color:rgba(200,160,80,0.5); flex-shrink:0; min-width:36px; text-align:right; }
+      /* Pip-style themes: hide bar, show label+value only */
+      .aflp-theme-status-strip .aflp-cum-track,
+      .aflp-theme-dossier .aflp-cum-track { display:none; }
+      .aflp-theme-status-strip .aflp-cum-label,
+      .aflp-theme-dossier .aflp-cum-label { width:auto; }
+      .aflp-theme-status-strip .aflp-arousal-name,
+      .aflp-theme-dossier .aflp-arousal-name { width:auto; }
+      .aflp-po-cock-chip.active { color:#f0e8d0; border-color:rgba(200,160,80,0.7); background:rgba(200,160,80,0.18); }
+      .aflp-po-cock-chip.inactive { color:rgba(150,120,60,0.5); border-color:rgba(150,120,60,0.25); background:transparent; }
+      .aflp-theme-aflp-classic .aflp-arousal-bar-fill.sub-fill { background: linear-gradient(90deg,#c02840,#ff4068); }
+      .aflp-theme-aflp-classic .aflp-card-arousal-bars { border-bottom-color: rgba(200,50,80,0.15); }
+      .aflp-theme-aflp-classic .aflp-card-gm-area { border-top-color: rgba(200,50,80,0.12); }
     `;
   }
 
@@ -830,25 +1519,25 @@ AFLP.HScene = (() => {
       .aflp-theme-dossier .aflp-card-portraits { padding: 5px 8px; flex-direction: column; gap: 3px; }
       /* Subject rows */
       .aflp-do-subject {
-        display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+        display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px;
         border: 1px solid rgba(30,80,40,0.3); border-radius: 2px;
         background: rgba(5,12,6,0.6); position: relative;
-        width: 100%; box-sizing: border-box; overflow: hidden;
+        width: 100%; box-sizing: border-box;
       }
       .aflp-do-subject.tgt { border-color: rgba(120,40,40,0.4); }
       .aflp-do-port {
         width: 32px; height: 32px; border-radius: 2px; overflow: hidden;
-        border: 1px solid rgba(40,120,40,0.4); flex-shrink: 0;
+        border: 1px solid rgba(40,120,40,0.4); flex-shrink: 0; margin-top: 2px;
       }
       .aflp-do-port.tgt { border-color: rgba(150,40,40,0.5); }
       .aflp-do-port img { width:100%;height:100%;object-fit:cover;object-position:top;pointer-events:none;display:block; }
-      .aflp-do-info { flex: 1; min-width: 0; overflow: hidden; }
+      .aflp-do-info { flex: 1; min-width: 0; }
       .aflp-do-id { font-size: 10px; color: rgba(40,120,40,0.6); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 1px; }
       .aflp-do-name { font-size: 14px; color: rgba(100,200,100,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
       .aflp-do-name.tgt { color: rgba(200,100,100,0.85); font-size: 14px; }
       .aflp-do-status { font-size: 11px; color: rgba(40,120,40,0.6); font-style: italic; }
       .aflp-do-stamp {
-        padding: 2px 7px; border-radius: 1px; font-size: 10px; letter-spacing: 0.06em; flex-shrink: 0; white-space: nowrap;
+        padding: 2px 7px; border-radius: 1px; font-size: 10px; letter-spacing: 0.06em; flex-shrink: 0; white-space: nowrap; align-self: flex-start;
       }
       .aflp-do-stamp.dom { border: 1px solid rgba(60,140,60,0.5); color: rgba(80,180,80,0.8); }
       .aflp-do-stamp.sub { border: 1px solid rgba(140,40,40,0.5); color: rgba(180,80,80,0.8); }
@@ -863,6 +1552,16 @@ AFLP.HScene = (() => {
       .aflp-theme-dossier .aflp-arousal-val { color: rgba(40,100,40,0.6); font-family:'Courier New',monospace; }
       .aflp-theme-dossier .aflp-card-arousal-bars { border-bottom-color: rgba(30,80,40,0.25); }
       .aflp-theme-dossier .aflp-card-prose-text { color: rgba(80,180,80,0.7); font-style: normal; font-family:'Courier New',monospace; font-size:13px; }
+      /* Dossier inline bars */
+      .aflp-do-bars { margin-top:4px; }
+      .aflp-do-bar-row { display:flex; align-items:center; gap:4px; margin-bottom:2px; }
+      .aflp-do-bar-lbl { font-size:9px; color:rgba(80,160,80,0.6); font-family:'Courier New',monospace; width:28px; flex-shrink:0; }
+      .aflp-do-bar-lbl.cum { color:rgba(80,160,80,0.45); }
+      .aflp-do-bar-track { flex:1; height:4px; background:rgba(5,20,5,0.8); border:1px solid rgba(20,60,20,0.5); border-radius:1px; overflow:hidden; }
+      .aflp-do-bar-fill { height:100%; transition:width 0.3s; }
+      .aflp-do-bar-fill.aro { background:linear-gradient(90deg,rgba(40,140,40,0.8),rgba(80,200,80,0.8)); }
+      .aflp-do-bar-fill.cum { background:linear-gradient(90deg,rgba(20,100,20,0.6),rgba(40,140,40,0.6)); }
+      .aflp-do-bar-val { font-size:8px; color:rgba(80,160,80,0.5); font-family:'Courier New',monospace; min-width:30px; text-align:right; flex-shrink:0; }
       .aflp-theme-dossier .aflp-card-gm-input { border-color: rgba(30,80,40,0.35); color: rgba(80,180,80,0.7); background: rgba(5,20,5,0.5); font-family:'Courier New',monospace; }
       .aflp-theme-dossier .aflp-card-gm-area { border-top-color: rgba(30,80,40,0.2); }
       .aflp-theme-dossier .aflp-log-header { color: rgba(80,180,80,0.8); font-family:'Courier New',monospace; }
@@ -919,243 +1618,311 @@ AFLP.HScene = (() => {
   }
 
   // -----------------------------------------------
+  // Build the in-card Cum / Edge button pair for a participant.
+  //   scene     — the scene object
+  //   key       — participant key (target token id, or attacker token id)
+  //   actorId   — world actor id of the participant (for masturbation/edge ctx)
+  //   variant   — "block" (stacked, default) or "inline" (compact, for strips)
+  // Returns an HTMLElement, or null if buttons shouldn't show for this actor
+  // (auto-cum configured) or the user can't control the scene.
+  //
+  // Buttons are dim by default and light up when the participant is pending a
+  // cum decision (scene.readyToCum[key]). Edge only shows if Edge automation
+  // would let this actor edge; otherwise just a Cum button is offered so a
+  // pending state can still be cleared.
+  // -----------------------------------------------
+  function _buildCumEdgeButtons(scene, key, actorId, variant = "block") {
+    // Token-first resolution so unlinked tokens resolve to their synthetic actor.
+    const actor = _resolveActor({ id: key, actorId });
+    if (!actor) return null;
+
+    // Hide entirely when cum auto-resolves for this actor (no manual choice).
+    if (!AFLP_Arousal?._shouldDeferCum?.(actor)) return null;
+
+    const mode = _sceneMode(scene);
+    if (!_userCanControl(scene, mode)) return null;
+
+    const ready = !!(scene.readyToCum && scene.readyToCum[key]);
+
+    const row = document.createElement("div");
+    row.className = `aflp-cumedge-row ${variant === "inline" ? "inline" : "block"}${ready ? " ready" : ""}`;
+    row.dataset.ceKey = key;
+
+    const cumBtn = document.createElement("button");
+    cumBtn.type = "button";
+    cumBtn.className = "aflp-ce-btn aflp-ce-cum";
+    cumBtn.textContent = "Cum";
+    cumBtn.title = ready ? "Resolve the climax now" : "Not ready to cum yet";
+    cumBtn.disabled = !ready;
+    cumBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      AFLP.HScene.resolveCum(scene.targetId, key);
+    });
+    row.appendChild(cumBtn);
+
+    const edgeBtn = document.createElement("button");
+    edgeBtn.type = "button";
+    edgeBtn.className = "aflp-ce-btn aflp-ce-edge";
+    edgeBtn.textContent = "Edge";
+    edgeBtn.title = ready ? "Attempt to hold back (Edge reaction)" : "Not ready to edge yet";
+    edgeBtn.disabled = !ready;
+    edgeBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      AFLP.HScene.resolveEdge(scene.targetId, key);
+    });
+    row.appendChild(edgeBtn);
+
+    return row;
+  }
+
+  // -----------------------------------------------
   // Calculate the pixel width needed to display a scene's actor row
   // -----------------------------------------------
   function _calcSceneWidth(scene) {
-    const N = Math.min(scene.attackers.length + 1, 10); // total actors, capped at 10
-    const pSize = N <= 2 ? 68 : N <= 3 ? 60 : N <= 5 ? 52 : N <= 7 ? 44 : 38;
-    const tSize = Math.round(pSize * 1.12);              // target portrait is slightly larger
-    const vsW   = N <= 3 ? 30 : N <= 5 ? 24 : 20;
-    // Width = (N-1 attackers * pSize) + (N-1 VS dividers) + tSize + 32px padding
-    // Minimum 360px for usability (arousal bars, GM input, controls row)
-    return Math.max(360, ((N - 1) * (pSize + vsW)) + tSize + 32);
+    // Vertical-stacking themes (Classic, Fuck-a-Mon, Lewd Lite, Dossier) keep a
+    // STABLE width regardless of actor count — performers stack downward, so the
+    // card must not grow per actor (a vestige of an old horizontal VS layout).
+    // Long inline content (e.g. cumflation labels) wraps within this width.
+    const theme = _effectiveTheme(scene);
+    if (theme !== "status-strip") return 360;
+
+    // Status Strip is horizontal: it lays one chip per visible entity in a row,
+    // so it DOES need width to show them. Size to the focused group's chips plus
+    // one compact chip per nearby group (+ a divider). _updateContainerWidth
+    // clamps this to the window, beyond which the strip scrolls.
+    const groups = _buildSceneGroups(scene);
+    if (!groups.length) return 360;
+    const focus        = _resolveFocusGroup(scene, groups);
+    const focusedChips = focus.type === "mutual" ? 2 : (1 + (focus.perfs?.length ?? 0));
+    const nearbyChips  = groups.length - 1;
+    const w = (focusedChips + nearbyChips) * 118 + (nearbyChips > 0 ? 24 : 0) + 16;
+    return Math.max(360, w);
   }
 
-  // Update the container to be as wide as the widest active scene
+  // Update the container to be as wide as the widest active scene.
+  //
+  // Width is driven SOLELY by _calcSceneWidth (a deterministic function of
+  // attacker count and portrait sizes). We deliberately do NOT measure
+  // scrollWidth of rendered content here: that created a feedback loop where
+  // prose lines, lit-up buttons, or any momentarily-unwrapped content could
+  // inflate the measured width, which then stuck (the container never shrank
+  // back). All in-card content (prose, bars, Cum/Edge buttons, hole chips)
+  // lives in min-width:0 columns that wrap/fit within the formula width, so
+  // the formula alone is sufficient and stable.
   function _updateContainerWidth() {
     if (!_container) return;
     let w = 280;
     for (const scene of _scenes.values()) w = Math.max(w, _calcSceneWidth(scene));
-    // Measure portrait rows at their natural (unconstrained) width by temporarily
-    // clearing the container width so scrollWidth reflects content, not the old set value.
-    _container.style.width = "";
-    for (const card of (_container.querySelectorAll?.(".aflp-hscene-card") ?? [])) {
-      const pRow = card.querySelector(".aflp-card-portraits");
-      if (pRow) w = Math.max(w, pRow.scrollWidth + 20);
-    }
     w = Math.min(w, window.innerWidth - 80);
     _container.style.width = w + "px";
   }
 
   // -----------------------------------------------
-  // Render portraits into card header — Combat HUD VS layout
-  // All attackers and target in a single flat horizontal row.
-  // Target centred, left attackers on left, right attackers on right.
-  // Container expands to fit; stops at 10 actors, then inner row scrolls.
-  // -----------------------------------------------
+  // ─── Lewd Lite renderer ─ PF2e-style combatant tracker rows ─────────
   function _refreshPortraits(card, scene) {
-    const theme = AFLP.Settings.hsceneTheme ?? "combat-hud";
-    if (theme === "status-strip") { _refreshPortraits_StatusStrip(card, scene); return; }
-    if (theme === "porno")        { _refreshPortraits_Porno(card, scene); return; }
-    if (theme === "dossier")      { _refreshPortraits_Dossier(card, scene); return; }
-    // Fall through to Combat HUD (default)
+    const theme = _effectiveTheme(scene);
+    if (theme === "status-strip")  { _refreshPortraits_StatusStrip(card, scene); return; }
+    if (theme === "aflp-classic")  { _refreshPortraits_AflpClassic(card, scene); return; }
+    if (theme === "dossier")       { _refreshPortraits_Dossier(card, scene); return; }
+    if (theme === "fuckamons")     { _refreshPortraits_FuckaMon(card, scene); return; }
+    // theme === "lewd-lite" — falls through to this renderer
+
     const wrap = card.querySelector(".aflp-card-portraits");
     if (!wrap) return;
     wrap.innerHTML = "";
 
-    // Always clear any leftover extra strip (should no longer exist, belt-and-braces)
-    card.querySelector(".aflp-card-inner")?.querySelectorAll(".aflp-extra-strip").forEach(el => el.remove());
-
+    const FLAG = AFLP.FLAG_SCOPE;
+    const mode = _sceneMode(scene);
     const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
-    const N  = scene.attackers.length + 1; // total actors including target
-    const nD = Math.min(N, 10);            // capped count for sizing
 
-    // Portrait size and VS divider width, scaling down as actors increase
-    const pSize = nD <= 2 ? 68 : nD <= 3 ? 60 : nD <= 5 ? 52 : nD <= 7 ? 44 : 38;
-    const tSize = Math.round(pSize * 1.12); // target slightly larger
-    const vsW   = nD <= 3 ? 30 : nD <= 5 ? 24 : 20;
+    const groups = _buildSceneGroups(scene);
+    if (!groups.length) {
+      _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, mode, scene);
+      _updateContainerWidth();
+      return;
+    }
+    const focus = _resolveFocusGroup(scene, groups);
+    const rest  = groups.filter(g => g !== focus);
+    const _llRing = (p) => _classicIsOwnPc(p) ? "box-shadow:0 0 0 2px #6fd3ff;" : "";
 
-    const SHORT_LABELS = {
-      "vaginal":         "Pounding Pussy",
-      "anal":            "Drilling Ass",
-      "oral-receive":    "Fucking Face",
-      "facial":          "Prepping Facial",
-      "riding-vaginal":  "Riding (pussy)",
-      "riding-anal":     "Riding (ass)",
-      "oral-give":       "Going Down",
-      "groping":         "Groping",
-      "other":           "Teasing",
-      "licking":         "Licking",
-      "fingering-pussy": "Fingering Pussy",
-      "fingering-anal":  "Fingering Ass",
-      "fingering-ass":   "Fingering Ass",
-      "fingering-cock":  "Cock Play",
-      "fingering":       "Fingering",
-      "toy-pussy":       "Toy — Pussy",
-      "toy-anal":        "Toy — Ass",
-      "toy-ass":         "Toy — Ass",
-    };
-    const posLabel = (posId) => {
-      if (!posId) return null;
-      if (SHORT_LABELS[posId]) return SHORT_LABELS[posId];
-      const entry = AFLP.getPosition(posId);
-      return entry?.label?.(safePron) ?? posId;
-    };
+    // One compact row. ctx: { isReceiver, atk, recvId, perfsLen, participant, coEqual }.
+    // Sourced from explicit participants (not scene.target/attackers) so any
+    // focused group renders. atk (a legacy proxy) marks an interactive performer.
+    const makeRow = (actor, tokenId, actorId, name, img, ctx = {}) => {
+      const { isReceiver = false, atk = null, recvId = null, perfsLen = 1, participant = null, coEqual = false } = ctx;
+      const arousal = actor?.getFlag?.(FLAG, "arousal") ?? {};
+      const arCur   = arousal.current ?? 0;
+      const arMax   = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(actor) : (arousal.max ?? 10);
+      const arPct   = arMax > 0 ? Math.min(100, Math.round(arCur / arMax * 100)) : 0;
+      const arCls   = arPct > 75 ? "high" : arPct > 40 ? "mid" : "low";
 
-    const makeVS = () => {
-      const d = document.createElement("div");
-      d.className = "aflp-vs-divider";
-      d.style.cssText = `flex-shrink:0;width:${vsW}px;`;
-      d.innerHTML = `<div class="aflp-vs-text">VS</div>`;
-      return d;
-    };
+      const posSrc   = atk ?? (coEqual ? participant : null);
+      const posEntry = posSrc ? AFLP.getPosition(posSrc.position) : null;
+      const posLabel = posEntry?.label?.(safePron) ?? (isReceiver ? "" : (atk ? "+ set position" : ""));
 
-    const makePosChip = (posId, maxW) => {
-      const lbl = posLabel(posId);
-      const d = document.createElement("div");
-      d.className = "aflp-pos-chip" + (lbl ? "" : " unset");
-      d.style.maxWidth = (maxW ?? pSize) + "px";
-      d.textContent = lbl ?? "⊕ position";
-      return d;
-    };
+      const row = document.createElement("div");
+      row.className = "aflp-ll-row" + (isReceiver ? " is-target" : "");
+      if (atk) row.dataset.atkId = tokenId;
+      const safeName = _safeName(name).split(" ").slice(0,2).join(" ");
+      const tag = (isReceiver && mode === "dominated")
+        ? ' <span style="font-size:8px;color:rgba(200,80,80,0.7);font-weight:normal;">[submitting]</span>'
+        : (coEqual ? ' <span style="font-size:8px;color:rgba(200,140,90,0.85);font-weight:normal;">⇄</span>' : "");
 
-    const makeAttackerCol = (atk) => {
-      const col = document.createElement("div");
-      col.className = "aflp-combatant is-attacker";
-      col.style.cssText = `flex:0 0 ${pSize}px;`;
-
-      col.innerHTML = `
-        <div class="aflp-combatant-portrait" style="width:${pSize}px;height:${pSize}px;">
-          <img src="${atk.img}" alt="${atk.name}" loading="lazy"/>
-          <div class="aflp-role-overlay dom">DOM</div>
+      row.innerHTML = `
+        <div class="aflp-ll-port" style="${_llRing(participant)}">
+          <img src="${img}" alt="${safeName}" width="36" height="36"
+               style="width:36px;height:36px;max-width:36px;max-height:36px;object-fit:cover;object-position:top;display:block;"/>
         </div>
-        <div class="aflp-combatant-name" style="max-width:${pSize}px;">${atk.name.split(" ")[0]}</div>
+        <div class="aflp-ll-info">
+          <div class="aflp-ll-name">${safeName}${tag}</div>
+          ${posLabel ? `<div class="aflp-ll-pos">${posLabel}${coEqual ? " →" : ""}</div>` : ""}
+          <div style="display:flex;align-items:center;gap:4px;margin-top:1px;">
+            <span class="aflp-ll-aro-lbl">Aro</span>
+            <div class="aflp-ll-aro-track" style="flex:1;" title="Arousal ${arCur}/${arMax}">
+              <div class="aflp-ll-aro-fill ${arCls}" style="width:${arPct}%;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="aflp-ll-right">
+          <span class="aflp-ll-aro-val">${arCur}/${arMax}</span>
+        </div>
       `;
-      col.appendChild(makePosChip(atk.position, pSize));
 
-      // Condition badges below position chip
-      const atkActor2 = _resolveActor(atk);
-      if (atkActor2) col.appendChild(makeCondBadges(atkActor2, pSize, scene));
+      if (actor) {
+        const conds = makeCondBadges(actor, 36, scene);
+        if (conds?.children?.length) row.querySelector(".aflp-ll-right").before(conds);
+      }
 
-      if (game.user.isGM && AFLP.Settings.positionTracking) {
-        col.title = "Click to change position";
-        col.addEventListener("click", async () => {
-          const atkActor = _resolveActor(atk);
-          if (!atkActor) return;
-          await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
-          const freshCard = _container?.querySelector(`[data-target-id="${scene.targetId}"]`);
-          if (freshCard) _refreshPortraits(freshCard, scene);
+      // Leave (GM) — performers and entangled members (not the receiver). For
+      // entangled members there is no receiver anchor, so resolve by scene id.
+      if ((atk || coEqual) && game.user.isGM) {
+        const lb = document.createElement("button");
+        lb.className = "aflp-leave-btn";
+        lb.textContent = "✕ Leave";
+        lb.style.cssText = "align-self:center;font-size:8px;padding:2px 5px;white-space:nowrap;";
+        lb.addEventListener("click", e => { e.stopPropagation(); AFLP.HScene.removeParticipant(recvId ?? scene.id, tokenId); });
+        row.querySelector(".aflp-ll-right").appendChild(lb);
+      }
+
+      // Position click (GM) — performers and entangled members. The prompt is
+      // partner-aware: a performer points at the receiver, an entangled member at
+      // the other side. Build a proxy for coEqual members (no atk passed in).
+      if ((atk || coEqual) && game.user.isGM && AFLP.Settings.positionTracking) {
+        const posTarget = atk ?? _legacyAttackerProxy(participant);
+        row.style.cursor = "pointer";
+        row.title = "Click to change position";
+        row.addEventListener("click", async e => {
+          if (e.target.closest(".aflp-leave-btn")) return;
+          if (e.target.closest(".aflp-cumedge-row")) return;
+          await AFLP.HScene._promptGroupPosition(scene, posTarget);
+          const fc = _cardFor(scene);
+          if (fc) _refreshPortraits(fc, scene);
         });
       }
-      // GM leave button for attackers
-      if (game.user.isGM) {
-        const leaveBtn = document.createElement("div");
-        leaveBtn.className = "aflp-leave-btn";
-        leaveBtn.textContent = "✕ Leave";
-        leaveBtn.title = `Remove ${atk.name} from scene`;
-        leaveBtn.addEventListener("click", e => {
-          e.stopPropagation();
-          AFLP.HScene.removeParticipant(scene.targetId, atk.id);
-        });
-        col.appendChild(leaveBtn);
+
+      // Cum/Edge (every participant who can climax — receiver, performers, both
+      // entangled sides).
+      {
+        const ce = _buildCumEdgeButtons(scene, tokenId, actorId ?? tokenId, "inline");
+        if (ce) row.querySelector(".aflp-ll-info")?.appendChild(ce);
       }
-      return col;
+      return row;
     };
 
-    const RECEIVING_LABELS = {
-      "vaginal":         "Fucked in pussy",
-      "anal":            "Fucked in ass",
-      "oral-receive":    "Being face fucked",
-      "facial":          "Prepping Facial",
-      "riding-vaginal":  "Being ridden (pussy)",
-      "riding-anal":     "Being ridden (ass)",
-      "oral-give":       "Riding face",
-      "groping":         "Being groped",
-      "licking":         "Being licked",
-      "fingering-pussy": "Fingered in pussy",
-      "fingering-anal":  "Fingered in ass",
-      "fingering-cock":  "Cock being played",
-      "toy-pussy":       "Toy in pussy",
-      "toy-anal":        "Toy in ass",
-    };
-    const receivingLabel = posId => RECEIVING_LABELS[posId] ?? posLabel(posId);
-
-    const makeTargetCol = () => {
-      const col = document.createElement("div");
-      col.className = "aflp-combatant is-target";
-      col.style.cssText = `flex:0 0 ${tSize}px;`;
-
-      col.innerHTML = `
-        <div class="aflp-combatant-portrait" style="width:${tSize}px;height:${tSize}px;">
-          <img src="${scene.targetImg}" alt="${scene.targetName}" loading="lazy"/>
-          <div class="aflp-role-overlay sub">SUBMITTING</div>
-        </div>
-        <div class="aflp-combatant-name sub" style="max-width:${tSize}px;">${scene.targetName.split(" ")[0]}</div>
-      `;
-      // Condition badges for target
-      const tgtActorForCond = _resolveActor({
-        id: scene.targetId, actorId: scene.targetActorId
-      });
-      if (tgtActorForCond) col.appendChild(makeCondBadges(tgtActorForCond, tSize, scene));
-      return col;
-    };
-
-    // Radial layout: left-col (even-indexed attackers) | VS | SUB | VS | right-col (odd-indexed)
-    // This keeps submitting actor centred with dominators flanking on both sides,
-    // VS correctly connecting each dom to the sub (not doms to each other).
-    const leftAtks  = scene.attackers.filter((_, i) => i % 2 === 0); // 0, 2, 4...
-    const rightAtks = scene.attackers.filter((_, i) => i % 2 === 1); // 1, 3, 5...
-
-    // For grid-like vertical stacking on each side
-    const makeVSStub = () => {
-      const d = document.createElement("div");
-      d.className = "aflp-vs-divider";
-      d.style.cssText = `flex-shrink:0;width:${vsW}px;align-self:center;`;
-      d.innerHTML = `<div class="aflp-vs-text">VS</div>`;
-      return d;
-    };
-
-    // Left side: stacked attackers (right-aligned toward center)
-    if (leftAtks.length > 0) {
-      const leftCol = document.createElement("div");
-      leftCol.style.cssText = "display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:1;";
-      leftAtks.forEach((atk, i) => {
-        if (i > 0) {
-          const spacer = document.createElement("div");
-          spacer.style.cssText = "height:2px;";
-          leftCol.appendChild(spacer);
-        }
-        leftCol.appendChild(makeAttackerCol(atk));
-      });
-      wrap.appendChild(leftCol);
-      wrap.appendChild(makeVSStub());
+    if (focus.type === "mutual") {
+      const hdr = document.createElement("div");
+      hdr.className = "aflp-ll-pos";
+      hdr.style.cssText = "text-align:center;letter-spacing:0.1em;color:rgba(200,140,90,0.85);padding:2px 0;";
+      hdr.textContent = "⇄ Entangled";
+      wrap.appendChild(hdr);
+      for (const m of focus.members) {
+        const mActor = _resolveActor({ id: m.tokenId, actorId: m.actorId });
+        wrap.appendChild(makeRow(mActor, m.tokenId, m.actorId, m.name, m.img, { coEqual: true, participant: m }));
+      }
+    } else {
+      const recv = focus.receiver;
+      const recvActor = _resolveActor({ id: recv.tokenId, actorId: recv.actorId });
+      wrap.appendChild(makeRow(recvActor, recv.tokenId, recv.actorId, recv.name, recv.img, { isReceiver: true, participant: recv }));
+      for (const p of focus.perfs) {
+        const pProxy = _legacyAttackerProxy(p);
+        const pActor = _resolveActor(pProxy);
+        wrap.appendChild(makeRow(pActor, p.tokenId, p.actorId, p.name, p.img,
+          { atk: pProxy, recvId: recv.tokenId, perfsLen: focus.perfs.length, participant: p }));
+      }
     }
 
-    wrap.appendChild(makeTargetCol());
-
-    // Right side: stacked attackers (left-aligned from center)
-    if (rightAtks.length > 0) {
-      wrap.appendChild(makeVSStub());
-      const rightCol = document.createElement("div");
-      rightCol.style.cssText = "display:flex;flex-direction:column;align-items:flex-start;gap:4px;flex:1;";
-      rightAtks.forEach((atk, i) => {
-        if (i > 0) {
-          const spacer = document.createElement("div");
-          spacer.style.cssText = "height:2px;";
-          rightCol.appendChild(spacer);
-        }
-        rightCol.appendChild(makeAttackerCol(atk));
-      });
-      wrap.appendChild(rightCol);
-    } else if (leftAtks.length > 0) {
-      // No right-side attackers — add a phantom flex:1 spacer to keep target centred
-      const phantom = document.createElement("div");
-      phantom.style.cssText = "flex:1;visibility:hidden;";
-      wrap.appendChild(phantom);
+    if (rest.length) {
+      const sep = document.createElement("div");
+      sep.className = "aflp-ll-pos";
+      sep.style.cssText = "text-align:center;letter-spacing:0.12em;opacity:0.6;padding:3px 0 1px;";
+      sep.textContent = "— nearby —";
+      wrap.appendChild(sep);
+      for (const g of rest) _llNearbyBlock(wrap, scene, g);
     }
 
-    // Update container width to fit the widest active scene
+    _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, mode, scene);
     _updateContainerWidth();
+  }
+
+  // Compact view-only Nearby block for Lewd Lite, with a per-client ⤒ Focus.
+  function _llNearbyBlock(wrap, scene, group) {
+    const block = document.createElement("div");
+    block.style.cssText = "border:1px solid rgba(200,90,110,0.15);border-radius:4px;padding:4px 6px;background:rgba(0,0,0,0.18);margin-top:2px;";
+
+    const ready = _classicGroupHasReady(scene, group);
+    const head = document.createElement("div");
+    head.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;";
+    const title = document.createElement("span");
+    title.style.cssText = "font-size:8px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(180,140,60,0.7);";
+    title.innerHTML = (group.type === "mutual" ? "⇄ Nearby" : "Nearby")
+      + (ready ? ` <span style="color:#d03040;" title="Someone here is ready to cum">● ready</span>` : "");
+    const fb = document.createElement("div");
+    fb.style.cssText = "font-size:8px;letter-spacing:0.06em;text-transform:uppercase;color:rgba(110,210,255,0.8);border:1px solid rgba(110,210,255,0.3);background:rgba(110,210,255,0.07);border-radius:3px;padding:1px 5px;cursor:pointer;";
+    fb.textContent = "⤒ Focus";
+    fb.title = "Focus this on your card";
+    fb.addEventListener("click", e => {
+      e.stopPropagation();
+      _setFocusPin(scene.id, group.id);
+      const c = _cardFor(scene);
+      if (c) _refreshPortraits(c, scene);
+    });
+    head.appendChild(title);
+    head.appendChild(fb);
+    block.appendChild(head);
+
+    const port = (p, sz, border) => `<img src="${p.img}" alt="${_safeName(p.name)}" style="width:${sz}px;height:${sz}px;border-radius:3px;object-fit:cover;object-position:top;border:1px solid ${border};flex-shrink:0;${_classicIsOwnPc(p) ? "box-shadow:0 0 0 2px #6fd3ff;" : ""}"/>`;
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:6px;";
+
+    if (group.type === "mutual") {
+      const [m1, m2] = group.members;
+      row.innerHTML = `${port(m1, 26, "rgba(180,140,40,0.4)")}<span class="aflp-ll-name" style="font-size:10px;flex:1;min-width:0;">${_safeName(m1.name)}</span><span style="color:rgba(200,140,90,0.85);">⇄</span><span class="aflp-ll-name" style="font-size:10px;flex:1;min-width:0;text-align:right;">${_safeName(m2.name)}</span>${port(m2, 26, "rgba(180,140,40,0.4)")}`;
+      block.appendChild(row);
+    } else {
+      const r = group.receiver;
+      row.innerHTML = `${port(r, 30, "rgba(200,50,80,0.5)")}<span class="aflp-ll-name" style="font-size:10px;color:#e08090;flex-shrink:0;">${_safeName(r.name)}</span>${_llCascade(group.perfs)}`;
+      block.appendChild(row);
+      const names = group.perfs.map(p => _safeName(p.name)).join(", ");
+      const take = document.createElement("div");
+      take.className = "aflp-ll-pos";
+      take.style.cssText = "margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+      take.textContent = `with ${names}`;
+      take.title = names;
+      block.appendChild(take);
+    }
+    wrap.appendChild(block);
+  }
+
+  // Cascaded performer thumbnails for a Lewd Lite nearby block.
+  function _llCascade(perfs) {
+    const CAP = 5;
+    const shown = perfs.slice(0, CAP), extra = perfs.length - shown.length;
+    let h = `<div style="display:flex;align-items:center;">`;
+    shown.forEach((p, i) => {
+      h += `<div style="width:24px;height:24px;border-radius:3px;overflow:hidden;border:1px solid rgba(180,140,40,0.4);box-shadow:-2px 0 3px rgba(0,0,0,0.5)${_classicIsOwnPc(p) ? ",0 0 0 2px #6fd3ff" : ""};${i ? "margin-left:-8px;" : ""}z-index:${20 - i};"><img src="${p.img}" style="width:24px;height:24px;display:block;object-fit:cover;object-position:top;"/></div>`;
+    });
+    if (extra > 0) h += `<div style="margin-left:-7px;width:22px;height:22px;border-radius:3px;background:rgba(0,0,0,0.5);border:1px solid rgba(180,140,40,0.4);color:#c9a96e;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;z-index:1;">+${extra}</div>`;
+    return h + `</div>`;
   }
 
   // -----------------------------------------------
@@ -1166,170 +1933,323 @@ AFLP.HScene = (() => {
     if (!wrap) return;
     wrap.innerHTML = "";
 
-    const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
-    const SHORT_LABELS = {
-      "vaginal":"Pounding Pussy","anal":"Drilling Ass","oral-receive":"Fucking Face",
-      "facial":"Prepping Facial","oral-give":"Going Down","riding-vaginal":"Riding (pussy)","riding-anal":"Riding (ass)",
-      "groping":"Groping","licking":"Licking",
-      "fingering-pussy":"Fingering Pussy","fingering-anal":"Fingering Ass",
-      "toy-pussy":"Toy — Pussy","toy-anal":"Toy — Ass","toy-ass":"Toy — Ass",
-    };
-    const posLabel = posId => {
-      if (!posId) return null;
-      if (SHORT_LABELS[posId]) return SHORT_LABELS[posId];
-      return AFLP.getPosition(posId)?.label?.(safePron) ?? posId;
-    };
+    const groups = _buildSceneGroups(scene);
+    if (!groups.length) {
+      _updateContainerWidth();
+      requestAnimationFrame(() => _updateContainerWidth());
+      _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, _sceneMode(scene), scene);
+      return;
+    }
+    const focus  = _resolveFocusGroup(scene, groups);
+    const rest   = groups.filter(g => g !== focus);
+    const ssMode = _sceneMode(scene);
 
-    const makeChip = (actor, roleLabel, traitCls, posId, portrait) => {
+    const _ssRing = (p) => _classicIsOwnPc(p) ? "box-shadow:0 0 0 2px #6fd3ff;" : "";
+
+    // One interactive chip. opts: { roleLabel, traitCls, posId, isTarget,
+    // recvId, perfsLen, coEqual, participant }. Sourced from an explicit
+    // participant so cum/edge keys + own-PC ring resolve correctly.
+    const makeChip = (participant, opts = {}) => {
+      const { roleLabel = "", traitCls = "aflp-ss-trait-pos", posId = null,
+              isTarget = false, recvId = null, perfsLen = 1, coEqual = false } = opts;
+      const resolvedActor = _resolveActor({ id: participant.tokenId, actorId: participant.actorId });
       const col = document.createElement("div");
       col.className = "aflp-ss-actor";
-      const safeName = actor.name.replace(/\s*[-–—].*$/, "").trim().split(" ").slice(0,2).join(" ");
-      const pos = posLabel(posId);
+      const safeName = _safeName(participant.name).split(" ").slice(0,2).join(" ");
+      const pos = _posLabelShort(posId);
+
+      const arousal = resolvedActor?.getFlag?.(AFLP.FLAG_SCOPE, "arousal") ?? {};
+      const arCur = arousal.current ?? 0;
+      const arMax = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(resolvedActor) : (arousal.max ?? 10);
+      const cumData = resolvedActor?.getFlag?.(AFLP.FLAG_SCOPE, "cum") ?? {};
+      const cumCur = cumData.current ?? 0;
+      const statsHtml = resolvedActor ? `<div class="aflp-ss-stats"><span class="aflp-ss-stat-aro">Aro ${arCur}/${arMax}</span><span class="aflp-ss-stat-cum">Cum ${cumCur}mL</span></div>` : "";
+      const portBorder = (roleLabel === "Submitting" || roleLabel === "Bottom") ? "rgba(200,64,64,0.5)" : "rgba(201,169,110,0.4)";
+
       col.innerHTML = `
-        <div class="aflp-ss-role-label">${roleLabel}</div>
+        <div class="aflp-ss-role-label">${coEqual ? "⇄ Entangled" : roleLabel}</div>
         <div class="aflp-ss-actor-row">
-          <div class="aflp-ss-mini-port" style="border:1px solid ${roleLabel==="Submitting"?"rgba(200,64,64,0.5)":"rgba(201,169,110,0.4)"};">
-            <img src="${portrait}" alt="${safeName}"/>
+          <div class="aflp-ss-mini-port" style="border:1px solid ${portBorder};${_ssRing(participant)}">
+            <img src="${participant.img}" alt="${safeName}"/>
           </div>
           <div class="aflp-ss-name">${safeName}</div>
         </div>
         <span class="aflp-ss-trait ${traitCls}">${roleLabel}</span>
-        ${pos ? `<span class="aflp-ss-trait aflp-ss-trait-pos">${pos}</span>` : ""}
+        ${pos ? `<span class="aflp-ss-trait aflp-ss-trait-pos">${pos}${coEqual ? " →" : ""}</span>` : ""}
+        ${isTarget ? `<div class="aflp-ss-partner-slot"></div>` : ""}
+        ${statsHtml}
       `;
-      return col;
-    };
 
-    // Target — tag shows dominator count
-    const tgtActor = { name: scene.targetName, img: scene.targetImg };
-    const domCount = scene.attackers.length;
-    const tgtCol = makeChip(tgtActor, "Submitting", "aflp-ss-trait-sub", null, scene.targetImg);
-    if (domCount > 0) {
-      const rc = document.createElement("span");
-      rc.className = "aflp-ss-trait aflp-ss-trait-pos";
-      rc.textContent = `Being used by ${domCount} dominant${domCount === 1 ? "" : "s"}`;
-      tgtCol.appendChild(rc);
-    }
-    wrap.appendChild(tgtCol);
+      if (resolvedActor) {
+        const ce = _buildCumEdgeButtons(scene, participant.tokenId, participant.actorId ?? participant.tokenId, "inline");
+        if (ce) col.appendChild(ce);
+      }
 
-    // Attackers
-    for (const atk of scene.attackers) {
-      const atkCol = makeChip({ name: atk.name, img: atk.img }, "Dominating", "aflp-ss-trait-dom", atk.position, atk.img);
-      if (game.user.isGM && AFLP.Settings.positionTracking) {
-        atkCol.style.cursor = "pointer";
-        atkCol.title = "Click to change position";
-        atkCol.addEventListener("click", async () => {
-          const atkActor = _resolveActor(atk);
-          if (!atkActor) return;
-          await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
+      // Position picker (GM) on performers and entangled members (not receiver).
+      // Partner-aware prompt: a performer points at the receiver, an entangled
+      // member at the other side.
+      if (!isTarget && game.user.isGM && AFLP.Settings.positionTracking) {
+        const atkProxy = _legacyAttackerProxy(participant);
+        col.style.cursor = "pointer";
+        col.title = "Click to change position";
+        col.addEventListener("click", async (e) => {
+          if (e.target.closest(".aflp-leave-btn")) return;
+          if (e.target.closest(".aflp-cumedge-row")) return;
+          await AFLP.HScene._promptGroupPosition(scene, atkProxy);
         });
       }
-      if (game.user.isGM) {
+      // Leave (GM) on performers and entangled members alike (not the receiver).
+      if (!isTarget && game.user.isGM) {
         const leaveBtn = document.createElement("div");
         leaveBtn.className = "aflp-leave-btn";
         leaveBtn.textContent = "✕ Leave";
-        leaveBtn.title = `Remove ${atk.name} from scene`;
-        leaveBtn.addEventListener("click", e => {
-          e.stopPropagation();
-          AFLP.HScene.removeParticipant(scene.targetId, atk.id);
-        });
-        atkCol.appendChild(leaveBtn);
+        leaveBtn.title = `Remove ${participant.name} from scene`;
+        leaveBtn.addEventListener("click", e => { e.stopPropagation(); AFLP.HScene.removeParticipant(recvId ?? scene.id, participant.tokenId); });
+        col.appendChild(leaveBtn);
       }
-      wrap.appendChild(atkCol);
+      return col;
+    };
+
+    if (focus.type === "mutual") {
+      for (const m of focus.members) {
+        wrap.appendChild(makeChip(m, { roleLabel: "Entangled", traitCls: "aflp-ss-trait-pos", posId: m.position, coEqual: true, participant: m }));
+      }
+    } else {
+      const recv  = focus.receiver;
+      const perfs = focus.perfs;
+      const tgtRoleLabel = ssMode === "dominated" ? "Submitting" : ssMode === "consensual" ? "Participant" : "Bottom";
+      const atkRoleLabel = ssMode === "dominated" ? "Dominating" : ssMode === "consensual" ? "Participant" : "Top";
+      const recvChip = makeChip(recv, { roleLabel: tgtRoleLabel, traitCls: ssMode === "dominated" ? "aflp-ss-trait-sub" : "aflp-ss-trait-pos", isTarget: true });
+      const domCount = perfs.length;
+      if (domCount > 0) {
+        const rc = document.createElement("span");
+        rc.className = "aflp-ss-trait aflp-ss-trait-pos";
+        rc.textContent = ssMode === "dominated"
+          ? `Being used by ${domCount} dominant${domCount === 1 ? "" : "s"}`
+          : `With ${domCount} partner${domCount === 1 ? "" : "s"}`;
+        const slot = recvChip.querySelector(".aflp-ss-partner-slot");
+        if (slot) slot.replaceWith(rc); else recvChip.appendChild(rc);
+      } else {
+        recvChip.querySelector(".aflp-ss-partner-slot")?.remove();
+      }
+      wrap.appendChild(recvChip);
+
+      for (const p of perfs) {
+        wrap.appendChild(makeChip(p, {
+          roleLabel: atkRoleLabel,
+          traitCls: ssMode === "dominated" ? "aflp-ss-trait-dom" : "aflp-ss-trait-pos",
+          posId: p.position, recvId: recv.tokenId, perfsLen: perfs.length,
+        }));
+      }
     }
 
-    // Trigger layout so scrollWidth reflects actual rendered content
+    if (rest.length) {
+      const divider = document.createElement("div");
+      divider.className = "aflp-ss-actor";
+      divider.style.cssText = "flex:0 0 auto;align-self:center;writing-mode:vertical-rl;text-orientation:upright;font-size:8px;letter-spacing:0.2em;color:rgba(100,160,255,0.4);text-transform:uppercase;padding:6px 3px;";
+      divider.textContent = "nearby";
+      wrap.appendChild(divider);
+      for (const g of rest) wrap.appendChild(_ssNearbyChip(scene, g));
+    }
+
+    wrap.scrollLeft = 0;
     _updateContainerWidth();
-    requestAnimationFrame(() => {
-      if (!_container) return;
-      const portraits = _container.querySelector(".aflp-card-portraits");
-      if (portraits && portraits.scrollWidth > _container.offsetWidth) {
-        const capped = Math.min(portraits.scrollWidth + 20, window.innerWidth - 80);
-        _container.style.width = capped + "px";
-      }
+    requestAnimationFrame(() => _updateContainerWidth());
+    _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, _sceneMode(scene), scene);
+  }
+
+  // View-only Nearby chip for Status Strip, with a per-client ⤒ Focus control.
+  function _ssNearbyChip(scene, group) {
+    const col = document.createElement("div");
+    col.className = "aflp-ss-actor";
+    col.style.background = "rgba(10,18,40,0.5)";
+    const ready = _classicGroupHasReady(scene, group);
+    const miniPort = (p, sz) => `<div class="aflp-ss-mini-port" style="width:${sz}px;height:${sz}px;border:1px solid rgba(60,100,200,0.4);${_classicIsOwnPc(p) ? "box-shadow:0 0 0 2px #6fd3ff;" : ""}"><img src="${p.img}" alt="${_safeName(p.name)}"/></div>`;
+
+    let bodyHtml = "";
+    if (group.type === "mutual") {
+      const [m1, m2] = group.members;
+      bodyHtml = `
+        <div class="aflp-ss-role-label">≈ Battle${ready ? ` <span style="color:#ff5070;">●</span>` : ""}</div>
+        <div class="aflp-ss-actor-row" style="gap:3px;">
+          ${miniPort(m1, 20)}<span style="color:#90caf9;font-weight:900;font-size:10px;">⇄</span>${miniPort(m2, 20)}
+        </div>
+        <div class="aflp-ss-name" style="font-size:10px;">${_safeName(m1.name)} / ${_safeName(m2.name)}</div>`;
+    } else {
+      const r = group.receiver;
+      bodyHtml = `
+        <div class="aflp-ss-role-label">≈ Nearby${ready ? ` <span style="color:#ff5070;">●</span>` : ""}</div>
+        <div class="aflp-ss-actor-row">${miniPort(r, 22)}<div class="aflp-ss-name" style="font-size:11px;">${_safeName(r.name)}</div></div>
+        <span class="aflp-ss-trait aflp-ss-trait-pos">with ${group.perfs.length}</span>`;
+    }
+    col.innerHTML = bodyHtml;
+
+    const fb = document.createElement("div");
+    fb.className = "aflp-ss-trait aflp-ss-trait-pos";
+    fb.style.cssText = "cursor:pointer;margin-top:3px;text-align:center;";
+    fb.textContent = "⤒ Focus";
+    fb.title = "Focus this on your card";
+    fb.addEventListener("click", e => {
+      e.stopPropagation();
+      _setFocusPin(scene.id, group.id);
+      const c = _cardFor(scene);
+      if (c) _refreshPortraits(c, scene);
     });
+    col.appendChild(fb);
+    return col;
   }
 
   // -----------------------------------------------
   // Porno Scene portrait renderer
   // -----------------------------------------------
-  function _refreshPortraits_Porno(card, scene) {
+  // ── AFLP Classic shared bits (short position labels, own-PC ring) ──────────
+  const _CLASSIC_SHORT_LABELS = {
+    "vaginal":"Vaginal","anal":"Anal","oral-receive":"Oral","facial":"Facial",
+    "oral-give":"Going Down","riding-vaginal":"Riding","riding-anal":"Riding (Anal)",
+    "groping":"Groping","licking":"Licking","fingering-pussy":"Fingering","fingering-anal":"Fingering (Anal)",
+    "fingering-cock":"Cock Play","fingering-mouth":"Oral Play",
+    "toy-pussy":"Toy","toy-anal":"Toy (Anal)","toy-ass":"Toy (Anal)",
+  };
+  const _CLASSIC_SAFE_PRON = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
+  function _posLabelShort(posId) {
+    if (!posId) return null;
+    if (_CLASSIC_SHORT_LABELS[posId]) return _CLASSIC_SHORT_LABELS[posId];
+    return AFLP.getPosition(posId)?.label?.(_CLASSIC_SAFE_PRON) ?? posId;
+  }
+  // The viewing user's own PC gets a cyan ring wherever it appears, so a player
+  // can spot their character even when it's a performer in someone else's block.
+  function _classicIsOwnPc(participant) {
+    const c = game.user?.character?.id;
+    return !!(c && participant?.actorId === c);
+  }
+  function _classicRing(participant) {
+    return _classicIsOwnPc(participant)
+      ? "box-shadow:0 0 0 2px #6fd3ff, 0 0 8px rgba(110,210,255,0.6);" : "";
+  }
+  const _safeName = n => (n ?? "").replace(/\s*[-–—].*$/, "").trim();
+
+  // ── AFLP Classic renderer (topology-aware / balanced) ──────────────────────
+  // Renders the per-client FOCUSED group as the interactive Talent block (a
+  // receiver-group, or an entangled/mutual pair), and every other group as a
+  // view-only Nearby block with a ⤒ Focus control. "Many vs one" is just the
+  // receiver-group case with several performers, so the traditional layout is
+  // preserved for the common case.
+  function _refreshPortraits_AflpClassic(card, scene) {
     const wrap = card.querySelector(".aflp-card-portraits");
     if (!wrap) return;
     wrap.innerHTML = "";
 
-    const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
-    const SHORT_LABELS = {
-      "vaginal":"Pounding Pussy","anal":"Drilling Ass","oral-receive":"Fucking Face",
-      "facial":"Prepping Facial","oral-give":"Going Down","riding-vaginal":"Riding (pussy)","riding-anal":"Riding (ass)",
-      "groping":"Groping","licking":"Licking",
-      "fingering-pussy":"Fingering Pussy","fingering-anal":"Fingering Ass",
-      "toy-pussy":"Toy — Pussy","toy-anal":"Toy — Ass","toy-ass":"Toy — Ass",
-    };
-    const posLabel = posId => {
-      if (!posId) return null;
-      if (SHORT_LABELS[posId]) return SHORT_LABELS[posId];
-      return AFLP.getPosition(posId)?.label?.(safePron) ?? posId;
-    };
+    const groups = _buildSceneGroups(scene);
+    if (!groups.length) { _updateContainerWidth(); return; }
+    const focus = _resolveFocusGroup(scene, groups);
+    const rest  = groups.filter(g => g !== focus);
 
-    const tgtActor = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId });
+    if (focus.type === "mutual") _classicMutualBlock(card, wrap, scene, focus);
+    else                         _classicReceiverGroup(card, wrap, scene, focus.receiver, focus.perfs);
+
+    if (rest.length) {
+      const sep = document.createElement("div");
+      sep.className = "aflp-po-divider";
+      sep.style.color = "rgba(200,90,110,0.45)";
+      sep.textContent = "— ALSO NEARBY —";
+      wrap.appendChild(sep);
+      for (const g of rest) _classicNearbyBlock(card, wrap, scene, g);
+    }
+
+    _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, _sceneMode(scene), scene);
+    _updateContainerWidth();
+  }
+
+  // Focused receiver-group: the Talent + their performers, fully interactive.
+  // Sourced from an explicit receiver participant + performer participants
+  // (NOT scene.target/attackers), so it renders whichever group is focused.
+  function _classicReceiverGroup(card, wrap, scene, recv, perfParticipants) {
+    const tgtId      = recv.tokenId;
+    const tgtActorId = recv.actorId;
+    const tgtName    = recv.name ?? "";
+    const tgtImg     = recv.img ?? "";
+    const attackers  = (perfParticipants ?? []).map(p => _legacyAttackerProxy(p));
+    const tgtActor   = _resolveActor({ id: recv.tokenId, actorId: recv.actorId });
+
     const hasPussy = !!tgtActor?.getFlag(AFLP.FLAG_SCOPE, "pussy");
-    const filledPositions = scene.attackers.map(a => a.position).filter(Boolean);
-    const hasVaginal = filledPositions.some(p => p === "vaginal");
-    const hasOral    = filledPositions.some(p => p === "oral-receive" || p === "facial");
-    const hasAnal    = filledPositions.some(p => p === "anal");
+    const filledPositions = attackers.map(a => a.position).filter(Boolean);
+    const _posHole = id => AFLP.getPosition(id)?.hole ?? AFLP.getPosition(id)?.holeId ?? id;
+    const hasVaginal = filledPositions.some(p => { const h=_posHole(p); return h==="vaginal"||p==="vaginal"; });
+    const hasOral    = filledPositions.some(p => { const h=_posHole(p); return h==="oral"||h==="facial"||p==="oral-receive"||p==="facial"; });
+    const hasAnal    = filledPositions.some(p => { const h=_posHole(p); return h==="anal"||p==="anal"; });
 
-    // Manual overrides: GM can click holes to toggle regardless of attacker positions
-    if (!scene.manualHoles) scene.manualHoles = {};
-    const mh = scene.manualHoles;
-    const vagFilled  = hasPussy  ? (hasVaginal  || !!mh.pussy) : false;
-    const oralFilled = hasOral   || !!mh.mouth;
-    const analFilled = hasAnal   || !!mh.ass;
+    const mode       = _sceneMode(scene);
+    const canControl = _userCanControl(scene, mode);
+    const safeTgtName = _safeName(tgtName);
+
+    // Manual hole overrides are per-receiver (keyed by the focused receiver's
+    // token id), so marks on one receiver don't bleed onto another.
+    const mh         = _manualHolesFor(scene, tgtId);
+    const vagFilled  = hasPussy ? (hasVaginal || !!mh.pussy) : false;
+    const oralFilled = hasOral || !!mh.mouth;
+    const analFilled = hasAnal || !!mh.ass;
     const airlocked  = hasPussy ? (vagFilled && oralFilled && analFilled) : (oralFilled && analFilled);
 
-    const safeTgtName = scene.targetName.replace(/\s*[-–—].*$/, "").trim();
-
-    // Build hole chips — clickable by GM to manually toggle
     function makeHoleChip(label, key, filled) {
       const span = document.createElement("span");
       span.className = `aflp-po-hole ${filled ? "filled" : "empty"}`;
       span.textContent = `${label} ${filled ? "✓" : "○"}`;
-      if (game.user.isGM) {
+      if (canControl) {
         span.style.cursor = "pointer";
-        span.title = filled ? `Click to unmark ${label} as filled` : `Click to manually mark ${label} as filled`;
+        span.title = filled ? `Click to unmark ${label}` : `Click to mark ${label} as filled`;
         span.addEventListener("click", e => {
           e.stopPropagation();
-          scene.manualHoles[key] = !scene.manualHoles[key];
-          const c = _container?.querySelector(`[data-target-id="${scene.targetId}"]`);
-          if (c) _refreshPortraits(c, scene);
+          if (!game.user.isGM) {
+            game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-hole-toggle", targetId: tgtId, key });
+          } else {
+            const m = _manualHolesFor(scene, tgtId);
+            m[key] = !m[key];
+            const c = _cardFor(scene);
+            if (c) _refreshPortraits(c, scene);
+          }
         });
       }
       return span;
     }
 
-    // Target (bottom/talent)
     const tgtDiv = document.createElement("div");
     tgtDiv.innerHTML = `
       <div class="aflp-po-bottom-label">The Talent</div>
       <div class="aflp-po-bottom-row">
-        <div class="aflp-po-bottom-port"><img src="${scene.targetImg}" alt="${safeTgtName}"/></div>
+        <div class="aflp-po-bottom-port" style="${_classicRing(recv)}"><img src="${tgtImg}" alt="${safeTgtName}" width="60" height="60" style="width:60px;height:60px;max-width:60px;max-height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/></div>
         <div class="aflp-po-bottom-info">
           <div class="aflp-po-bottom-name">${safeTgtName}</div>
           <div class="aflp-po-bottom-role">Taking everything they've got</div>
-          <div class="aflp-po-holes" id="aflp-po-holes-${scene.targetId}"></div>
+          <div class="aflp-po-holes" id="aflp-po-holes-${tgtId}"></div>
           ${airlocked ? `<div class="aflp-po-airlock">★ AIRLOCKED ★</div>` : ""}
         </div>
       </div>
     `;
     wrap.appendChild(tgtDiv);
-    const holesDiv = tgtDiv.querySelector(`#aflp-po-holes-${scene.targetId}`);
+    const holesDiv = tgtDiv.querySelector(`#aflp-po-holes-${tgtId}`);
     if (hasPussy) holesDiv.appendChild(makeHoleChip("PUSSY", "pussy", vagFilled));
     holesDiv.appendChild(makeHoleChip("MOUTH", "mouth", oralFilled));
     holesDiv.appendChild(makeHoleChip("ASS",   "ass",   analFilled));
+    {
+      const tgtCe = _buildCumEdgeButtons(scene, tgtId, tgtActorId ?? tgtId, "block");
+      if (tgtCe) tgtDiv.querySelector(".aflp-po-bottom-info")?.appendChild(tgtCe);
+    }
+    if (tgtActor?.getFlag(AFLP.FLAG_SCOPE, "cock")) {
+      const targetCockActive = attackers.some(atk => {
+        if (!atk.position) return false;
+        const pe = AFLP.getPosition(atk.position);
+        return pe && !pe.penile && (pe.hole === "vaginal" || pe.hole === "anal");
+      });
+      const cockSpan = document.createElement("span");
+      cockSpan.className = `aflp-po-hole ${targetCockActive ? "filled" : "empty"}`;
+      cockSpan.textContent = `COCK ${targetCockActive ? "✓" : "○"}`;
+      holesDiv.appendChild(cockSpan);
+    }
 
-    if (scene.attackers.length) {
+    if (attackers.length) {
       const dividerDiv = document.createElement("div");
       dividerDiv.className = "aflp-po-divider";
-      dividerDiv.textContent = "— DOMINATED BY —";
+      dividerDiv.textContent = mode === "dominated" ? "— DOMINATED BY —" : "— WITH —";
       wrap.appendChild(dividerDiv);
 
       const domHeader = document.createElement("div");
@@ -1339,25 +2259,64 @@ AFLP.HScene = (() => {
 
       const domRow = document.createElement("div");
       domRow.className = "aflp-po-dom-row";
-      for (const atk of scene.attackers) {
-        const safeAtkName = atk.name.replace(/\s*[-–—].*$/, "").trim().split(" ").slice(0,2).join(" ");
-        const posStr = posLabel(atk.position) ?? "⊕ position";
+      for (const atk of attackers) {
+        const safeAtkName = _safeName(atk.name).split(" ").slice(0,2).join(" ");
+        const posStr     = _posLabelShort(atk.position) ?? (attackers.length > 1 ? "Watching" : "+ set position");
+        const posTooltip = atk.position ? (AFLP.getPositionDesc?.(atk.position) ?? "") : (attackers.length > 1 ? "Watching the scene - click to join in" : "Click to set a position");
         const col = document.createElement("div");
         col.className = "aflp-po-dom-col";
+        col.dataset.atkId = atk.id;
+        const atkActorForCock = _resolveActor(atk);
+        const atkHasCock      = !!atkActorForCock?.getFlag?.(AFLP.FLAG_SCOPE, "cock");
+        const posEntryForCock = atk.position ? AFLP.getPosition(atk.position) : null;
+        const cockActive      = atkHasCock && !!(posEntryForCock?.penile);
+
+        const atkCumData = atkActorForCock ? (atkActorForCock.getFlag(AFLP.FLAG_SCOPE, "cum") ?? {}) : {};
+        const atkCumCur  = atkCumData.current ?? 0;
+        const atkCumMax  = atkCumData.max ?? 80;
+        const atkCumPct  = atkCumMax > 0 ? Math.min(100, Math.round((atkCumCur / atkCumMax) * 100)) : 0;
+        const atkArousal = atkActorForCock ? (atkActorForCock.getFlag(AFLP.FLAG_SCOPE, "arousal") ?? {}) : {};
+        const atkArCur   = atkArousal.current ?? 0;
+        const atkArMax   = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(atkActorForCock) : (atkArousal.max ?? 10);
+        const atkArPct   = atkArMax > 0 ? Math.min(100, Math.round((atkArCur / atkArMax) * 100)) : 0;
+
+        const atkChips = [];
+        if (cockActive) atkChips.push(`<span class="aflp-po-atk-chip">COCK ✓</span>`);
+        else if (atkHasCock) atkChips.push(`<span class="aflp-po-atk-chip" style="opacity:0.35;">COCK ○</span>`);
+
         col.innerHTML = `
-          <div class="aflp-po-dom-port"><img src="${atk.img}" alt="${safeAtkName}"/></div>
-          <div style="min-width:0;">
+          <div class="aflp-po-dom-port" style="${_classicRing(atk.__participant)}"><img src="${atk.img}" alt="${safeAtkName}" width="60" height="60" style="width:60px;height:60px;max-width:60px;max-height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/></div>
+          <div class="aflp-po-dom-infocol" style="min-width:0;flex:1;overflow:hidden;">
             <div class="aflp-po-dom-name">${safeAtkName}</div>
-            <div class="aflp-po-dom-pos" style="cursor:${game.user.isGM && AFLP.Settings.positionTracking?'pointer':'default'}">${posStr}</div>
+            <div class="aflp-po-dom-pos" title="${posTooltip}" style="cursor:${canControl && AFLP.Settings.positionTracking?'pointer':'default'};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${posStr}</div>
+            ${atkChips.length ? `<div class="aflp-po-atk-chips">${atkChips.join("")}</div>` : ""}
+            <div style="margin-top:3px;">
+              <div style="display:flex;align-items:center;gap:3px;margin-bottom:2px;">
+                <span style="font-size:7px;color:rgba(200,160,80,0.5);letter-spacing:0.08em;flex-shrink:0;width:30px;">CUM</span>
+                <div class="aflp-cum-track" style="flex:1;"><div class="aflp-cum-fill" style="width:${atkCumPct}%;"></div></div>
+                <span style="font-size:8px;color:rgba(200,160,80,0.45);flex-shrink:0;min-width:28px;text-align:right;">${atkCumCur}mL</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:3px;">
+                <span style="font-size:7px;color:rgba(220,80,80,0.5);letter-spacing:0.08em;flex-shrink:0;width:30px;">ARO</span>
+                <div class="aflp-cum-track" style="flex:1;"><div class="aflp-cum-fill" style="width:${atkArPct}%;background:linear-gradient(90deg,#c02828,#ff5070);"></div></div>
+                <span style="font-size:8px;color:rgba(220,80,80,0.45);flex-shrink:0;min-width:28px;text-align:right;">${atkArCur}/${atkArMax}</span>
+              </div>
+            </div>
           </div>
         `;
-        if (game.user.isGM && AFLP.Settings.positionTracking) {
+        if (canControl && AFLP.Settings.positionTracking) {
           col.style.cursor = "pointer";
-          col.title = "Click to change position";
+          col.title = posTooltip || "Click to change position";
           col.addEventListener("click", async () => {
-            const atkActor = _resolveActor(atk);
-            if (!atkActor) return;
-            await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
+            if (!game.user.isGM) {
+              game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-position-change", targetId: tgtId, atkTokenId: atk.id });
+              ui.notifications.info("Position change requested, waiting for GM.");
+            } else if (attackers.length === 1) {
+              const atkActor = _resolveActor(atk);
+              if (atkActor) await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
+            } else {
+              await AFLP.HScene._promptGroupPosition(scene, atk);
+            }
           });
         }
         if (game.user.isGM) {
@@ -1367,44 +2326,48 @@ AFLP.HScene = (() => {
           leaveBtn.title = `Remove ${atk.name} from scene`;
           leaveBtn.addEventListener("click", e => {
             e.stopPropagation();
-            AFLP.HScene.removeParticipant(scene.targetId, atk.id);
+            AFLP.HScene.removeParticipant(tgtId, atk.id);
           });
           col.appendChild(leaveBtn);
+        }
+        {
+          const atkCe = _buildCumEdgeButtons(scene, atk.id, atk.actorId ?? atk.id, "block");
+          if (atkCe) col.querySelector(".aflp-po-dom-infocol")?.appendChild(atkCe);
         }
         domRow.appendChild(col);
       }
       wrap.appendChild(domRow);
     }
 
-    // Trigger airlock scene log entry if newly airlocked
+    // Airlock scene-log entry (once per airlock transition)
     if (airlocked && !card.dataset.airlocked) {
       card.dataset.airlocked = "1";
-      AFLP.HScene.addProse(scene.targetId, `★ AIRLOCKED ★ — ${safeTgtName} is being used in all holes simultaneously.`, "gm");
+      AFLP.HScene.addProse(tgtId, `★ AIRLOCKED ★ - ${safeTgtName} is being used in all holes simultaneously.`, "gm");
     } else if (!airlocked) {
       delete card.dataset.airlocked;
     }
 
-    // Cumflation status word — show below airlocked if target has any cumflation
+    // Cumflation status word on the receiver
     if (tgtActor) {
       const cf = tgtActor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {};
       const cfWord = _cumflationWord(cf);
       const existingStatus = tgtDiv.querySelector(".aflp-po-cumflation-status");
       if (cfWord) {
+        const cfPctNew = Math.round(((cf.anal??0) + (cf.oral??0) + (cf.vaginal??0)) / (3 * 8) * 100);
         if (existingStatus) {
-          existingStatus.textContent = `◈ ${cfWord.word} ◈`;
+          existingStatus.textContent = `Cumflation ${cfPctNew}%: ${cfWord.word}`;
           existingStatus.style.color = cfWord.color;
-          existingStatus.style.borderColor = cfWord.glow;
+          existingStatus.style.border = `1px solid ${cfWord.glow}`;
           existingStatus.style.background = cfWord.glow.replace(/[\d.]+\)$/, "0.12)");
           existingStatus.style.boxShadow = `0 0 8px ${cfWord.glow}`;
         } else {
           const statusEl = document.createElement("div");
           statusEl.className = "aflp-po-cumflation-status";
-          statusEl.textContent = `◈ ${cfWord.word} ◈`;
+          statusEl.textContent = `Cumflation ${cfPctNew}%: ${cfWord.word}`;
           statusEl.style.color = cfWord.color;
           statusEl.style.border = `1px solid ${cfWord.glow}`;
           statusEl.style.background = cfWord.glow.replace(/[\d.]+\)$/, "0.12)");
           statusEl.style.boxShadow = `0 0 8px ${cfWord.glow}`;
-          // Insert into the bottom-info div alongside airlocked
           const infoDiv = tgtDiv.querySelector(".aflp-po-bottom-info");
           if (infoDiv) infoDiv.appendChild(statusEl);
         }
@@ -1412,8 +2375,145 @@ AFLP.HScene = (() => {
         existingStatus.remove();
       }
     }
+  }
 
-    _updateContainerWidth();
+  // Focused mutual/entangled pair: two co-equal sides with Cum/Edge each. Each
+  // side's position is set relative to its partner (the other side) via the
+  // partner-aware prompt — same as any performer, just pointing the other way.
+  function _classicMutualBlock(card, wrap, scene, group) {
+    const canControl = _userCanControl(scene, _sceneMode(scene));
+    const label = document.createElement("div");
+    label.className = "aflp-po-bottom-label";
+    label.style.textAlign = "center";
+    label.textContent = "⇄ Entangled";
+    wrap.appendChild(label);
+
+    const row = document.createElement("div");
+    row.className = "aflp-po-bottom-row";
+    row.style.gap = "14px";
+    row.style.alignItems = "flex-start";
+
+    group.members.forEach((p, i) => {
+      const side = document.createElement("div");
+      side.className = "aflp-po-bottom-info";
+      const nm = _safeName(p.name);
+      const posStr = _posLabelShort(p.position) ?? "+ set position";
+      side.innerHTML = `
+        <div class="aflp-po-bottom-port" style="${_classicRing(p)}"><img src="${p.img}" alt="${nm}" width="60" height="60" style="width:60px;height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/></div>
+        <div class="aflp-po-bottom-name" style="font-size:13px;">${nm}</div>
+        <div class="aflp-po-dom-pos" style="text-align:center;">${posStr} →</div>
+      `;
+      const ce = _buildCumEdgeButtons(scene, p.tokenId, p.actorId ?? p.tokenId, "block");
+      if (ce) side.appendChild(ce);
+      if (game.user.isGM) {
+        const leaveBtn = document.createElement("div");
+        leaveBtn.className = "aflp-leave-btn";
+        leaveBtn.style.alignSelf = "center";
+        leaveBtn.textContent = "✕ Leave";
+        leaveBtn.title = `Remove ${p.name} from scene`;
+        leaveBtn.addEventListener("click", e => { e.stopPropagation(); AFLP.HScene.removeParticipant(scene.id, p.tokenId); });
+        side.appendChild(leaveBtn);
+      }
+      if (canControl && AFLP.Settings.positionTracking) {
+        const posEl = side.querySelector(".aflp-po-dom-pos");
+        if (posEl) {
+          posEl.style.cursor = "pointer";
+          posEl.title = p.position ? (AFLP.getPositionDesc?.(p.position) ?? "Click to change position") : "Click to set a position";
+          posEl.addEventListener("click", async e => {
+            e.stopPropagation();
+            if (!game.user.isGM) {
+              game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-position-change", targetId: p.partnerId ?? scene.id, atkTokenId: p.tokenId });
+              ui.notifications.info("Position change requested, waiting for GM.");
+            } else {
+              await AFLP.HScene._promptGroupPosition(scene, _legacyAttackerProxy(p));
+            }
+          });
+        }
+      }
+      row.appendChild(side);
+
+      if (i === 0) {
+        const swap = document.createElement("div");
+        swap.textContent = "⇄";
+        swap.style.cssText = "font-size:20px;color:rgba(200,140,90,0.85);align-self:center;";
+        row.appendChild(swap);
+      }
+    });
+    wrap.appendChild(row);
+  }
+
+  // Cascaded (overlapping) performer portraits for a Nearby block, capped then +N.
+  function _classicCascade(perfs) {
+    const CAP = 5;
+    const shown = perfs.slice(0, CAP), extra = perfs.length - shown.length;
+    let h = `<div style="display:flex;align-items:center;">`;
+    shown.forEach((p, i) => {
+      h += `<div style="width:30px;height:30px;border-radius:50%;overflow:hidden;border:1px solid rgba(180,140,40,0.4);box-shadow:-2px 0 3px rgba(0,0,0,0.5)${_classicIsOwnPc(p) ? ",0 0 0 2px #6fd3ff" : ""};${i ? "margin-left:-10px;" : ""}z-index:${20 - i};"><img src="${p.img}" style="width:30px;height:30px;display:block;object-fit:cover;object-position:top;"/></div>`;
+    });
+    if (extra > 0) h += `<div style="margin-left:-8px;width:26px;height:26px;border-radius:50%;background:rgba(0,0,0,0.5);border:1px solid rgba(180,140,40,0.4);color:#d0a860;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;z-index:1;">+${extra}</div>`;
+    return h + `</div>`;
+  }
+  function _classicGroupHasReady(scene, group) {
+    const ids = group.type === "mutual"
+      ? group.members.map(m => m.tokenId)
+      : [group.receiver.tokenId, ...group.perfs.map(p => p.tokenId)];
+    return ids.some(id => scene.readyToCum && scene.readyToCum[id]);
+  }
+
+  // View-only Nearby block: a glance at another pairing, with a ⤒ Focus control
+  // (per-client) that promotes it to the Talent slot. No inline interaction.
+  function _classicNearbyBlock(card, wrap, scene, group) {
+    const block = document.createElement("div");
+    block.style.cssText = "border:1px solid rgba(200,90,110,0.18);border-radius:5px;padding:6px 8px;background:rgba(0,0,0,0.22);margin-top:2px;";
+
+    const ready = _classicGroupHasReady(scene, group);
+    const head = document.createElement("div");
+    head.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;";
+    const title = document.createElement("span");
+    title.style.cssText = "font-size:9px;letter-spacing:0.18em;color:rgba(200,140,150,0.75);text-transform:uppercase;";
+    title.innerHTML = (group.type === "mutual" ? "⇄ Nearby" : "Nearby")
+      + (ready ? ` <span style="color:#ff5070;" title="Someone here is ready to cum">● ready</span>` : "");
+    const focusBtn = document.createElement("div");
+    focusBtn.style.cssText = "display:inline-flex;align-items:center;gap:3px;font-size:8px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(110,210,255,0.85);border:1px solid rgba(110,210,255,0.35);background:rgba(110,210,255,0.08);border-radius:3px;padding:1px 6px;cursor:pointer;";
+    focusBtn.textContent = "⤒ Focus";
+    focusBtn.title = "Focus this scene on your card";
+    focusBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      _setFocusPin(scene.id, group.id);
+      const c = _cardFor(scene);
+      if (c) _refreshPortraits(c, scene);
+    });
+    head.appendChild(title);
+    head.appendChild(focusBtn);
+    block.appendChild(head);
+
+    if (group.type === "mutual") {
+      const [m1, m2] = group.members;
+      const port = (p) => `<div style="width:34px;height:34px;border-radius:4px;overflow:hidden;border:1px solid ${p.role === "sub" ? "rgba(200,50,80,0.5)" : "rgba(180,140,40,0.4)"};box-shadow:${_classicIsOwnPc(p) ? "0 0 0 2px #6fd3ff" : "none"};flex-shrink:0;"><img src="${p.img}" style="width:34px;height:34px;display:block;object-fit:cover;object-position:top;"/></div>`;
+      const rowM = document.createElement("div");
+      rowM.style.cssText = "display:flex;align-items:center;gap:8px;";
+      rowM.innerHTML = `
+        <div style="display:flex;align-items:center;gap:5px;flex:1;min-width:0;">${port(m1)}<div style="min-width:0;"><div class="aflp-po-dom-name">${_safeName(m1.name)}</div><div class="aflp-po-dom-pos">${_posLabelShort(m1.position) ?? ""}</div></div></div>
+        <div style="color:rgba(200,140,90,0.85);font-size:14px;">⇄</div>
+        <div style="display:flex;align-items:center;gap:5px;flex:1;min-width:0;justify-content:flex-end;text-align:right;"><div style="min-width:0;"><div class="aflp-po-dom-name">${_safeName(m2.name)}</div><div class="aflp-po-dom-pos">${_posLabelShort(m2.position) ?? ""}</div></div>${port(m2)}</div>`;
+      block.appendChild(rowM);
+    } else {
+      const r = group.receiver;
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;";
+      row.innerHTML = `
+        <div style="width:40px;height:40px;border-radius:4px;overflow:hidden;border:1px solid rgba(200,50,80,0.5);box-shadow:${_classicIsOwnPc(r) ? "0 0 0 2px #6fd3ff" : "none"};flex-shrink:0;"><img src="${r.img}" style="width:40px;height:40px;display:block;object-fit:cover;object-position:top;"/></div>
+        <div class="aflp-po-bottom-name" style="font-size:11px;flex-shrink:0;">${_safeName(r.name)}</div>
+        ${_classicCascade(group.perfs)}`;
+      block.appendChild(row);
+      const names = group.perfs.map(p => _safeName(p.name)).join(", ");
+      const take = document.createElement("div");
+      take.style.cssText = "font-size:9px;color:rgba(180,110,125,0.8);font-style:italic;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;";
+      take.textContent = `taking it from ${names}`;
+      take.title = names;
+      block.appendChild(take);
+    }
+    wrap.appendChild(block);
   }
 
   // -----------------------------------------------
@@ -1424,6 +2524,7 @@ AFLP.HScene = (() => {
     if (!wrap) return;
     wrap.innerHTML = "";
 
+    const FLAG = AFLP.FLAG_SCOPE;
     const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
     const posLabel = posId => {
       if (!posId) return null;
@@ -1444,68 +2545,684 @@ AFLP.HScene = (() => {
       return AFLP.getPosition(posId)?.label?.(safePron) ?? posId;
     };
 
+    const groups = _buildSceneGroups(scene);
+    if (!groups.length) {
+      _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, _sceneMode(scene), scene);
+      _updateContainerWidth();
+      return;
+    }
+    const focus = _resolveFocusGroup(scene, groups);
+    const rest  = groups.filter(g => g !== focus);
+    const dm    = _sceneMode(scene);
+    const ALPHA = ["ALPHA","BRAVO","CHARLIE","DELTA","ECHO","FOXTROT","GOLF","HOTEL","INDIA","JULIET"];
+
+    // Build one subject row. o: { idLabel, isTgt, stampText, stampCls, statusText,
+    // recvId, coEqual }. Performers and entangled members (anything not the target)
+    // get a position picker + Leave.
+    const subjectRow = (participant, o) => {
+      const actor = _resolveActor({ id: participant.tokenId, actorId: participant.actorId });
+      const nm = _safeName(participant.name);
+      const row = document.createElement("div");
+      row.className = "aflp-do-subject" + (o.isTgt ? " tgt" : "");
+      row.innerHTML = `
+        <div class="aflp-do-port ${o.isTgt ? "tgt" : ""}" style="${_classicIsOwnPc(participant) ? "box-shadow:0 0 0 2px #6fd3ff;" : ""}"><img src="${participant.img}" alt="${nm}"/></div>
+        <div class="aflp-do-info">
+          <div class="aflp-do-id">${o.idLabel}</div>
+          <div class="aflp-do-name ${o.isTgt ? "tgt" : ""}">${nm.toUpperCase()}</div>
+          <div class="aflp-do-status">// ${o.statusText} ▌</div>
+        </div>
+        <div class="aflp-do-stamp ${o.stampCls}">${o.stampText}</div>
+      `;
+      // ARO / CUM bars
+      const aro = actor?.getFlag?.(FLAG, "arousal") ?? {};
+      const arCur = aro.current ?? 0, arMax = AFLP.HScene.calcArousalMax?.(actor) ?? aro.max ?? 10;
+      const arPct = arMax > 0 ? Math.min(100, Math.round(arCur / arMax * 100)) : 0;
+      const cum = actor?.getFlag?.(FLAG, "cum") ?? {};
+      const cumCur = cum.current ?? 0, cumMax = cum.max ?? 80;
+      const cumPct = cumMax > 0 ? Math.min(100, Math.round(cumCur / cumMax * 100)) : 0;
+      const bd = document.createElement("div");
+      bd.className = "aflp-do-bars"; bd.dataset.doBarsId = participant.tokenId;
+      bd.innerHTML = `<div class="aflp-do-bar-row"><span class="aflp-do-bar-lbl">ARO</span><div class="aflp-do-bar-track"><div class="aflp-do-bar-fill aro" style="width:${arPct}%;"></div></div><span class="aflp-do-bar-val">${arCur}/${arMax}</span></div><div class="aflp-do-bar-row"><span class="aflp-do-bar-lbl cum">CUM</span><div class="aflp-do-bar-track"><div class="aflp-do-bar-fill cum" style="width:${cumPct}%;"></div></div><span class="aflp-do-bar-val">${cumCur}mL</span></div>`;
+      row.querySelector(".aflp-do-info")?.appendChild(bd);
+      const ce = _buildCumEdgeButtons(scene, participant.tokenId, participant.actorId ?? participant.tokenId, "block");
+      if (ce) row.querySelector(".aflp-do-info")?.appendChild(ce);
+
+      if (!o.isTgt && game.user.isGM) {
+        const leaveBtn = document.createElement("div");
+        leaveBtn.className = "aflp-leave-btn";
+        leaveBtn.textContent = "✕ Leave";
+        leaveBtn.title = `Remove ${participant.name} from scene`;
+        leaveBtn.addEventListener("click", e => { e.stopPropagation(); AFLP.HScene.removeParticipant(o.recvId ?? scene.id, participant.tokenId); });
+        row.appendChild(leaveBtn);
+      }
+      if (!o.isTgt && game.user.isGM && AFLP.Settings.positionTracking) {
+        row.style.cursor = "pointer";
+        row.title = "Click to change position";
+        row.addEventListener("click", async e => {
+          if (e.target.closest(".aflp-leave-btn")) return;
+          if (e.target.closest(".aflp-cumedge-row")) return;
+          await AFLP.HScene._promptGroupPosition(scene, _legacyAttackerProxy(participant));
+        });
+      }
+      return row;
+    };
+
     const headerDiv = document.createElement("div");
     headerDiv.className = "aflp-do-subjects-header";
     headerDiv.textContent = "// SUBJECTS IN ENCOUNTER:";
     wrap.appendChild(headerDiv);
 
-    const ALPHA = ["ALPHA","BRAVO","CHARLIE","DELTA","ECHO","FOXTROT","GOLF","HOTEL","INDIA","JULIET"];
+    if (focus.type === "mutual") {
+      focus.members.forEach((m, i) => {
+        wrap.appendChild(subjectRow(m, {
+          idLabel: `SUBJECT ${ALPHA[i] ?? `UNIT-${i}`} — ENTANGLED`,
+          isTgt: false, stampText: "ENTANGLED", stampCls: "dom",
+          statusText: posLabel(m.position) ?? "Position: unassigned",
+          recvId: null,
+        }));
+      });
+    } else {
+      const recv = focus.receiver, perfs = focus.perfs;
+      wrap.appendChild(subjectRow(recv, {
+        idLabel: `SUBJECT ${ALPHA[0]} — TARGET`, isTgt: true,
+        stampText: dm === "dominated" ? "COMPROMISED" : "ACTIVE", stampCls: "sub",
+        statusText: perfs.length === 0
+          ? (dm === "dominated" ? "No dominants yet" : "No partners yet")
+          : (dm === "dominated"
+              ? `Being used by ${perfs.length} dominant${perfs.length === 1 ? "" : "s"}`
+              : `With ${perfs.length} partner${perfs.length === 1 ? "" : "s"}`),
+      }));
+      perfs.forEach((p, i) => {
+        wrap.appendChild(subjectRow(p, {
+          idLabel: `SUBJECT ${ALPHA[i + 1] ?? `GOLF-${i}`} — ${dm === "dominated" ? "HOSTILE" : "PARTNER"}`,
+          isTgt: false, stampText: dm === "dominated" ? "DOMINANT" : "PARTNER", stampCls: "dom",
+          statusText: posLabel(p.position) ?? "Position: unassigned",
+          recvId: recv.tokenId,
+        }));
+      });
+    }
 
-    // Target first
-    const tgtSafeName = scene.targetName.replace(/\s*[-–—].*$/, "").trim();
-    const receivingPositions = scene.attackers.filter(a=>a.position).map(a=>posLabel(a.position)).filter(Boolean).join(" + ");
-    const tgtRow = document.createElement("div");
-    tgtRow.className = "aflp-do-subject tgt";
-    tgtRow.innerHTML = `
-      <div class="aflp-do-port tgt"><img src="${scene.targetImg}" alt="${tgtSafeName}"/></div>
-      <div class="aflp-do-info">
-        <div class="aflp-do-id">SUBJECT ${ALPHA[0]} — TARGET</div>
-        <div class="aflp-do-name tgt">${tgtSafeName.toUpperCase()}</div>
-        <div class="aflp-do-status">// ${scene.attackers.length > 0 ? `Being used by ${scene.attackers.length} dominant${scene.attackers.length === 1 ? "" : "s"}` : "No dominants yet"} ▌</div>
-      </div>
-      <div class="aflp-do-stamp sub">COMPROMISED</div>
-    `;
-    wrap.appendChild(tgtRow);
+    if (rest.length) {
+      const oh = document.createElement("div");
+      oh.className = "aflp-do-subjects-header";
+      oh.style.marginTop = "6px";
+      oh.textContent = "// OTHER ACTIVITY ON SITE:";
+      wrap.appendChild(oh);
+      for (const g of rest) wrap.appendChild(_doNearbyEntry(scene, g));
+    }
 
-    // Attackers
-    scene.attackers.forEach((atk, i) => {
-      const atkSafeName = atk.name.replace(/\s*[-–—].*$/, "").trim();
-      const pos = posLabel(atk.position);
-      const atkRow = document.createElement("div");
-      atkRow.className = "aflp-do-subject";
-      if (game.user.isGM && AFLP.Settings.positionTracking) {
-        atkRow.style.cursor = "pointer";
-        atkRow.title = "Click to change position";
-        atkRow.addEventListener("click", async () => {
-          const atkActor = _resolveActor(atk);
-          if (!atkActor) return;
-          await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
-        });
-      }
-      atkRow.innerHTML = `
-        <div class="aflp-do-port"><img src="${atk.img}" alt="${atkSafeName}"/></div>
-        <div class="aflp-do-info">
-          <div class="aflp-do-id">SUBJECT ${ALPHA[i+1] ?? `GOLF-${i}`} — HOSTILE</div>
-          <div class="aflp-do-name">${atkSafeName.toUpperCase()}</div>
-          <div class="aflp-do-status">// ${pos ? pos : "Position: unassigned"} ▌</div>
-        </div>
-        <div class="aflp-do-stamp dom">DOMINANT</div>
-      `;
-      if (game.user.isGM) {
-        const leaveBtn = document.createElement("div");
-        leaveBtn.className = "aflp-leave-btn";
-        leaveBtn.textContent = "✕ Leave";
-        leaveBtn.title = `Remove ${atk.name} from scene`;
-        leaveBtn.addEventListener("click", e => {
-          e.stopPropagation();
-          AFLP.HScene.removeParticipant(scene.targetId, atk.id);
-        });
-        atkRow.appendChild(leaveBtn);
-      }
-      wrap.appendChild(atkRow);
-    });
-
+    _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, _sceneMode(scene), scene);
     _updateContainerWidth();
+
+    // Live-update cum bars in the (hidden) arousal area for all participants.
+    const allParts = (scene.participants ?? []).map(p => ({ id: p.tokenId, actorId: p.actorId }));
+    for (const part of allParts) {
+      const cumRowEl = _container?.querySelector(`.aflp-cum-row[data-cum-actor-id="${part.id}"]`);
+      if (!cumRowEl) continue;
+      const pActor = _resolveActor(part);
+      if (!pActor) continue;
+      const pCum = pActor.getFlag?.(FLAG, "cum") ?? {};
+      const pCur = pCum.current ?? 0, pMax = pCum.max ?? 80;
+      const pPct = pMax > 0 ? Math.min(100, Math.round((pCur / pMax) * 100)) : 0;
+      const pFill = cumRowEl.querySelector(".aflp-cum-fill");
+      const pVal  = cumRowEl.querySelectorAll(".aflp-arousal-val")[0];
+      if (pFill) pFill.style.width = pPct + "%";
+      if (pVal)  pVal.textContent = pCur + " mL";
+    }
+  }
+
+  // Compact view-only "other activity" entry for Dossier, with a ⤒ Focus stamp.
+  function _doNearbyEntry(scene, group) {
+    const row = document.createElement("div");
+    row.className = "aflp-do-subject";
+    row.style.opacity = "0.92";
+    const ready = _classicGroupHasReady(scene, group);
+
+    let portImg, idLabel, nameText, statusText;
+    if (group.type === "mutual") {
+      const [m1, m2] = group.members;
+      portImg = m1.img;
+      idLabel = "SURVEILLANCE — ENTANGLED";
+      nameText = `${_safeName(m1.name).toUpperCase()} ⇄ ${_safeName(m2.name).toUpperCase()}`;
+      statusText = "Mutual engagement";
+    } else {
+      const r = group.receiver;
+      portImg = r.img;
+      idLabel = "SURVEILLANCE — TARGET";
+      nameText = _safeName(r.name).toUpperCase();
+      statusText = `With ${group.perfs.length} subject${group.perfs.length === 1 ? "" : "s"}`;
+    }
+    row.innerHTML = `
+      <div class="aflp-do-port"><img src="${portImg}"/></div>
+      <div class="aflp-do-info">
+        <div class="aflp-do-id">${idLabel}${ready ? ` <span style="color:rgba(200,80,80,0.9);">● READY</span>` : ""}</div>
+        <div class="aflp-do-name">${nameText}</div>
+        <div class="aflp-do-status">// ${statusText} ▌</div>
+      </div>
+    `;
+    const fb = document.createElement("div");
+    fb.className = "aflp-do-stamp dom";
+    fb.style.cursor = "pointer";
+    fb.textContent = "⤒ FOCUS";
+    fb.title = "Focus this on your card";
+    fb.addEventListener("click", e => {
+      e.stopPropagation();
+      _setFocusPin(scene.id, group.id);
+      const c = _cardFor(scene);
+      if (c) _refreshPortraits(c, scene);
+    });
+    row.appendChild(fb);
+    return row;
+  }
+
+  // ─── Fuck a Mon' theme CSS ──────────────────────────────────────────────
+  function _fuckamonCSS() {
+    return `
+      .aflp-theme-fuckamons { font-family: inherit; }
+      .aflp-theme-fuckamons .aflp-card-theme-select,
+      .aflp-theme-fuckamons .aflp-card-arousal-select {
+        background: rgba(220,20,60,0.7); color: #fff; border-color: #f5e642;
+      }
+      .aflp-theme-fuckamons .aflp-card-header {
+        background: linear-gradient(180deg, rgba(220,20,60,0.95) 0%, rgba(180,10,50,0.98) 100%);
+        border-bottom: 3px solid #f5e642;
+        padding: 0;
+      }
+      .aflp-theme-fuckamons .aflp-card-header-top {
+        background: transparent; border-bottom: 1px solid rgba(245,230,66,0.4);
+      }
+      .aflp-theme-fuckamons .aflp-card-btn {
+        background: rgba(245,230,66,0.15); color: #f5e642; border-color: rgba(245,230,66,0.5);
+      }
+      .aflp-theme-fuckamons .aflp-card-btn:hover { background: rgba(245,230,66,0.3); }
+      .aflp-theme-fuckamons .aflp-card-portraits {
+        padding: 0; flex-direction: column; align-items: stretch; justify-content: flex-start;
+      }
+      /* battle screen layout */
+      .aflp-fm-battlefield {
+        background: linear-gradient(180deg, #4fc3f7 0%, #81d4fa 40%, #a5d6a7 40%, #66bb6a 60%, #388e3c 100%);
+        height: 152px; position: relative; overflow: hidden;
+        border-bottom: 3px solid #f5e642; flex-shrink: 0;
+      }
+      /* Target (wild mon) Cum/Edge strip — sits between battlefield and party */
+      .aflp-fm-target-cumedge {
+        background: rgba(20,20,80,0.92); padding: 6px 10px 4px;
+        border-bottom: 1px solid #3f51b5;
+      }
+      .aflp-fm-tagline {
+        position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+        font-size: 9px; font-weight: bold; color: #fff; text-shadow: 1px 1px 0 #c00;
+        white-space: nowrap; letter-spacing: 0.12em; text-transform: uppercase;
+        background: rgba(220,20,60,0.7); padding: 1px 8px; border-radius: 2px;
+        border: 1px solid #f5e642;
+      }
+      .aflp-fm-mon-zone {
+        position: absolute; top: 20px; right: 10px; width: 76px;
+        display: flex; flex-direction: column; align-items: center;
+      }
+      .aflp-fm-mon-portrait {
+        width: 72px; height: 72px; border-radius: 50%;
+        border: 3px solid #f5e642; object-fit: cover; object-position: top;
+        display: block; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.6));
+        flex-shrink: 0;
+      }
+      .aflp-fm-mon-label {
+        font-size: 9px; font-weight: bold; color: #fff; text-shadow: 1px 1px 0 #000;
+        margin-top: 2px; text-transform: uppercase; text-align: center;
+        max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .aflp-fm-wild-text {
+        position: absolute; top: 28px; left: 10px; width: 100px;
+        font-size: 11px; font-weight: bold; color: #fff;
+        text-shadow: 1px 1px 0 #000; line-height: 1.5;
+      }
+      .aflp-fm-hp-box {
+        position: absolute; bottom: 6px; left: 8px; right: 90px;
+        background: rgba(0,0,0,0.6); border: 2px solid #f5e642;
+        border-radius: 4px; padding: 3px 8px;
+      }
+      .aflp-fm-hp-label { font-size: 9px; color: #f5e642; font-weight: bold; }
+      .aflp-fm-hp-track { background: #333; height: 8px; border-radius: 3px; margin: 2px 0; overflow: hidden; }
+      .aflp-fm-hp-fill  { height: 100%; border-radius: 3px; transition: width 0.4s; }
+      .aflp-fm-hp-fill.high   { background: linear-gradient(90deg, #4caf50, #66bb6a); }
+      .aflp-fm-hp-fill.mid    { background: linear-gradient(90deg, #ffc107, #ffca28); }
+      .aflp-fm-hp-fill.low    { background: linear-gradient(90deg, #f44336, #ef5350); }
+
+      /* party panel */
+      .aflp-fm-party {
+        background: rgba(20,20,80,0.92); border-top: 2px solid #3f51b5;
+        padding: 6px 10px; display: flex; flex-direction: column; gap: 4px;
+        overflow-y: auto; max-height: 180px;
+      }
+      .aflp-fm-party-header {
+        font-size: 9px; color: #90caf9; font-weight: bold;
+        letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 2px;
+      }
+      .aflp-fm-trainer-row {
+        display: flex; align-items: center; gap: 6px; cursor: pointer;
+        background: rgba(63,81,181,0.2); border: 1px solid rgba(63,81,181,0.4);
+        border-radius: 3px; padding: 3px 6px; flex-shrink: 0;
+      }
+      .aflp-fm-trainer-row:hover { background: rgba(63,81,181,0.4); }
+      .aflp-fm-trainer-port {
+        width: 28px; height: 28px; border-radius: 50%;
+        border: 1px solid #90caf9; object-fit: cover; object-position: top;
+        flex-shrink: 0; display: block;
+      }
+      .aflp-fm-trainer-name { font-size: 11px; color: #e3f2fd; font-weight: bold; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .aflp-fm-trainer-move {
+        font-size: 9px; color: #f5e642; font-style: italic;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; flex-shrink: 0;
+      }
+      .aflp-fm-cock-badge {
+        font-size: 9px; color: #f5e642; border: 1px solid rgba(245,230,66,0.6);
+        background: rgba(245,230,66,0.12); border-radius: 2px; padding: 0 3px; flex-shrink: 0;
+      }
+      }
+      .aflp-fm-leave-btn {
+        font-size: 9px; color: #ef9a9a; cursor: pointer; border: 1px solid rgba(239,154,154,0.4);
+        background: transparent; border-radius: 2px; padding: 1px 4px; margin-left: 2px;
+      }
+      .aflp-fm-leave-btn:hover { background: rgba(239,154,154,0.2); }
+      .aflp-fm-stat-bars { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; margin-left:2px; }
+      .aflp-fm-stat-row { display:flex; align-items:center; gap:3px; }
+      .aflp-fm-stat-lbl { font-size:7px; font-weight:bold; color:rgba(245,230,66,0.6); width:20px; flex-shrink:0; }
+      .aflp-fm-stat-lbl.aro { color:rgba(239,83,80,0.7); }
+      .aflp-fm-stat-track { flex:1; height:4px; background:rgba(0,0,0,0.4); border-radius:2px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); }
+      .aflp-fm-stat-fill { height:100%; border-radius:2px; transition:width 0.3s; }
+      .aflp-fm-stat-fill.cum { background:linear-gradient(90deg,#6a1b9a,#ab47bc); }
+      .aflp-fm-stat-fill.aro { background:linear-gradient(90deg,#b71c1c,#ef5350); }
+      /* balanced model: trainer battle (mutual) + elsewhere-on-the-field (nearby) */
+      .aflp-fm-vs { position:absolute; top:64px; left:50%; transform:translate(-50%,-50%); font-size:22px; font-weight:900; color:#fff; text-shadow:2px 2px 0 #c00,-1px -1px 0 #c00; z-index:3; }
+      .aflp-fm-near-combat { position:absolute; bottom:8px; left:14px; display:flex; flex-direction:column; align-items:center; width:80px; }
+      .aflp-fm-nearby { background:rgba(20,20,80,0.92); border:1px solid #3f51b5; border-radius:4px; padding:5px 8px; }
+      .aflp-fm-nearby + .aflp-fm-nearby { margin-top:3px; }
+      .aflp-fm-nearby-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+      .aflp-fm-nearby-title { font-size:9px; color:#90caf9; font-weight:bold; letter-spacing:0.08em; text-transform:uppercase; }
+      .aflp-fm-nearby-row { display:flex; align-items:center; gap:8px; }
+      .aflp-fm-nearby-take { font-size:9px; color:#aab8e8; font-style:italic; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+      .aflp-fm-focus-btn { display:inline-flex; align-items:center; gap:3px; font-size:8px; letter-spacing:0.08em; text-transform:uppercase; color:#f5e642; border:1px solid rgba(245,230,66,0.5); background:rgba(245,230,66,0.12); border-radius:3px; padding:1px 6px; cursor:pointer; }
+      /* hole chips in fuckamon theme */
+      .aflp-theme-fuckamons .aflp-po-hole {
+        font-size: 9px; border-radius: 2px; padding: 1px 4px; margin: 0 2px;
+        border: 1px solid; cursor: default;
+      }
+      .aflp-theme-fuckamons .aflp-po-hole.filled {
+        background: rgba(245,230,66,0.2); color: #f5e642; border-color: #f5e642;
+      }
+      .aflp-theme-fuckamons .aflp-po-hole.empty {
+        background: transparent; color: rgba(245,230,66,0.4); border-color: rgba(245,230,66,0.25);
+      }
+    `;
+  }
+
+  // ─── Fuck a Mon' portrait renderer ───────────────────────────────────────
+  function _refreshPortraits_FuckaMon(card, scene) {
+    const wrap = card.querySelector(".aflp-card-portraits");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+
+    const groups = _buildSceneGroups(scene);
+    if (!groups.length) { _updateContainerWidth(); return; }
+    const focus = _resolveFocusGroup(scene, groups);
+    const rest  = groups.filter(g => g !== focus);
+
+    // Focused group is the active "battle": a wild encounter (receiver-group) or
+    // a trainer battle (mutual). Everything else is "Elsewhere on the field".
+    if (focus.type === "mutual") _fmTrainerBattle(card, wrap, scene, focus);
+    else                         _fmWildEncounter(card, wrap, scene, focus.receiver, focus.perfs);
+
+    if (rest.length) {
+      const panel = document.createElement("div");
+      panel.className = "aflp-fm-party";
+      panel.style.borderTop = "2px solid #3f51b5";
+      const ph = document.createElement("div");
+      ph.className = "aflp-fm-party-header";
+      ph.textContent = "≈ Elsewhere on the field";
+      panel.appendChild(ph);
+      for (const g of rest) _fmNearbyBlock(panel, scene, g);
+      wrap.appendChild(panel);
+    }
+
+    _applyDragHandleTheme(_container?.querySelector("#aflp-hscene-drag-handle"), null, _sceneMode(scene), scene);
+    _updateContainerWidth();
+  }
+
+  // Own-PC identity ring (cyan), consistent across themes. Box-shadow so it works
+  // on circular FM portraits alongside their yellow border + drop-shadow.
+  function _fmRing(participant) {
+    return _classicIsOwnPc(participant)
+      ? "box-shadow:0 0 0 2px #6fd3ff,0 0 8px rgba(110,210,255,0.6),2px 2px 4px rgba(0,0,0,0.6);"
+      : "";
+  }
+
+  // Focused wild encounter: the receiver is the "wild mon"; the performers are the
+  // "trainers in battle". Sourced from an explicit receiver + performer set (not
+  // scene.target/attackers) so any focused group renders here.
+  function _fmWildEncounter(card, wrap, scene, recv, perfParticipants) {
+    const tgtId      = recv.tokenId;
+    const tgtActorId = recv.actorId ?? recv.tokenId;
+    const tgtImg     = recv.img ?? "";
+    const tgtActor   = _resolveActor({ id: recv.tokenId, actorId: recv.actorId });
+    const FLAG       = AFLP.FLAG_SCOPE;
+    const hasPussy   = !!tgtActor?.getFlag?.(FLAG, "pussy");
+    const hasCock    = !!tgtActor?.getFlag?.(FLAG, "cock");
+    const tgtName    = _safeName(recv.name);
+    const attackers  = (perfParticipants ?? []).map(p => _legacyAttackerProxy(p));
+
+    // CUM gauge (HP bar)
+    const cumData = tgtActor?.getFlag?.(FLAG, "cum") ?? {};
+    const cumCur  = cumData.current ?? 0;
+    const cumMax  = cumData.max ?? 80;
+    const hpPct   = Math.max(0, Math.min(100, Math.round((cumCur / cumMax) * 100)));
+    const hpClass = hpPct > 60 ? "high" : hpPct > 25 ? "mid" : "low";
+
+    // Holes (from this receiver-group's performers only)
+    const mode       = _sceneMode(scene);
+    const canControl = _userCanControl(scene, mode);
+    const mh         = _manualHolesFor(scene, tgtId);   // per-receiver overrides
+    const allPos     = attackers.map(a => AFLP.getPosition(a.position)).filter(Boolean);
+    const hasVaginal = allPos.some(p => p.hole === "vaginal");
+    const hasAnal    = allPos.some(p => p.hole === "anal");
+    const hasOral    = allPos.some(p => p.hole === "oral" || p.hole === "facial");
+    const vagFilled  = hasPussy ? (hasVaginal || !!mh.pussy) : false;
+    const analFilled = hasAnal || !!mh.ass;
+    const oralFilled = hasOral || !!mh.mouth;
+
+    const wildLines = attackers.length === 0
+      ? [`A wild ${tgtName}`, `appeared!`]
+      : attackers.length === 1
+        ? [`${tgtName} is`, `being caught!`]
+        : [`Gang bang!`, `${attackers.length} trainers!`];
+
+    const battlefield = document.createElement("div");
+    battlefield.className = "aflp-fm-battlefield";
+    battlefield.innerHTML = `
+      <div class="aflp-fm-tagline">Gotta Fuck 'Em All!</div>
+      <div class="aflp-fm-wild-text">${wildLines[0]}<br/>${wildLines[1]}</div>
+      <div class="aflp-fm-mon-zone">
+        <img src="${tgtImg}" alt="${tgtName}" width="72" height="72"
+             style="width:72px;height:72px;display:block;object-fit:cover;object-position:top;border-radius:50%;border:3px solid #f5e642;filter:drop-shadow(2px 2px 4px rgba(0,0,0,0.6));flex-shrink:0;${_fmRing(recv)}"/>
+        <div class="aflp-fm-mon-label">${tgtName}</div>
+      </div>
+      <div class="aflp-fm-hp-box" id="aflp-fm-hp-${tgtId}">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="aflp-fm-hp-label">CUM</span>
+          <span class="aflp-fm-hp-label aflp-fm-hp-val" style="color:#fff;font-weight:normal;font-size:10px;">${cumCur} / ${cumMax} mL</span>
+        </div>
+        <div class="aflp-fm-hp-track">
+          <div class="aflp-fm-hp-fill ${hpClass}" style="width:${hpPct}%"></div>
+        </div>
+        <div id="aflp-fm-holes-${tgtId}" style="margin-top:3px;"></div>
+      </div>
+    `;
+    wrap.appendChild(battlefield);
+
+    // Wild-mon Cum/Edge: separate strip after the (overflow:hidden) battlefield.
+    {
+      const tce = _buildCumEdgeButtons(scene, tgtId, tgtActorId, "block");
+      if (tce) {
+        const tceStrip = document.createElement("div");
+        tceStrip.className = "aflp-fm-target-cumedge";
+        tceStrip.appendChild(tce);
+        wrap.appendChild(tceStrip);
+      }
+    }
+
+    // Hole chips
+    const holesDiv = battlefield.querySelector(`#aflp-fm-holes-${tgtId}`);
+    if (holesDiv) {
+      const makeChip = (label, key, filled) => {
+        const sp = document.createElement("span");
+        sp.className = `aflp-po-hole ${filled ? "filled" : "empty"}`;
+        sp.textContent = `${label} ${filled ? "✓" : "○"}`;
+        if (canControl) {
+          sp.style.cursor = "pointer";
+          sp.addEventListener("click", e => {
+            e.stopPropagation();
+            if (!game.user.isGM) {
+              game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-hole-toggle", targetId: tgtId, key });
+            } else {
+              const m = _manualHolesFor(scene, tgtId);
+              m[key] = !m[key];
+              _refreshPortraits(card, scene);
+            }
+          });
+        }
+        return sp;
+      };
+      if (hasPussy) holesDiv.appendChild(makeChip("PUSSY", "pussy", vagFilled));
+      holesDiv.appendChild(makeChip("MOUTH", "mouth", oralFilled));
+      holesDiv.appendChild(makeChip("ASS",   "ass",   analFilled));
+      if (hasCock) {
+        const tgtCockActive = attackers.some(a => {
+          const pe = AFLP.getPosition(a.position);
+          return pe && !pe.penile && (pe.hole === "vaginal" || pe.hole === "anal");
+        });
+        const ck = document.createElement("span");
+        ck.className = `aflp-po-hole ${tgtCockActive ? "filled" : "empty"}`;
+        ck.textContent = `COCK ${tgtCockActive ? "✓" : "○"}`;
+        holesDiv.appendChild(ck);
+      }
+    }
+
+    // Party panel (trainers = this group's performers)
+    const party = document.createElement("div");
+    party.className = "aflp-fm-party";
+    const ph = document.createElement("div");
+    ph.className = "aflp-fm-party-header";
+    ph.textContent = attackers.length ? "▶ TRAINERS IN BATTLE" : "▶ NO TRAINERS YET";
+    party.appendChild(ph);
+
+    const safePron = { subject:"they", object:"them", possessive:"their", reflexive:"themselves" };
+    for (const atk of attackers) {
+      const atkActorFM = _resolveActor(atk);
+      const atkHasCock = !!atkActorFM?.getFlag?.(FLAG, "cock");
+      const posEntry   = atk.position ? AFLP.getPosition(atk.position) : null;
+      const moveName   = posEntry ? (_posLabelShort(atk.position) ?? posEntry.label?.(safePron) ?? atk.position)
+                                  : (attackers.length > 1 ? "Watching" : null);
+      const cockActive = atkHasCock && !!(posEntry?.penile);
+
+      const row = document.createElement("div");
+      row.className = "aflp-fm-trainer-row";
+      row.dataset.trainerId = atk.id;
+
+      const safeName = _safeName(atk.name).split(" ").slice(0,2).join(" ");
+      const fmAArо   = atkActorFM?.getFlag?.(FLAG,"arousal") ?? {};
+      const fmAArCur = fmAArо.current ?? 0;
+      const fmAArMax = AFLP.HScene.calcArousalMax?.(atkActorFM) ?? fmAArо.max ?? 10;
+      const fmAArPct = fmAArMax > 0 ? Math.min(100, Math.round(fmAArCur / fmAArMax * 100)) : 0;
+      const fmACum   = atkActorFM?.getFlag?.(FLAG,"cum") ?? {};
+      const fmACumCur= fmACum.current ?? 0;
+      const fmACumMax= fmACum.max ?? 80;
+      const fmACumPct= fmACumMax > 0 ? Math.min(100, Math.round(fmACumCur / fmACumMax * 100)) : 0;
+      row.innerHTML = `
+        <img src="${atk.img}" alt="${safeName}" width="28" height="28"
+             style="width:28px;height:28px;display:block;object-fit:cover;object-position:top;border-radius:50%;border:1px solid #90caf9;flex-shrink:0;${_fmRing(atk)}"/>
+        <span class="aflp-fm-trainer-name">${safeName}</span>
+        <div class="aflp-fm-stat-bars">
+          ${moveName ? `<div style="font-size:8px;color:#f5e642;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${moveName}</div>` : ""}
+          <div class="aflp-fm-stat-row"><span class="aflp-fm-stat-lbl">CUM</span><div class="aflp-fm-stat-track"><div class="aflp-fm-stat-fill cum" style="width:${fmACumPct}%;"></div></div></div>
+          <div class="aflp-fm-stat-row"><span class="aflp-fm-stat-lbl aro">ARO</span><div class="aflp-fm-stat-track"><div class="aflp-fm-stat-fill aro" style="width:${fmAArPct}%;"></div></div></div>
+        </div>
+        ${atkHasCock ? `<span class="aflp-fm-cock-badge" style="align-self:flex-start;flex-shrink:0;">COCK ${cockActive ? "✓" : "○"}</span>` : ""}
+      `;
+
+      if (canControl && AFLP.Settings.positionTracking) {
+        row.title = posEntry ? (AFLP.getPositionDesc?.(atk.position) ?? "Click to change position") : "Click to set a position";
+        row.addEventListener("click", async () => {
+          if (!game.user.isGM) {
+            game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-position-change", targetId: tgtId, atkTokenId: atk.id });
+            ui.notifications.info("Position change requested, waiting for GM.");
+          } else if (attackers.length === 1) {
+            await AFLP.HScene._promptAndSetPosition(scene, atk, atkActorFM);
+          } else {
+            await AFLP.HScene._promptGroupPosition(scene, atk);
+          }
+        });
+      }
+
+      if (game.user.isGM) {
+        const lb = document.createElement("button");
+        lb.className = "aflp-fm-leave-btn";
+        lb.textContent = "✕";
+        lb.title = "Remove " + atk.name + " from scene";
+        lb.addEventListener("click", e => { e.stopPropagation(); AFLP.HScene.removeParticipant(tgtId, atk.id); });
+        row.appendChild(lb);
+      }
+      {
+        const ace = _buildCumEdgeButtons(scene, atk.id, atk.actorId ?? atk.id, "inline");
+        if (ace) row.appendChild(ace);
+      }
+      party.appendChild(row);
+    }
+
+    wrap.appendChild(party);
+  }
+
+  // Focused trainer battle (mutual/reversal): two co-equal combatants on the
+  // field (VS), each with their own Cum/Edge. Positions for entangled sides are
+  // set via SA/SS (no in-card picker for mutual sides yet, as in Classic).
+  function _fmTrainerBattle(card, wrap, scene, group) {
+    const [m1, m2] = group.members;
+    const FLAG = AFLP.FLAG_SCOPE;
+    const n1 = _safeName(m1.name), n2 = _safeName(m2.name);
+
+    const battlefield = document.createElement("div");
+    battlefield.className = "aflp-fm-battlefield";
+    battlefield.innerHTML = `
+      <div class="aflp-fm-tagline">Trainer Battle!</div>
+      <div class="aflp-fm-mon-zone">
+        <img src="${m2.img}" alt="${n2}" width="64" height="64"
+             style="width:64px;height:64px;display:block;object-fit:cover;object-position:top;border-radius:50%;border:3px solid #f5e642;filter:drop-shadow(2px 2px 4px rgba(0,0,0,0.6));${_fmRing(m2)}"/>
+        <div class="aflp-fm-mon-label">${n2}</div>
+      </div>
+      <div class="aflp-fm-vs">VS</div>
+      <div class="aflp-fm-near-combat">
+        <img src="${m1.img}" alt="${n1}" width="58" height="58"
+             style="width:58px;height:58px;display:block;object-fit:cover;object-position:top;border-radius:50%;border:3px solid #f5e642;filter:drop-shadow(2px 2px 4px rgba(0,0,0,0.6));${_fmRing(m1)}"/>
+        <div class="aflp-fm-mon-label">${n1}</div>
+      </div>
+    `;
+    wrap.appendChild(battlefield);
+
+    const party = document.createElement("div");
+    party.className = "aflp-fm-party";
+    const ph = document.createElement("div");
+    ph.className = "aflp-fm-party-header";
+    ph.textContent = "▶ LOCKED IN COMBAT";
+    party.appendChild(ph);
+
+    for (const m of group.members) {
+      const nm = _safeName(m.name).split(" ").slice(0,2).join(" ");
+      const mActor = _resolveActor({ id: m.tokenId, actorId: m.actorId });
+      const hasCock = !!mActor?.getFlag?.(FLAG, "cock");
+      const posStr = _posLabelShort(m.position);
+      const row = document.createElement("div");
+      row.className = "aflp-fm-trainer-row";
+      row.innerHTML = `
+        <img src="${m.img}" alt="${nm}" width="28" height="28"
+             style="width:28px;height:28px;display:block;object-fit:cover;object-position:top;border-radius:50%;border:1px solid #90caf9;flex-shrink:0;${_fmRing(m)}"/>
+        <span class="aflp-fm-trainer-name">${nm}</span>
+        <span style="flex:1;font-size:9px;color:#f5e642;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${posStr ? posStr + " →" : ""}</span>
+        ${hasCock ? `<span class="aflp-fm-cock-badge" style="flex-shrink:0;">♂</span>` : ""}
+      `;
+      const ce = _buildCumEdgeButtons(scene, m.tokenId, m.actorId ?? m.tokenId, "inline");
+      if (ce) row.appendChild(ce);
+      if (game.user.isGM) {
+        const lb = document.createElement("button");
+        lb.className = "aflp-fm-leave-btn";
+        lb.textContent = "✕";
+        lb.title = "Remove " + m.name + " from scene";
+        lb.addEventListener("click", e => { e.stopPropagation(); AFLP.HScene.removeParticipant(scene.id, m.tokenId); });
+        row.appendChild(lb);
+      }
+      if (_userCanControl(scene, _sceneMode(scene)) && AFLP.Settings.positionTracking) {
+        row.style.cursor = "pointer";
+        row.title = m.position ? (AFLP.getPositionDesc?.(m.position) ?? "Click to change position") : "Click to set a position";
+        row.addEventListener("click", async e => {
+          if (e.target.closest(".aflp-fm-leave-btn")) return;
+          if (e.target.closest(".aflp-cumedge-row")) return;
+          if (!game.user.isGM) {
+            game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-position-change", targetId: m.partnerId ?? scene.id, atkTokenId: m.tokenId });
+            ui.notifications.info("Position change requested, waiting for GM.");
+          } else {
+            await AFLP.HScene._promptGroupPosition(scene, _legacyAttackerProxy(m));
+          }
+        });
+      }
+      party.appendChild(row);
+    }
+    wrap.appendChild(party);
+  }
+
+  // Cascaded (overlapping) trainer portraits for an FM nearby block.
+  function _fmCascade(perfs) {
+    const CAP = 5;
+    const shown = perfs.slice(0, CAP), extra = perfs.length - shown.length;
+    let h = `<div style="display:flex;align-items:center;">`;
+    shown.forEach((p, i) => {
+      h += `<div style="width:26px;height:26px;border-radius:50%;overflow:hidden;border:1px solid #90caf9;box-shadow:-2px 0 3px rgba(0,0,0,0.5)${_classicIsOwnPc(p) ? ",0 0 0 2px #6fd3ff" : ""};${i ? "margin-left:-9px;" : ""}z-index:${20 - i};"><img src="${p.img}" style="width:26px;height:26px;display:block;object-fit:cover;object-position:top;"/></div>`;
+    });
+    if (extra > 0) h += `<div style="margin-left:-8px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,0.5);border:1px solid #90caf9;color:#90caf9;font-size:9px;font-weight:bold;display:flex;align-items:center;justify-content:center;z-index:1;">+${extra}</div>`;
+    return h + `</div>`;
+  }
+
+  // View-only "elsewhere on the field" block: a glance at another encounter or
+  // trainer battle, with a per-client ⤒ Focus control that promotes it.
+  function _fmNearbyBlock(panel, scene, group) {
+    const block = document.createElement("div");
+    block.className = "aflp-fm-nearby";
+
+    const ready = _classicGroupHasReady(scene, group);
+    const head = document.createElement("div");
+    head.className = "aflp-fm-nearby-head";
+    const title = document.createElement("span");
+    title.className = "aflp-fm-nearby-title";
+    title.innerHTML = (group.type === "mutual" ? "≈ Trainer battle nearby" : "≈ Nearby encounter")
+      + (ready ? ` <span style="color:#ff5070;" title="Someone here is ready to cum">● ready</span>` : "");
+    const focusBtn = document.createElement("div");
+    focusBtn.className = "aflp-fm-focus-btn";
+    focusBtn.textContent = "⤒ Focus";
+    focusBtn.title = "Focus this encounter on your card";
+    focusBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      _setFocusPin(scene.id, group.id);
+      const c = _cardFor(scene);
+      if (c) _refreshPortraits(c, scene);
+    });
+    head.appendChild(title);
+    head.appendChild(focusBtn);
+    block.appendChild(head);
+
+    if (group.type === "mutual") {
+      const [m1, m2] = group.members;
+      const port = (p, sz) => `<img src="${p.img}" alt="${_safeName(p.name)}" style="width:${sz}px;height:${sz}px;border-radius:50%;border:1px solid #90caf9;object-fit:cover;object-position:top;flex-shrink:0;${_classicIsOwnPc(p) ? "box-shadow:0 0 0 2px #6fd3ff;" : ""}"/>`;
+      const row = document.createElement("div");
+      row.className = "aflp-fm-nearby-row";
+      row.style.justifyContent = "center";
+      row.innerHTML = `
+        ${port(m1, 30)}<span class="aflp-fm-trainer-name">${_safeName(m1.name)}</span>
+        <span style="color:#fff;font-weight:900;font-size:12px;">VS</span>
+        <span class="aflp-fm-trainer-name">${_safeName(m2.name)}</span>${port(m2, 30)}`;
+      block.appendChild(row);
+    } else {
+      const r = group.receiver;
+      const row = document.createElement("div");
+      row.className = "aflp-fm-nearby-row";
+      row.innerHTML = `
+        <img src="${r.img}" alt="${_safeName(r.name)}" style="width:32px;height:32px;border-radius:50%;border:2px solid #f5e642;object-fit:cover;object-position:top;flex-shrink:0;${_classicIsOwnPc(r) ? "box-shadow:0 0 0 2px #6fd3ff;" : ""}"/>
+        <span class="aflp-fm-trainer-name" style="color:#fff;">Wild ${_safeName(r.name)}</span>
+        ${_fmCascade(group.perfs)}`;
+      block.appendChild(row);
+      const names = group.perfs.map(p => _safeName(p.name)).join(", ");
+      const take = document.createElement("div");
+      take.className = "aflp-fm-nearby-take";
+      take.textContent = `vs ${names}`;
+      take.title = names;
+      block.appendChild(take);
+    }
+    panel.appendChild(block);
   }
 
   // -----------------------------------------------
@@ -1514,7 +3231,13 @@ AFLP.HScene = (() => {
   function _refreshArousalBars(card, scene) {
     const area = card.querySelector(".aflp-card-arousal-bars");
     if (!area) return;
-    area.innerHTML = "";
+
+    const isPorno = card.className.includes("aflp-theme-aflp-classic");
+
+    // For porno theme: don't rebuild the bottom bar area (performer cards have inline bars).
+    // But still run the live-update section at the bottom for cum/FM bars.
+    if (!isPorno) {
+      area.innerHTML = "";
 
     const allParticipants = [
       { name: scene.targetName, id: scene.targetId, actorId: scene.targetActorId, tokenDoc: scene.targetTokenDoc },
@@ -1544,13 +3267,13 @@ AFLP.HScene = (() => {
       valEl.textContent = `${cur}/${max}`;
 
       // ─── Bar or Pips: respect explicit setting, fall back to theme default ──
-      const _theme = AFLP.Settings.hsceneTheme ?? "porno";
-      const _arousalPref = AFLP.Settings.hsceneArousalStyle ?? "auto";
+      const _theme = AFLP.Settings.hsceneTheme ?? "aflp-classic";
+      const _arousalPref = "auto"; // Each UI has its own fixed style - no user override
       const useBars = _arousalPref === "bars"
         ? true
         : _arousalPref === "pips"
           ? false
-          : (_theme === "combat-hud" || _theme === "porno"); // "auto" = theme default
+          : (_theme === "lewd-lite" || _theme === "aflp-classic"); // "auto" = theme default
       const isTarget = (participant.id === scene.targetId) ||
         ((participant.actorId ?? participant.id) === scene.targetActorId);
 
@@ -1629,6 +3352,85 @@ AFLP.HScene = (() => {
         cfRow.appendChild(cfVal);
         area.appendChild(cfRow);
       }
+    } // end for (participant)
+    } // end if (!isPorno) - full rebuild only for non-porno themes
+
+    // Live-update inline bars for porno and gangbang-hud themes
+    if (isPorno) {
+      // AFLP Classic: update cumflation status chip live
+      const cfEl2 = card.querySelector(".aflp-po-cumflation-status");
+      if (cfEl2) {
+        const cfAct = _resolveActor({id:scene.targetId,actorId:scene.targetActorId});
+        const cfF   = cfAct?.getFlag?.(AFLP.FLAG_SCOPE,"cumflation") ?? {};
+        const cfw   = _cumflationWord(cfF);
+        if (cfw) {
+          const cfP = Math.round(((cfF.anal??0)+(cfF.oral??0)+(cfF.vaginal??0))/(3*8)*100);
+          cfEl2.textContent = `Cumflation ${cfP}%: ${cfw.word}`;
+          cfEl2.style.color = cfw.color;
+          cfEl2.style.textShadow = `0 0 8px ${cfw.glow}`;
+          cfEl2.style.display = "";
+        } else {
+          cfEl2.style.display = "none";
+        }
+      }
+      // Gangbang HUD: update target horizontal bars
+      if (card.className.includes("aflp-theme-lewd-lite")) {
+        const tgtBars = card.querySelector(`#aflp-ch-tgt-${scene.targetId}`);
+        if (tgtBars) {
+          const chTgt = _resolveActor({id:scene.targetId,actorId:scene.targetActorId});
+          const chCum = chTgt?.getFlag?.(AFLP.FLAG_SCOPE,"cum") ?? {};
+          const chCumPct = (chCum.max??80) > 0 ? Math.min(100,Math.round((chCum.current??0)/(chCum.max??80)*100)) : 0;
+          const chAro = chTgt?.getFlag?.(AFLP.FLAG_SCOPE,"arousal") ?? {};
+          const chArCur = chAro.current ?? 0;
+          const chArMax = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(chTgt) : (chAro.max ?? 10);
+          const chArPct = chArMax > 0 ? Math.min(100,Math.round(chArCur/chArMax*100)) : 0;
+          const [cumFill, aroFill] = tgtBars.querySelectorAll(".aflp-ch-hbar-fill");
+          if (cumFill) cumFill.style.width = chCumPct + "%";
+          if (aroFill) aroFill.style.width = chArPct + "%";
+        }
+        // Attacker inline bars (below portrait)
+        for (const atk of scene.attackers) {
+          const atkCol = card.querySelector(`[data-atk-id="${atk.id}"]`);
+          if (!atkCol) continue;
+          const chAtk = _resolveActor(atk);
+          if (!chAtk) continue;
+          const chACum = chAtk.getFlag?.(AFLP.FLAG_SCOPE,"cum") ?? {};
+          const chACumPct = (chACum.max??80) > 0 ? Math.min(100,Math.round((chACum.current??0)/(chACum.max??80)*100)) : 0;
+          const chAAro = chAtk.getFlag?.(AFLP.FLAG_SCOPE,"arousal") ?? {};
+          const chAArCur = chAAro.current ?? 0;
+          const chAArMax = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(chAtk) : (chAAro.max ?? 10);
+          const chAArPct = chAArMax > 0 ? Math.min(100,Math.round(chAArCur/chAArMax*100)) : 0;
+          const fills = atkCol.querySelectorAll(".aflp-ch-vbar-cum, .aflp-ch-vbar-aro");
+          // bars are inline — find by gradient color
+          const allFills = [...atkCol.querySelectorAll("div[style*='background:linear-gradient']")];
+          const cumFill = allFills.find(d=>d.style.background?.includes("#8060a0"));
+          const aroFill = allFills.find(d=>d.style.background?.includes("#c02828"));
+          if (cumFill) cumFill.style.width = chACumPct + "%";
+          if (aroFill) aroFill.style.width = chAArPct + "%";
+        }
+      }
+    }
+    if (isPorno) {
+      for (const atk of scene.attackers) {
+        const atkActor = _resolveActor(atk);
+        if (!atkActor) continue;
+        const col = card.querySelector(`[data-atk-id="${atk.id}"]`);
+        if (!col) continue;
+        const atkCumData  = atkActor.getFlag?.(AFLP.FLAG_SCOPE, "cum") ?? {};
+        const atkCumCur   = atkCumData.current ?? 0;
+        const atkCumMax   = atkCumData.max ?? 80;
+        const atkCumPct   = atkCumMax > 0 ? Math.min(100, Math.round((atkCumCur / atkCumMax) * 100)) : 0;
+        const atkArousal  = atkActor.getFlag?.(AFLP.FLAG_SCOPE, "arousal") ?? {};
+        const atkArCur    = atkArousal.current ?? 0;
+        const atkArMax    = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(atkActor) : (atkArousal.max ?? 10);
+        const atkArPct    = atkArMax > 0 ? Math.min(100, Math.round((atkArCur / atkArMax) * 100)) : 0;
+        const fills = col.querySelectorAll(".aflp-cum-fill");
+        const vals  = col.querySelectorAll(".aflp-cum-val, [style*='min-width:28px']");
+        if (fills[0]) fills[0].style.width = atkCumPct + "%";
+        if (fills[1]) fills[1].style.width = atkArPct + "%";
+        if (vals[0])  vals[0].textContent = atkCumCur + "mL";
+        if (vals[1])  vals[1].textContent = atkArCur + "/" + atkArMax;
+      }
     }
   }
 
@@ -1639,28 +3441,27 @@ AFLP.HScene = (() => {
     // Theme selector — per-user client setting
     card.querySelector(".aflp-card-theme-select")?.addEventListener("change", e => {
       e.stopPropagation();
-      game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME, e.target.value);
-      // Sync all other open cards to the new selection
+      const newTheme = e.target.value;
+      // Always save as per-user choice
+      game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME, newTheme);
+      // If GM changes theme, also update the appropriate GM default setting
+      if (game.user.isGM) {
+        const isMon = scene && (() => {
+          const ta = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId });
+          return ta && ta.type === "npc" && !ta.hasPlayerOwner;
+        })();
+        const gmKey = isMon
+          ? AFLP.Settings.KEYS.HSCENE_THEME_MON
+          : AFLP.Settings.KEYS.HSCENE_THEME_PC;
+        game.settings.set(AFLP.Settings.ID, gmKey, newTheme).catch(() => {});
+      }
+      // Sync all other open cards
       document.querySelectorAll(".aflp-card-theme-select").forEach(sel => {
-        if (sel !== e.target) sel.value = e.target.value;
+        if (sel !== e.target) sel.value = newTheme;
       });
     });
 
-    // Arousal display selector — per-user client setting
-    card.querySelector(".aflp-card-arousal-select")?.addEventListener("change", e => {
-      e.stopPropagation();
-      game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_AROUSAL, e.target.value);
-      // Refresh all active cards' arousal bars immediately
-      const scenes = AFLP.HScene._scenes;
-      if (!scenes) return;
-      for (const [tid, sc] of scenes) {
-        const c = _container?.querySelector(`[data-target-id="${tid}"]`);
-        if (c) _refreshArousalBars(c, sc);
-      }
-      document.querySelectorAll(".aflp-card-arousal-select").forEach(sel => {
-        if (sel !== e.target) sel.value = e.target.value;
-      });
-    });
+    // Arousal style is now fixed per-theme — selector removed from UI
 
     // Minimise
     card.querySelector(".aflp-card-minimize")?.addEventListener("click", e => {
@@ -1793,6 +3594,11 @@ AFLP.HScene = (() => {
     game.socket.on("module.ardisfoxxs-lewd-pf2e", data => {
       if (!data?.type?.startsWith("hscene")) return;
 
+      // Unified full-scene sync (supersedes piecemeal start/add/remove relays).
+      if (data.type === "hscene-sync") {
+        _applySceneSync(data);
+      }
+      // Legacy relays kept for back-compat (our own emits now use hscene-sync).
       if (data.type === "hscene-start") {
         AFLP.HScene.startScene(
           { id: data.attackerId, actorId: data.attackerActorId ?? data.attackerId, name: data.attackerName, img: data.attackerImg },
@@ -1812,7 +3618,7 @@ AFLP.HScene = (() => {
         }
       }
       if (data.type === "hscene-close") {
-        AFLP.HScene.closeScene(data.targetId);
+        AFLP.HScene.closeScene(data.sceneId ?? data.targetId);
       }
       if (data.type === "hscene-remove-participant") {
         AFLP.HScene.removeParticipant(data.targetId, data.tokenId, true);
@@ -1824,9 +3630,17 @@ AFLP.HScene = (() => {
         AFLP.HScene.refreshArousalBars(data.targetId);
       }
 
+      // Player clicked the in-card Cum/Edge button — only the GM resolves.
+      if (data.type === "hscene-resolve-cum" && _isPrimaryGM()) {
+        AFLP.HScene.resolveCum(data.targetId, data.key, true);
+      }
+      if (data.type === "hscene-resolve-edge" && _isPrimaryGM()) {
+        AFLP.HScene.resolveEdge(data.targetId, data.key, true);
+      }
+
       // A player-run SS macro asks the GM to apply conditions and start the scene.
       // Only the GM processes this; other players ignore it.
-      if (data.type === "hscene-player-ss" && game.user.isGM) {
+      if (data.type === "hscene-player-ss" && _isPrimaryGM()) {
         (async () => {
           const srcToken  = canvas.tokens.get(data.srcTokenId);
           const tgtToken  = canvas.tokens.get(data.tgtTokenId);
@@ -1898,6 +3712,34 @@ AFLP.HScene = (() => {
           AFLP.HScene.startScene(atkData, tgtData);
         })().catch(e => console.error("AFLP | hscene-player-ss error:", e));
       }
+
+      // ── Player requests a hole toggle (non-GM allowed user) ─────────────
+      if (data.type === "hscene-player-hole-toggle" && _isPrimaryGM()) {
+        const scene = _sceneByAnyId(data.targetId);
+        if (!scene) return;
+        const mode = _sceneMode(scene);
+        // Validate the requesting user is allowed
+        // (We trust the client check for now; validation could be tightened with userId)
+        const m = _manualHolesFor(scene, data.targetId);   // keyed by receiver token id
+        m[data.key] = !m[data.key];
+        _saveSceneState();
+        const card = _cardFor(scene);
+        if (card) _refreshPortraits(card, scene);
+      }
+
+      // ── Player requests a position change (non-GM allowed user) ─────────
+      if (data.type === "hscene-player-position-change" && _isPrimaryGM()) {
+        (async () => {
+          const scene = _sceneByAnyId(data.targetId);
+          if (!scene) return;
+          // Resolve from participants (not just the legacy attackers view) so this
+          // works for performers AND entangled members, including a lone battle
+          // where one side is the projected target. The prompt is partner-aware.
+          const part = scene.participants?.find(p => p.tokenId === data.atkTokenId);
+          if (!part) return;
+          await AFLP.HScene._promptGroupPosition(scene, _legacyAttackerProxy(part));
+        })().catch(e => console.error("AFLP | hscene-player-position-change error:", e));
+      }
     });
   }
 
@@ -1910,15 +3752,15 @@ AFLP.HScene = (() => {
       const actorId = currentCombatant?.actorId;
       if (!actorId) return;
 
-      for (const [targetId, scene] of _scenes) {
+      for (const [, scene] of _scenes) {
         const isInvolved = scene.targetActorId === actorId ||
           scene.attackers.some(a => a.actorId === actorId);
-        const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+        const card = _cardFor(scene);
         if (!card) continue;
 
         if (isInvolved) {
           card.classList.remove("minimized");
-          const _dh = document.getElementById('aflp-hscene-drag-handle');
+          const _dh = _container?.querySelector('#aflp-hscene-drag-handle');
           if (_dh?.nextSibling) _container.insertBefore(card, _dh.nextSibling);
           else _container.appendChild(card);
         }
@@ -1934,7 +3776,6 @@ AFLP.HScene = (() => {
             if (hasRestrained)            scene.restrainedRounds = (scene.restrainedRounds ?? 0) + 1;
           }
           // Airlock: read from card dataset which is updated by porno portrait renderer
-          const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
           if (card?.dataset.airlocked) scene.airlockRounds = (scene.airlockRounds ?? 0) + 1;
         }
       }
@@ -1943,11 +3784,11 @@ AFLP.HScene = (() => {
     Hooks.on("deleteToken", (tokenDoc) => {
       if (!AFLP.Settings.hsceneEnabled || !game.user.isGM) return;
       const tokenId = tokenDoc.id;
-      // Check every active scene for this token
-      for (const [targetId, scene] of _scenes) {
-        if (scene.targetId === tokenId || scene.attackers.some(a => a.id === tokenId)) {
-          AFLP.HScene.removeParticipant(targetId, tokenId);
-          break; // each token can only be in one scene role at a time
+      // Check every active scene for this token (participant-aware).
+      for (const scene of _scenes.values()) {
+        if ((scene.participants ?? []).some(p => p.tokenId === tokenId)) {
+          AFLP.HScene.removeParticipant(scene.id, tokenId);
+          break; // each token can only be in one scene at a time
         }
       }
     });
@@ -1960,9 +3801,11 @@ AFLP.HScene = (() => {
     Hooks.on("updateActor", (actor, diff) => {
       if (!AFLP.Settings.hsceneEnabled) return;
 
-      // Refresh arousal bars when AFLP flags change
+      // Refresh arousal bars when AFLP flags change. "cum" is included so the
+      // cum-volume gauge updates immediately on a cum/edge resolution — without
+      // it the bar stayed stale until the next unrelated flag change refreshed.
       const flags = diff?.flags?.[AFLP.FLAG_SCOPE];
-      if (flags && ("cumflation" in flags || "horny" in flags || "denied" in flags || "arousal" in flags)) {
+      if (flags && ("cumflation" in flags || "horny" in flags || "denied" in flags || "arousal" in flags || "cum" in flags)) {
         AFLP.HScene.refreshArousalForActor(actor.id);
       }
 
@@ -1972,8 +3815,8 @@ AFLP.HScene = (() => {
       const newHP = diff?.system?.attributes?.hp?.value;
       if (newHP == null) return;
 
-      for (const [targetId, scene] of _scenes) {
-        const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      for (const [, scene] of _scenes) {
+        const card = _cardFor(scene);
         if (!card) continue;
 
         const isTarget   = (scene.targetActorId ?? scene.targetId) === actor.id;
@@ -1993,26 +3836,19 @@ AFLP.HScene = (() => {
         }
 
         if (newHP <= 0) {
-          if (isTarget) {
-            // Target dropped to 0 — close the scene entirely
-            if (game.user.isGM) {
+          if (game.user.isGM) {
+            if (isTarget) {
+              // Target dropped to 0 — close the scene entirely
               ChatMessage.create({
                 content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong> has been defeated. The H scene ends.</p></div>`,
                 speaker: { alias: "AFLP" },
               });
-              AFLP.HScene.closeScene(targetId);
-            }
-          } else if (isAttacker) {
-            // Attacker dropped to 0 — remove them from the scene
-            if (game.user.isGM) {
-              scene.attackers.splice(atkIndex, 1);
-              if (scene.attackers.length === 0) {
-                // No attackers left — close scene
-                AFLP.HScene.closeScene(targetId);
-              } else {
-                _refreshPortraits(card, scene);
-                _refreshArousalBars(card, scene);
-              }
+              AFLP.HScene.closeScene(scene.id);
+            } else if (isAttacker) {
+              // Attacker dropped to 0 — remove them (participant-aware; handles
+              // unpairing + close-if-no-pairing + sync inside removeParticipant).
+              const p = (scene.participants ?? []).find(pp => (pp.actorId ?? pp.tokenId) === actor.id);
+              if (p) AFLP.HScene.removeParticipant(scene.id, p.tokenId);
             }
           }
         } else {
@@ -2161,6 +3997,10 @@ AFLP.HScene = (() => {
       }
     },
 
+    // Expose theme helpers so module-settings onChange callbacks can call them
+    _applyDefaultThemesToAll() { _applyDefaultThemesToAll(); },
+    _resetPlayersToDefaultTheme() { _resetPlayersToDefaultTheme(); },
+
     // Calculate true arousal max for an actor
     // Base 6 + Denied level + any flag overrides
     calcArousalMax(actor) {
@@ -2176,138 +4016,161 @@ AFLP.HScene = (() => {
     // id = token ID (unique per placed token), actorId = world actor ID.
     // Scenes are keyed by target TOKEN id so two tokens of the same actor
     // are treated as distinct participants.
+    //
+    // ── PHASE 1 INVARIANT (read before the Section A rewrite) ───────────────
+    // When this is rewired to build scene.participants instead of the flat
+    // legacy fields, the SA/SS *target* participant MUST be pushed to
+    // participants[] BEFORE the attacker. In a balanced 1v1 the projected
+    // target ties on incoming-partner count (1-1) and _projectTarget falls
+    // through to insertion order; target-first insertion is what makes the
+    // projected legacy view reproduce the real target. See the comment block
+    // on _projectTarget. Inserting attacker-first here silently flips the
+    // projected target in every 1v1 and breaks the legacy renderers.
     startScene(attacker, target, fromSocket = false) {
       if (!AFLP.Settings.hsceneEnabled) return;
       _ensureContainer();
-      _applyDragHandleTheme(document.getElementById('aflp-hscene-drag-handle'), _container);
+      _applyDragHandleTheme(_container?.querySelector('#aflp-hscene-drag-handle'), _container);
 
-      // If the target is already the target in an existing scene, join it (gangbang support).
-      const existingScene = this._getSceneWhereTarget(target.id, target.actorId);
-      if (existingScene) {
-        this.addAttacker(existingScene.targetId, attacker, fromSocket);
-        return;
+      // ── Resolve the ONE scene for this battlemap (create or join) ─────────
+      // Unified model: there is at most one scene per battlemap. If one already
+      // exists we JOIN it (ensure participants, re-point partnerId) rather than
+      // spawning a second scene. This is what fixes "target SA'ing its own
+      // attacker spawns a 3rd scene" and the gangbang-join path in one stroke.
+      const sceneId = _battlemapId(target.tokenDoc ?? target.id);
+      let scene = _scenes.get(sceneId);
+      const isNew = !scene;
+      if (isNew) {
+        scene = { id: sceneId, participants: [], ..._freshSceneStats() };
+        _defineLegacyView(scene);
+        _scenes.set(sceneId, scene);
       }
 
-      const scene = {
-        targetId:       target.id,
-        targetActorId:  target.actorId ?? target.id,
-        targetName:     target.name,
-        targetImg:      target.img,
-        targetTokenDoc: target.tokenDoc ?? null,
-        attackers:      [{ id: attacker.id, actorId: attacker.actorId ?? attacker.id, name: attacker.name, img: attacker.img, tokenDoc: attacker.tokenDoc ?? null }],
-        log:            [],
-        orgasms:        {},   // tokenId -> count for this scene
-        // ── Scene stats ──────────────────────────────────────────────────
-        damageTaken:    0,    // HP lost by target during scene
-        damageDealt:    0,    // HP dealt by target to others during scene
-        bondageRounds:  0,    // turns target spent with grabbed/bondage condition
-        restrainedRounds: 0,  // turns target spent with restrained condition
-        airlockRounds:  0,    // turns target spent airlocked (all holes filled)
-        loadsReceived:  0,    // total cum events into target
-        loadsByHole:    { anal: 0, oral: 0, vaginal: 0, facial: 0 },
-        creaturesFucked: new Set(), // actorIds of unique attackers who cummed into target
-        orgasmsByAttacker: {}, // actorId -> cumCount (attackers who cummed from scene)
-      };
-      _scenes.set(target.id, scene);
+      // Build participants TARGET FIRST (projection invariant — see
+      // _projectTarget), then the attacker. _ensureParticipant is find-or-create
+      // so re-advancing just refreshes/repoints rather than duplicating.
+      const tgtActor = canvas?.tokens?.get(target.id)?.actor
+                    ?? game.actors.get(target.actorId ?? target.id);
+      const atkActor = canvas?.tokens?.get(attacker.id)?.actor
+                    ?? game.actors.get(attacker.actorId ?? attacker.id);
+
+      const tgtP = _ensureParticipant(scene, {
+        tokenId: target.id, actorId: target.actorId ?? target.id,
+        name: target.name, img: target.img, tokenDoc: target.tokenDoc ?? null,
+      });
+      tgtP.role = _roleFromActor(tgtActor) ?? tgtP.role;
+
+      const isSelfScene = attacker.id === target.id;
+      let atkP = null;
+      if (!isSelfScene) {
+        atkP = _ensureParticipant(scene, {
+          tokenId: attacker.id, actorId: attacker.actorId ?? attacker.id,
+          name: attacker.name, img: attacker.img, tokenDoc: attacker.tokenDoc ?? null,
+        });
+        atkP.role = _roleFromActor(atkActor) ?? atkP.role;
+        // Pair: attacker points at this target now (an INTENTIONAL edge); the
+        // target defaults to FACING the attacker if it has no current partner.
+        // The facing flag distinguishes that cosmetic back-edge from a real
+        // reversal (where the target later runs its own SA, clearing _facing).
+        atkP.partnerId = target.id;
+        atkP._facing = false;
+        if (!tgtP.partnerId) { tgtP.partnerId = attacker.id; tgtP._facing = true; }
+      }
       _saveSceneState();
 
-      const card = _buildCard(scene);
-      // Card starts hidden — revealed by _revealCard() after any position dialog
-      card.style.display = "none";
-      _container.appendChild(card);
+      // ── Card: build once per battlemap; otherwise refresh in place ────────
+      let card = _cardFor(scene);
+      if (!card) {
+        card = _buildCard(scene);
+        card.style.display = "none"; // revealed after any position dialog
+        _container.appendChild(card);
+      } else {
+        _refreshPortraits(card, scene);
+        _refreshArousalBars(card, scene);
+      }
       _container.style.display = "flex";
 
-      // Reveal helper — keyed by targetId so SA macro can call it too
+      // Reveal helper keyed by the stable scene.id (one card per battlemap).
       const _revealCard = () => { card.style.display = ""; };
-      // Expose on module-level map so SA can call it after its own position dialog
-      _pendingReveal.set(scene.targetId, _revealCard);
+      _pendingReveal.set(scene.id, _revealCard);
 
       const needsPositionPrompt = (
-        !fromSocket && AFLP.Settings.positionTracking && game.user.isGM &&
-        attacker.actorId !== target.actorId
+        !fromSocket && AFLP.Settings.positionTracking && game.user.isGM && !isSelfScene
       );
 
-      // Role selection prompt - only fire if NEITHER actor has any role assigned.
-      // SS always sets Dominating on the attacker before calling startScene, so
-      // atkHasRole will be true and this prompt won't fire for SS-initiated scenes.
-      // Also skip if the SS macro is in progress (cross-client safety).
-      if (!fromSocket && game.user.isGM && !window._aflpMacroHandlingPosition && !window._aflpSSInProgress) {
-        const isSelfScene = attacker.actorId === target.actorId;
-        if (!isSelfScene) {
-          const atkActor = canvas?.tokens?.get(attacker.id)?.actor
-                        ?? game.actors.get(attacker.actorId ?? attacker.id);
-          const tgtActor = canvas?.tokens?.get(target.id)?.actor
-                        ?? game.actors.get(target.actorId ?? target.id);
-          // Check token actor items directly (more reliable than hasCondition for synthetic actors)
-          const atkHasRole = atkActor?.items?.some(c => c.slug === "dominating" || c.slug === "submitting")
-                          || atkActor?.hasCondition?.("dominating") || atkActor?.hasCondition?.("submitting");
-          const tgtHasRole = tgtActor?.items?.some(c => c.slug === "dominating" || c.slug === "submitting")
-                          || tgtActor?.hasCondition?.("dominating") || tgtActor?.hasCondition?.("submitting");
-          if (!atkHasRole && !tgtHasRole && atkActor && tgtActor) {
-            AFLP.HScene._promptRoleSelection(atkActor, tgtActor).catch(() => {});
-          }
+      // Role selection prompt - only when NEITHER actor has a role yet.
+      // SS sets Dominating on the attacker before calling startScene, so this
+      // won't fire for SS-initiated scenes. Skip while the SS macro is running.
+      if (!fromSocket && game.user.isGM && !isSelfScene &&
+          !window._aflpMacroHandlingPosition && !window._aflpSSInProgress) {
+        const atkHasRole = atkActor?.items?.some(c => c.slug === "dominating" || c.slug === "submitting")
+                        || atkActor?.hasCondition?.("dominating") || atkActor?.hasCondition?.("submitting");
+        const tgtHasRole = tgtActor?.items?.some(c => c.slug === "dominating" || c.slug === "submitting")
+                        || tgtActor?.hasCondition?.("dominating") || tgtActor?.hasCondition?.("submitting");
+        if (!atkHasRole && !tgtHasRole && atkActor && tgtActor) {
+          AFLP.HScene._promptRoleSelection(atkActor, tgtActor).catch(() => {});
         }
       }
 
-      if (needsPositionPrompt && !window._aflpMacroHandlingPosition) {
-        // startScene handles position itself — reveal card when dialog resolves
-        const atkData  = scene.attackers[0];
-        const atkActor = canvas?.tokens?.get(attacker.id)?.actor
-                      ?? game.actors.get(attacker.actorId ?? attacker.id);
+      if (needsPositionPrompt && !window._aflpMacroHandlingPosition && atkP) {
+        // Fetch the legacy attacker proxy so position writes reflect onto the
+        // participant (atkData.position = ... -> atkP.position).
+        const atkData = scene.attackers.find(a => a.id === attacker.id);
         if (atkData && atkActor) {
-          AFLP.HScene._promptAndSetPosition(scene, atkData, atkActor)
+          AFLP.HScene._promptGroupPosition(scene, atkData)
             .catch(() => {})
-            .finally(() => AFLP.HScene.revealCard(scene.targetId));
+            .finally(() => AFLP.HScene.revealCard(scene.id));
         } else {
-          AFLP.HScene.revealCard(scene.targetId);
+          AFLP.HScene.revealCard(scene.id);
         }
       } else if (!needsPositionPrompt || fromSocket) {
-        // No position dialog needed — show immediately
-        AFLP.HScene.revealCard(scene.targetId);
+        AFLP.HScene.revealCard(scene.id);
       }
       // If _aflpMacroHandlingPosition: SA macro will call revealCard after its dialog
 
-      // Broadcast to other clients
+      // Broadcast the full scene to other clients (single unified sync).
       if (!fromSocket && game.user.isGM) {
-        game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
-          type:           "hscene-start",
-          attackerId:     attacker.id,
-          attackerActorId: attacker.actorId ?? attacker.id,
-          attackerName:   attacker.name,
-          attackerImg:    attacker.img,
-          targetId:       target.id,
-          targetActorId:  target.actorId ?? target.id,
-          targetName:     target.name,
-          targetImg:      target.img,
-        });
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", _sceneSyncPayload(scene));
       }
     },
 
+    // Add an attacker to the scene that contains `targetId` (the token the
+    // attacker is joining against). targetId may be a battlemap scene.id or any
+    // contained token id. The attacker is paired (partnerId) to that target.
     addAttacker(targetId, attacker, fromSocket = false) {
-      const scene = _scenes.get(targetId);
+      const scene = _sceneByAnyId(targetId);
       if (!scene) return;
 
-      // Avoid duplicates
-      if (scene.attackers.some(a => a.id === attacker.id)) return;
-      scene.attackers.push({ id: attacker.id, actorId: attacker.actorId ?? attacker.id, name: attacker.name, img: attacker.img, tokenDoc: attacker.tokenDoc ?? null });
+      // Avoid duplicate participants
+      if ((scene.participants ?? []).some(p => p.tokenId === attacker.id)) return;
+
+      // Ensure the attacker as a participant paired to the target token.
+      const partnerTokenId = scene.participants?.some(p => p.tokenId === targetId)
+        ? targetId
+        : (scene.targetId ?? targetId); // fall back to projected target
+      const atkP = _ensureParticipant(scene, {
+        tokenId: attacker.id, actorId: attacker.actorId ?? attacker.id,
+        name: attacker.name, img: attacker.img, tokenDoc: attacker.tokenDoc ?? null,
+      });
+      atkP.partnerId = partnerTokenId;
+      atkP._facing = false;
+      const atkActorEarly = canvas?.tokens?.get(attacker.id)?.actor
+                          ?? game.actors.get(attacker.actorId ?? attacker.id);
+      atkP.role = _roleFromActor(atkActorEarly) ?? atkP.role;
       _saveSceneState();
 
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      const card = _cardFor(scene);
       if (card) {
         _refreshPortraits(card, scene); // also calls _updateContainerWidth internally
         _refreshArousalBars(card, scene);
       }
 
-      // Prompt for position if tracking is on and this is the local user adding themselves
-      // (not a socket relay from another client).
-      // Skip if a macro (e.g. SA) is handling the position prompt itself to avoid double dialogs.
+      // Prompt for position if tracking is on and this is the local GM adding
+      // (not a socket relay). Skip if a macro is handling the prompt itself.
       if (!fromSocket && AFLP.Settings.positionTracking && game.user.isGM && !window._aflpMacroHandlingPosition) {
-        const atkData  = scene.attackers.find(a => a.id === attacker.id);
-        const atkActor = canvas?.tokens?.get(attacker.id)?.actor
-                      ?? game.actors.get(attacker.actorId ?? attacker.id);
+        const atkData  = scene.attackers.find(a => a.id === attacker.id); // legacy proxy -> writes reflect
+        const atkActor = atkActorEarly;
         if (atkData && atkActor) {
-          // If new attacker has no role condition, apply Dominating (standard for scene joiners).
-          // Fire role prompt only if they somehow have Submitting already.
+          // New scene joiners default to Dominating unless they already have a role.
           const hasRole = atkActor.hasCondition?.("dominating") || atkActor.hasCondition?.("submitting");
           if (!hasRole) {
             try {
@@ -2315,71 +4178,69 @@ AFLP.HScene = (() => {
               if (increaseCondition) increaseCondition(atkActor, "dominating").catch(() => {});
             } catch {}
           }
-          // Fire async without blocking — attacker is already in scene
-          AFLP.HScene._promptAndSetPosition(scene, atkData, atkActor).catch(() => {});
+          AFLP.HScene._promptGroupPosition(scene, atkData).catch(() => {});
         }
       }
 
       if (!fromSocket && game.user.isGM) {
-        game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
-          type:            "hscene-add-attacker",
-          targetId,
-          attackerId:      attacker.id,
-          attackerActorId: attacker.actorId ?? attacker.id,
-          attackerName:    attacker.name,
-          attackerImg:     attacker.img,
-        });
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", _sceneSyncPayload(scene));
       }
     },
 
-    // Remove a single participant (attacker) from an active scene by their token ID.
-    // If it's a 2-person scene (1 attacker + target) and the attacker leaves,
-    // or the target leaves, the scene closes entirely.
+    // Remove a single participant from the scene containing `tokenId`.
+    // targetId may be a battlemap scene.id or any contained token id. Any other
+    // participant whose partnerId pointed at the removed token is unpaired. The
+    // scene closes when no active pairing remains (covers 1v1 either-side leave
+    // and target-leaves-gangbang), matching the old close behaviour.
     // fromSocket: true when called via socket relay (skip re-broadcast).
     removeParticipant(targetId, tokenId, fromSocket = false) {
-      const scene = _scenes.get(targetId);
+      const scene = _sceneByAnyId(targetId);
       if (!scene) return;
 
-      const isTarget = scene.targetId === tokenId;
+      const idx = (scene.participants ?? []).findIndex(p => p.tokenId === tokenId);
+      if (idx === -1) return;
 
-      if (isTarget) {
-        // Target leaving always closes the scene entirely
-        if (game.user.isGM) AFLP.HScene.closeScene(targetId);
-        if (!fromSocket && game.user.isGM) {
-          game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type: "hscene-close", targetId });
-        }
-        return;
-      }
-
-      const atkIndex = scene.attackers.findIndex(a => a.id === tokenId);
-      if (atkIndex === -1) return;
-
-      // Clean up Dominating condition from the leaving attacker
+      // Clean up role conditions from the leaving participant (mid-scene leave;
+      // closeScene handles full cleanup when the whole scene ends). Clear BOTH
+      // Submitting and Dominating so a receiver who leaves does not keep
+      // Submitting (which would make their next scene default to non-consensual).
       if (game.user.isGM) {
-        const atk = scene.attackers[atkIndex];
-        const atkActor = _resolveActor(atk);
-        if (atkActor) {
-          const domCond = atkActor.items?.find(c =>
-            c.slug === "dominating" ||
-            (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.["dominating"]?.uuid ?? "")
+        const leaverActor = _resolveActor({ id: tokenId, actorId: scene.participants[idx].actorId });
+        if (leaverActor) {
+          const wasSub = !!leaverActor.items?.some(c =>
+            c.slug === "submitting" ||
+            (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.["submitting"]?.uuid ?? "NOMATCH")
           );
-          if (domCond) domCond.delete().catch(() => {});
+          const slugs = wasSub
+            ? ["submitting", "dominating", "grabbed", "restrained"]
+            : ["submitting", "dominating"];
+          for (const slug of slugs) {
+            const cond = leaverActor.items?.find(c =>
+              c.slug === slug ||
+              (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.[slug]?.uuid ?? "NOMATCH")
+            );
+            if (cond) cond.delete().catch(() => {});
+          }
         }
       }
 
-      scene.attackers.splice(atkIndex, 1);
+      scene.participants.splice(idx, 1);
+      // Unpair anyone who pointed at the removed token.
+      for (const p of scene.participants) if (p.partnerId === tokenId) p.partnerId = null;
 
-      // Last attacker left — close the whole scene
-      if (scene.attackers.length === 0) {
-        if (game.user.isGM) AFLP.HScene.closeScene(targetId);
+      // Close if nothing is still paired (no active interaction remains).
+      const hasActivePair = scene.participants.some(p =>
+        p.partnerId && scene.participants.some(q => q.tokenId === p.partnerId));
+      if (scene.participants.length === 0 || !hasActivePair) {
+        if (game.user.isGM) AFLP.HScene.closeScene(scene.id);
         if (!fromSocket && game.user.isGM) {
-          game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type: "hscene-close", targetId });
+          game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type: "hscene-close", sceneId: scene.id });
         }
         return;
       }
 
-      // More attackers remain — refresh the card and persist
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      // Otherwise refresh + persist + sync.
+      const card = _cardFor(scene);
       if (card) {
         _refreshPortraits(card, scene);
         _refreshArousalBars(card, scene);
@@ -2387,18 +4248,40 @@ AFLP.HScene = (() => {
       _saveSceneState();
 
       if (!fromSocket && game.user.isGM) {
-        game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
-          type: "hscene-remove-participant",
-          targetId,
-          tokenId,
-        });
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", _sceneSyncPayload(scene));
+      }
+    },
+
+    // Re-point a single pairing in place: make `performerTokenId` act on
+    // `receiverTokenId` (intentional edge) and turn the receiver's back-edge into
+    // a cosmetic facing edge, WITHOUT closing the battlemap scene. Used by the
+    // Struggle/Snuggle reversal so flipping one pair in a multi-pair scene leaves
+    // the others untouched. Stale positions from the old orientation are cleared
+    // so the reversed pair re-prompts. Persists + syncs + refreshes.
+    repointPairing(sceneId, performerTokenId, receiverTokenId) {
+      const scene = _sceneByAnyId(sceneId);
+      if (!scene) return;
+      const perf = scene.participants?.find(p => p.tokenId === performerTokenId);
+      const recv = scene.participants?.find(p => p.tokenId === receiverTokenId);
+      if (!perf || !recv) return;
+      perf.partnerId = receiverTokenId; perf._facing = false; // performer now acts on receiver
+      recv.partnerId = performerTokenId; recv._facing = true;  // receiver merely faces performer
+      perf.position = null; recv.position = null;              // orientation reversed; re-prompt
+      _saveSceneState();
+      const card = _cardFor(scene);
+      if (card) {
+        _refreshPortraits(card, scene);
+        _refreshArousalBars(card, scene);
+      }
+      if (game.user.isGM) {
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", _sceneSyncPayload(scene));
       }
     },
 
     // Add a prose line to the card for a given target actor
     addProse(targetId, text, type = "flavor") {
-      const scene = _scenes.get(targetId);
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      const scene = _sceneByAnyId(targetId);
+      const card = _cardFor(scene);
       if (!card) return;
       _showProse(card, text, type, scene);
     },
@@ -2421,8 +4304,8 @@ AFLP.HScene = (() => {
         `[data-actor-name]`
       );
       // Match by actor name or find via scene map
-      for (const [targetId, scene] of _scenes) {
-        const card = _container.querySelector(`[data-target-id="${targetId}"]`);
+      for (const [, scene] of _scenes) {
+        const card = _cardFor(scene);
         if (!card) continue;
 
         const isTarget   = (scene.targetActorId ?? scene.targetId) === actorId;
@@ -2452,10 +4335,16 @@ AFLP.HScene = (() => {
 
     // Refresh arousal bars on all cards showing this target
     refreshArousalBars(targetId, fromSocket = false) {
-      const scene = _scenes.get(targetId);
+      const scene = _sceneByAnyId(targetId);
       if (!scene) return;
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
-      if (card) _refreshArousalBars(card, scene);
+      const card = _cardFor(scene);
+      if (card) {
+        // All themes render arousal bars inline in the portrait rows, so a full
+        // portrait refresh is what actually updates the visible bars. We also
+        // call _refreshArousalBars for its live cum/FM-bar update section.
+        _refreshPortraits(card, scene);
+        _refreshArousalBars(card, scene);
+      }
 
       if (!fromSocket && game.user.isGM) {
         game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
@@ -2471,9 +4360,10 @@ AFLP.HScene = (() => {
     // Called from the cum macro after cumflation is applied.
     incrementSceneLoads(targetActorId, attackerActorId, hole) {
       if (!game.user.isGM) return;
-      const sceneEntry = [..._scenes.entries()].find(([, sc]) => sc.targetActorId === targetActorId);
-      if (!sceneEntry) return;
-      const [, scene] = sceneEntry;
+      // Find the scene that CONTAINS the receiving actor (one scene per
+      // battlemap), not only one where they project as the legacy target.
+      const scene = _sceneForToken(null, targetActorId);
+      if (!scene) return;
       scene.loadsReceived = (scene.loadsReceived ?? 0) + 1;
       if (hole && scene.loadsByHole) scene.loadsByHole[hole] = (scene.loadsByHole[hole] ?? 0) + 1;
       if (attackerActorId) {
@@ -2495,37 +4385,162 @@ AFLP.HScene = (() => {
         if (!match) continue;
         scene.orgasms[match.id] = (scene.orgasms[match.id] ?? 0) + 1;
         // Refresh the card so the counter updates immediately
-        const card = _container?.querySelector(`[data-target-id="${scene.targetId}"]`);
+        const card = _cardFor(scene);
         if (card) _refreshArousalBars(card, scene);
         break;
       }
     },
 
     refreshArousalForActor(actorId) {
-      for (const [targetId, scene] of _scenes) {
+      // All current themes render arousal bars INLINE in their portrait rows
+      // (the separate .aflp-card-arousal-bars area is hidden for every theme —
+      // see the display:none rule and the _skipBars list). So _refreshArousalBars
+      // is effectively a no-op for them; we must do a full _refreshPortraits to
+      // re-read arousal and update the visible inline bars. This is why arousal
+      // (e.g. a reset on cum) wasn't visually updating in Lewd Lite et al.
+      for (const [, scene] of _scenes) {
         const involved = (scene.targetActorId ?? scene.targetId) === actorId ||
           scene.attackers.some(a => (a.actorId ?? a.id) === actorId);
         if (involved) {
-          const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
-          if (card) _refreshArousalBars(card, scene);
+          const card = _cardFor(scene);
+          if (card) _refreshPortraits(card, scene);
         }
       }
     },
 
-    // Reveal a card that was created hidden (used by SA macro after position dialog)
+    // ── Ready-to-Cum state ────────────────────────────────────────────────
+    // When an actor reaches max arousal and the interactive flow applies,
+    // _onArousalMax calls markReadyToCum instead of resolving. This records
+    // the pending state on the scene, lights the in-card Cum/Edge buttons,
+    // and logs an announcement. The state persists until a Cum or Edge click.
+    //
+    // State lives on scene.readyToCum keyed by participant key (token id, with
+    // actor id fallback): { isMasturbation, tokenId, actorId }.
+    markReadyToCum(actor, tokenId = null, context = {}) {
+      if (!actor) return;
+      // Find the scene + role for this actor (prefer the scene where they are
+      // the target, since that's where they're being brought to climax).
+      let found = null;
+      for (const [tid, scene] of _scenes) {
+        const isTarget = scene.targetId === tokenId ||
+          (scene.targetActorId ?? scene.targetId) === actor.id;
+        if (isTarget) { found = { scene, key: scene.targetId }; break; }
+        const atk = scene.attackers.find(a =>
+          a.id === tokenId || (a.actorId ?? a.id) === actor.id);
+        if (atk && !found) found = { scene, key: atk.id };
+      }
+      if (!found) {
+        // No scene (e.g. solo masturbation outside a scene): resolve normally
+        // rather than stranding the actor with no UI to click.
+        AFLP_Arousal._onArousalMax(actor, tokenId, { forceResolve: true });
+        return;
+      }
+      const { scene, key } = found;
+      scene.readyToCum = scene.readyToCum ?? {};
+      if (scene.readyToCum[key]) return; // already pending — don't double-log
+      scene.readyToCum[key] = {
+        isMasturbation: !!context.isMasturbation,
+        // `key` is the scene's token id for this participant (target or attacker).
+        // Prefer it over the passed tokenId so resolution always has a valid
+        // token to resolve the synthetic actor from (critical for unlinked mooks).
+        tokenId: tokenId ?? key,
+        actorId: actor.id,
+      };
+
+      const safeName = actor.name.replace(/\s*[-–—].*$/, "").trim();
+      this.addProse(scene.targetId, `${safeName} is on the edge - about to cum. Click Cum to let go, or Edge to hold back.`, "action");
+
+      const card = _cardFor(scene);
+      if (card) _refreshPortraits(card, scene);
+    },
+
+    // Is a given participant key currently pending a cum decision?
+    _isReadyToCum(scene, key) {
+      return !!(scene?.readyToCum && scene.readyToCum[key]);
+    },
+
+    // Clear pending state for a participant key and refresh the card.
+    _clearReadyToCum(scene, key) {
+      if (scene?.readyToCum && scene.readyToCum[key]) {
+        delete scene.readyToCum[key];
+        const card = _cardFor(scene);
+        if (card) _refreshPortraits(card, scene);
+      }
+    },
+
+    // Resolve a pending cum via the in-card Cum button.
+    // GM-only execution; non-GM clicks are routed here via socket.
+    async resolveCum(targetId, key, fromSocket = false) {
+      const scene = _sceneByAnyId(targetId);
+      if (!scene) return;
+      const pending = scene.readyToCum?.[key];
+      if (!pending) return;
+
+      if (!game.user.isGM) {
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
+          type: "hscene-resolve-cum", targetId, key,
+        });
+        return;
+      }
+
+      this._clearReadyToCum(scene, key);
+      // Resolve token-first: for unlinked tokens the per-token synthetic actor
+      // holds the real arousal/cum flags, NOT game.actors.get(actorId) (which is
+      // the shared base template). _resolveActor tries the token before the
+      // world actor, so linked PCs and unlinked monster mooks both resolve right.
+      const actor = _resolveActor({ id: pending.tokenId, actorId: pending.actorId });
+      if (!actor) return;
+      await AFLP_Arousal._onArousalMax(actor, pending.tokenId, { forceResolve: true });
+    },
+
+    // Resolve a pending cum via the in-card Edge button: roll Edge directly.
+    // On success the cum is cancelled; on failure the cum resolves.
+    async resolveEdge(targetId, key, fromSocket = false) {
+      const scene = _sceneByAnyId(targetId);
+      if (!scene) return;
+      const pending = scene.readyToCum?.[key];
+      if (!pending) return;
+
+      if (!game.user.isGM) {
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
+          type: "hscene-resolve-edge", targetId, key,
+        });
+        return;
+      }
+
+      this._clearReadyToCum(scene, key);
+      // Token-first resolution (see resolveCum) so unlinked monster tokens edge
+      // against their own synthetic actor, not the shared base template.
+      const actor = _resolveActor({ id: pending.tokenId, actorId: pending.actorId });
+      if (!actor) return;
+
+      const edged = await AFLP.Kinks?.buttonEdge?.(actor, pending.tokenId, {
+        isMasturbation: pending.isMasturbation,
+      });
+      if (!edged) {
+        // Edge failed — cum proceeds.
+        await AFLP_Arousal._onArousalMax(actor, pending.tokenId, { forceResolve: true });
+      }
+    },
+
+
+    // Reveal a card created hidden (used by startScene/SA after position dialog).
+    // Accepts the scene.id (battlemap id) OR any contained token id.
     revealCard(targetId) {
-      const fn = _pendingReveal.get(targetId);
-      if (fn) { fn(); _pendingReveal.delete(targetId); }
-      // If no pending fn (e.g. already revealed), just ensure card is visible
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      const scene = _sceneByAnyId(targetId);
+      const revealKey = scene?.id ?? targetId;
+      const fn = _pendingReveal.get(revealKey) ?? _pendingReveal.get(targetId);
+      if (fn) { fn(); _pendingReveal.delete(revealKey); _pendingReveal.delete(targetId); }
+      // If no pending fn (e.g. already revealed), just ensure the card is visible.
+      const card = _cardFor(scene) ?? _container?.querySelector(`[data-target-id="${targetId}"]`);
       if (card) card.style.display = "";
     },
 
     // Rebuild portraits + arousal for a specific scene (used by theme change onChange)
     refreshScene(targetId) {
-      const scene = _scenes.get(targetId);
+      const scene = _sceneByAnyId(targetId);
       if (!scene) return;
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      const card = _cardFor(scene);
       if (!card) return;
       _refreshPortraits(card, scene);
       _refreshArousalBars(card, scene);
@@ -2534,59 +4549,54 @@ AFLP.HScene = (() => {
     // Re-inject all theme CSS (called by onChange when theme changes)
     _rebuildStyle() {
       const styleEl = document.getElementById("aflp-hscene-styles-v2");
-      if (styleEl) styleEl.textContent = _cardCSS() + _statusStripCSS() + _pornoSceneCSS() + _dossierCSS();
+      if (styleEl) styleEl.textContent = _cardCSS() + _statusStripCSS() + _aflpClassicCSS() + _dossierCSS() + _fuckamonCSS();
     },
 
     async closeScene(targetId) {
-      const card = _container?.querySelector(`[data-target-id="${targetId}"]`);
+      const scene = _sceneByAnyId(targetId);
+      const card = _cardFor(scene);
 
       // Remove Dominating from all attackers and Submitting from target when scene ends.
       // Only runs on GM client to avoid duplicate writes.
       if (game.user.isGM) {
-        const scene = _scenes.get(targetId);
         if (scene) {
-          // Remove Submitting from target
-          const tgtParticipant = { id: scene.targetId, actorId: scene.targetActorId, tokenDoc: scene.targetTokenDoc };
-          const targetActor = _resolveActor(tgtParticipant);
-          if (targetActor) {
-            for (const slug of ["submitting", "grabbed", "restrained"]) {
-              const cond = targetActor.items?.find(c =>
+          // Unified model: one battlemap scene can hold several pairings (several
+          // receivers), so role cleanup must cover EVERY participant — not just
+          // the single projected target. Otherwise a non-projected receiver keeps
+          // Submitting and the next scene with them wrongly defaults to noncon.
+          // Remove Submitting/Dominating from everyone; only clear scene-applied
+          // grabbed/restrained from the bottoms (those who had Submitting) so a
+          // performer's unrelated combat conditions aren't stripped.
+          const _rolesSeen = new Set();
+          for (const p of scene.participants ?? []) {
+            const actor = _resolveActor({ id: p.tokenId, actorId: p.actorId, tokenDoc: p.tokenDoc });
+            if (!actor || _rolesSeen.has(actor.id)) continue;
+            _rolesSeen.add(actor.id);
+            const wasSub = !!actor.items?.some(c =>
+              c.slug === "submitting" || c.sourceId === AFLP.conditions["submitting"]?.uuid
+            );
+            const slugs = wasSub
+              ? ["submitting", "dominating", "grabbed", "restrained"]
+              : ["submitting", "dominating"];
+            for (const slug of slugs) {
+              const cond = actor.items?.find(c =>
                 c.slug === slug || c.sourceId === AFLP.conditions[slug]?.uuid
               );
               if (cond) cond.delete().catch(() => {});
             }
           }
-          // Remove Dominating from each attacker
-          for (const atk of scene.attackers ?? []) {
-            const atkActor = _resolveActor(atk);
-            if (!atkActor) continue;
-            const dominating = atkActor.items?.find(c =>
-              c.slug === "dominating" || c.sourceId === AFLP.conditions["dominating"]?.uuid
-            );
-            if (dominating) dominating.delete().catch(() => {});
-          }
 
-          // Mind Break → Creature Fetish: remove MB from all scene participants.
-          // The deleteItem hook in aflp-kinks.js fires onMindBreakEndCreatureFetish,
-          // which reads mbCumCounts and grants the appropriate CF level.
-          const allParticipants = [
-            { actor: targetActor },
-            ...(scene.attackers ?? []).map(a => ({ actor: _resolveActor(a) })),
-          ];
-          for (const { actor: pActor } of allParticipants) {
-            if (!pActor) continue;
-            const mbItem = pActor.items?.find(c =>
-              c.slug === "mind-break" || c.sourceId === AFLP.conditions?.["mind-break"]?.uuid
-            );
-            if (mbItem) mbItem.delete().catch(() => {});
-          }
+          // Mind Break → Creature Fetish: the deleteItem hook in aflp-kinks.js fires
+          // onMindBreakEndCreatureFetish when MB is eventually removed.
+          // We do NOT forcibly remove MB here — it has its own duration (60 min) and
+          // should persist after the scene ends until PF2e's condition system removes it.
+          // The CF kink is granted when MB naturally expires via the deleteItem hook.
         }
       }
 
       // ── End-of-scene report ─────────────────────────────────────────────
       // Post a styled chat card summarising the scene stats for the target.
       if (game.user.isGM) {
-        const scene = _scenes.get(targetId);
         if (scene) {
           const tgtName   = scene.targetName ?? "Unknown";
           const tgtImg    = scene.targetImg  ?? "";
@@ -2689,7 +4699,7 @@ AFLP.HScene = (() => {
 
           ChatMessage.create({
             content: reportHtml,
-            speaker: { alias: "AFLP — Scene End" },
+            speaker: { alias: "AFLP Scene End" },
             ...(whisperList !== undefined ? { whisper: whisperList } : {}),
           }).catch(() => {});
 
@@ -2706,7 +4716,8 @@ AFLP.HScene = (() => {
       }
 
       card?.remove();
-      _scenes.delete(targetId);
+      _scenes.delete(scene?.id ?? targetId);
+      _clearFocusPin(scene?.id ?? targetId);
       _saveSceneState();
 
       // Recalculate container width after scene closes
@@ -2725,12 +4736,73 @@ AFLP.HScene = (() => {
 // Expose scene iterator for external role-aware lookups (e.g. cum macro).
     get _scenes() { return _scenes; },
 
+    // Returns the scene where this actor is an ATTACKER (not where they are the target).
+    // Use _getSceneWhereTarget to find scenes where an actor is the target.
     _getScene(actorId) {
       for (const scene of _scenes.values()) {
-        if ((scene.targetActorId ?? scene.targetId) === actorId) return scene;
         if (scene.attackers.some(a => (a.actorId ?? a.id) === actorId)) return scene;
       }
       return null;
+    },
+
+    // Public: the unified battlemap scene CONTAINING a token (or actor), or null.
+    // Battlemap-agnostic (scans participants). Preferred by the macros over the
+    // legacy _getScene/_getSceneWhereTarget projection lookups.
+    getSceneForToken(tokenId, actorId = null) {
+      return _sceneForToken(tokenId, actorId);
+    },
+
+    // Balanced-layout helpers (also used for live verification). _buildSceneGroups
+    // returns the topology groups for a scene; _resolveFocusGroup applies the
+    // per-client focus rules; setFocusPin/clearFocusPin manage the client-side pin.
+    _buildSceneGroups(sceneOrId) {
+      const scene = (typeof sceneOrId === "string") ? _scenes.get(sceneOrId) : sceneOrId;
+      return _buildSceneGroups(scene);
+    },
+    _resolveFocusGroup(sceneOrId) {
+      const scene = (typeof sceneOrId === "string") ? _scenes.get(sceneOrId) : sceneOrId;
+      return scene ? _resolveFocusGroup(scene, _buildSceneGroups(scene)) : null;
+    },
+    setFocusPin(sceneId, groupId) { _setFocusPin(sceneId, groupId); },
+    clearFocusPin(sceneId) { _clearFocusPin(sceneId); },
+
+    // Public: a legacy-attacker proxy for the participant with this token id, in
+    // whatever scene contains it. Writes to .position reflect onto the
+    // participant. Lets the SA macro set the advancing actor's position
+    // regardless of whether that actor projects as target or attacker.
+    participantHandle(tokenId) {
+      const scene = _sceneForToken(tokenId);
+      const p = scene?.participants?.find(pp => pp.tokenId === tokenId);
+      return p ? _legacyAttackerProxy(p) : null;
+    },
+
+    // Public: establish a scene role ("dominating"/"submitting") on an actor
+    // WITHOUT a prompt. Idempotent - no-op if the actor already has that role.
+    // AFLP roles are custom items (NOT PF2e core conditions), so they are created
+    // from AFLP.conditions[slug].uuid and detected by item slug; hasCondition()
+    // never sees them. Used by the SA macro to default a newcomer to Dominating
+    // when joining an already-controlled scene (legacy addAttacker behavior).
+    async establishRole(actor, slug) {
+      const live = actor?.token?.actor ?? actor;
+      if (!live) return;
+      if (live.items?.some(i => (i.slug ?? i.system?.slug ?? "") === slug)) return;
+      try {
+        const uuid = AFLP.conditions?.[slug]?.uuid;
+        const doc  = uuid ? await fromUuid(uuid) : null;
+        if (doc) await live.createEmbeddedDocuments("Item", [doc.toObject()]);
+        else if (typeof live.increaseCondition === "function") await live.increaseCondition(slug);
+      } catch (e) {
+        console.warn(`AFLP | establishRole: could not apply ${slug} to ${actor?.name}:`, e.message);
+      }
+    },
+
+    // Returns true if this actor is the TARGET of any active scene.
+    _isSceneTarget(tokenId, actorId) {
+      for (const scene of _scenes.values()) {
+        if (scene.targetId === tokenId) return true;
+        if (actorId && (scene.targetActorId ?? scene.targetId) === actorId) return true;
+      }
+      return false;
     },
 
     // Returns the scene where this token ID is the TARGET (not just any participant).
@@ -2754,6 +4826,7 @@ AFLP.HScene = (() => {
         _container = null;
       }
       _scenes.clear();
+      _focusPins.clear();
       _saveSceneState();
     },
 
@@ -2794,6 +4867,13 @@ AFLP.HScene = (() => {
             <strong style="font-size:11px;color:#c9a96e;">${tgtName} is Dominating</strong>
             <span style="font-size:10px;color:#888;">${atkName} is Submitting</span>
           </div>
+        </button>
+        <button type="button" data-choice="consensual" style="${btnStyle}">
+          <div style="width:36px;height:36px;border-radius:3px;background:rgba(180,140,200,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">💗</div>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong style="font-size:11px;color:rgba(180,140,200,0.9);">No one is Dominating (Consensual Sex)</strong>
+            <span style="font-size:10px;color:#888;">Both participants have equal say</span>
+          </div>
         </button>`;
 
       let resolveRole;
@@ -2801,9 +4881,9 @@ AFLP.HScene = (() => {
 
       foundry.applications.api.DialogV2.wait({
         window:   { title: "Choose Scene Roles" },
-        position: { width: 300 },
+        position: { width: 320 },
         content,
-        buttons: [{ action: "skip", label: "Skip", callback: async () => resolveRole(null) }],
+        buttons: [{ action: "close", label: "✕", callback: async () => resolveRole(null) }],
         close:   async () => resolveRole(null),
         render(ev, dlg) {
           dlg.element.querySelectorAll("[data-choice]").forEach(btn => {
@@ -2816,7 +4896,7 @@ AFLP.HScene = (() => {
       }, { classes: ["aflp-dialog"] });
 
       const choice = await rolePromise;
-      if (!choice) return null;
+      if (!choice || choice === "consensual") return null; // no conditions applied for consensual
 
       // Apply conditions using the same pattern as SS applyCondition
       const dominator = choice === "attacker-dom" ? atkActor  : targetActor;
@@ -2846,34 +4926,38 @@ AFLP.HScene = (() => {
     },
 
     async _promptAndSetPosition(scene, atkData, atkActor) {
-      const targetActor = _resolveActor({
-        id: scene.targetId, actorId: scene.targetActorId, tokenDoc: scene.targetTokenDoc
-      });
+      // Resolve the receiver from the attacker's OWN partner (not the scene's
+      // projected target), so position + prose are correct in multi-pair scenes.
+      const recv = _receiverParticipant(scene, atkData);
+      const targetActor = recv
+        ? _resolveActor({ id: recv.tokenId, actorId: recv.actorId })
+        : _resolveActor({ id: scene.targetId, actorId: scene.targetActorId, tokenDoc: scene.targetTokenDoc });
+      const targetName = recv?.name ?? scene.targetName;
       const targetPronouns = AFLP.getPronouns(targetActor);
       const hasCock = !!atkActor?.getFlag(AFLP.FLAG_SCOPE, "cock");
 
-      const positionId = await AFLP.HScene._showPositionDialog(atkActor, targetActor, hasCock, targetPronouns);
+      const positionId = await AFLP.HScene._showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, 1);
       if (!positionId) return; // dismissed — leave unset
 
       // Store on the scene's attacker object
       atkData.position = positionId;
       _saveSceneState();
 
-      // Post to scene log
+      // Post to scene log (named against the attacker's actual partner)
       const posEntry = AFLP.getPosition(positionId);
       if (posEntry) {
         const prevPosition = atkData._prevPosition;
         const isChange = !!prevPosition && prevPosition !== positionId;
-        const phrase = posEntry.logPhrase(atkData.name, scene.targetName, targetPronouns);
+        const phrase = posEntry.logPhrase(atkData.name, targetName, targetPronouns);
         const logText = isChange
-          ? `${atkData.name} changes position: ${phrase}`
+          ? `The actors reposition themselves... ${atkData.name} is now ${phrase}`
           : phrase;
-        AFLP.HScene.addProse(scene.targetId, logText, "action");
+        AFLP.HScene.addProse(scene.id, logText, "action");
         atkData._prevPosition = positionId;
       }
 
       // Refresh the card so portraits + pills update
-      const card = _container?.querySelector(`[data-target-id="${scene.targetId}"]`);
+      const card = _cardFor(scene);
       if (card) {
         _refreshPortraits(card, scene);
         _refreshArousalBars(card, scene);
@@ -2977,7 +5061,7 @@ AFLP.HScene = (() => {
         window:   { title: "Masturbation" },
         position: { width: 320 },
         content,
-        buttons: [{ action: "skip", label: "Skip", callback: async () => resolvePos(null) }],
+        buttons: [{ action: "skip", label: "Skip for now", callback: async () => resolvePos(null) }],
         close:    async () => resolvePos(null),
         render(ev, dlg) {
           dlg.element.querySelectorAll(".aflp-pos-choice").forEach(btn => {
@@ -2996,99 +5080,389 @@ AFLP.HScene = (() => {
     // The actual position picker dialog — styled like
     // the H scene card: dark, actor portraits, clear labeling.
     // -----------------------------------------------
-    async _showPositionDialog(atkActor, targetActor, hasCock, targetPronouns) {
+    // ── Unified group position picker ─────────────────────────────────────
+    // Called whenever a position chip is clicked OR when an attacker joins.
+    // For 1 top  → show 2p categorized position picker (Vaginal/Anal/Oral/Foreplay/Toy).
+    // For 2+ tops → show group presets section at top + collapsed individual categories below.
+    // newAtk: the attacker entry that just joined (null if triggered by chip click).
+    async _promptGroupPosition(scene, newAtk = null) {
+      // Partner-aware: operate on the receiver-GROUP of the source (newAtk) — the
+      // performers sharing newAtk's partner — not every attacker in the scene.
+      // This keeps separate nearby pairings on one battlemap independent.
+      const recv     = _receiverParticipant(scene, newAtk);
+      const recvId   = recv?.tokenId ?? scene.targetId;
+      const recvName = recv?.name ?? scene.targetName;
+      const tgtActor = recv
+        ? _resolveActor({ id: recv.tokenId, actorId: recv.actorId })
+        : _resolveActor({ id: scene.targetId, actorId: scene.targetActorId });
+      const perfs    = _coPerformerParticipants(scene, recvId).map(p => _legacyAttackerProxy(p));
+      const nTops    = perfs.length || 1;
+      const FLAG     = AFLP.FLAG_SCOPE;
+
+      // ── 1 top: standard 2p categorized picker ─────────────────────────
+      if (nTops === 1) {
+        const atk      = perfs[0] ?? newAtk;
+        const atkActor = _resolveActor(atk);
+        if (atkActor) await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
+        return;
+      }
+
+      // ── 2+ tops: group picker + individual categories ──────────────────
+      const targetAtk   = newAtk; // may be null (chip click, no specific new attacker)
+      const presets     = AFLP.getGangbangPresets?.(tgtActor, nTops) ?? [];
+      const hasCock     = perfs.some(a => _resolveActor(a)?.getFlag?.(FLAG, "cock"));
+      const tgtHasPussy = !!tgtActor?.getFlag?.(FLAG, "pussy");
+      const tgtPronouns = AFLP.getPronouns?.(tgtActor) ?? AFLP._defaultPronouns;
+
+      const sectionStyle = "margin-bottom:6px;";
+      const headerStyle  = "display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;border-bottom:1px solid rgba(200,160,80,0.25);padding:4px 0;cursor:pointer;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(200,160,80,0.85);font-family:var(--font-primary,serif);";
+      const presetBtnStyle = "display:block;width:100%;box-sizing:border-box;min-height:0;height:auto;background:rgba(200,160,80,0.08);border:1px solid rgba(200,160,80,0.4);border-radius:4px;color:#f0e8d0;cursor:pointer;font-size:12px;padding:6px 10px 8px;margin-bottom:6px;text-align:left;font-family:var(--font-primary,serif);";
+      const indivBtnStyle  = "display:block;width:100%;box-sizing:border-box;min-height:0;height:auto;background:rgba(255,255,255,0.06);border:1px solid rgba(200,160,80,0.25);border-radius:4px;color:#f0e8d0;cursor:pointer;font-size:12px;padding:5px 10px 8px;margin-bottom:6px;text-align:left;font-family:var(--font-primary,serif);";
+
+      // Group presets section (expanded by default)
+      const presetBtns = presets.map(p => {
+        const descHtml = p.desc ? `<span style="display:block;color:rgba(200,170,120,0.6);font-size:10px;margin-top:2px;line-height:1.35;">${p.desc}</span>` : "";
+        return `<button type="button" class="aflp-gb-choice" data-preset-id="${p.id}" style="${presetBtnStyle}">
+          <strong>${p.name}</strong>${descHtml}
+        </button>`;
+      }).join("");
+
+      // Individual positions, grouped by hole type and collapsible
+      const allowedIds = newAtk
+        ? AFLP.getActorPositions?.(_resolveActor(newAtk)) ?? []
+        : [...new Set(perfs.flatMap(a => AFLP.getActorPositions?.(_resolveActor(a)) ?? []))];
+
+      const allPositions = AFLP.positions ?? [];
+      const groups = { vaginal: [], anal: [], oral: [], foreplay: [] };
+      for (const posId of allowedIds) {
+        const entry = allPositions.find(p => p.id === posId);
+        if (!entry) continue;
+        const hole = entry.hole ?? entry.holeId ?? null;
+        if (entry.penile && !hasCock) continue;
+        if (hole === "vaginal" && !tgtHasPussy) continue;
+        const label = entry.label?.(tgtPronouns) ?? posId;
+        const posDesc = AFLP.getPositionDesc?.(posId);
+        const descHtml = posDesc ? `<span style="display:block;color:rgba(200,170,120,0.55);font-size:10px;margin-top:2px;line-height:1.35;">${posDesc}</span>` : "";
+        const btn = `<button type="button" class="aflp-pos-choice aflp-indiv-choice" data-pos-id="${posId}" style="${indivBtnStyle}">${label}${descHtml}</button>`;
+        if (hole === "vaginal")      groups.vaginal.push(btn);
+        else if (hole === "anal")    groups.anal.push(btn);
+        else if (hole === "oral" || hole === "facial") groups.oral.push(btn);
+        else                         groups.foreplay.push(btn);
+      }
+
+      const makeCollapsible = (id, title, buttons) => !buttons.length ? "" :
+        `<div class="${sectionStyle}">
+          <button type="button" class="aflp-pos-header" data-section="${id}"
+            style="${headerStyle}">
+            <span>${title}</span><span style="font-size:9px;">&#9658;</span>
+          </button>
+          <div class="aflp-pos-submenu" data-for="${id}" style="display:none;padding:4px 0;">
+            ${buttons.join("")}
+          </div>
+        </div>`;
+
+      // Wrap group positions in a collapsible section too
+      const groupSection = `<div style="margin-bottom:6px;">
+        <button type="button" class="aflp-pos-header" data-section="group-positions"
+          style="${headerStyle}">
+          <span>Group Positions</span><span class="aflp-pos-arrow-icon" style="font-size:9px;">&#9660;</span>
+        </button>
+        <div class="aflp-pos-submenu" data-for="group-positions" style="padding:4px 0;">
+          ${presetBtns || '<p style="color:#666;font-size:11px;margin:4px 0;">No group positions available for this combination.</p>'}
+        </div>
+      </div>`;
+
+      const indivHeader = `<div style="font-size:10px;color:#666;letter-spacing:0.08em;text-transform:uppercase;margin:8px 0 4px;">
+        Individual Position${newAtk ? ` for ${newAtk.name}` : ""}
+      </div>`;
+
+      const content = `<div style="overflow-y:auto;max-height:calc(90vh - 130px);padding:2px 4px 2px 2px;">
+        ${groupSection}
+        ${indivHeader}
+        ${makeCollapsible("vaginal", "Vaginal", groups.vaginal)}
+        ${makeCollapsible("anal", "Anal", groups.anal)}
+        ${makeCollapsible("oral", "Oral / Facial", groups.oral)}
+        ${makeCollapsible("foreplay", "Foreplay", groups.foreplay)}
+      </div>`;
+
+      let resolved = false;
+      const result = await new Promise(resolve => {
+        foundry.applications.api.DialogV2.wait({
+          window:   { title: nTops >= 2 ? "Group Position" : "Select Position" },
+          position: { width: 360 },
+          content,
+          buttons: [{ action: "cancel", label: "✕ Cancel", callback: () => resolve(null) }],
+          close:   () => { if (!resolved) resolve(null); },
+          render(ev, dlg) {
+            // Fix Foundry's window-content overflow:hidden
+            const wc = dlg.element.querySelector(".window-content");
+            if (wc) { wc.style.overflow = "visible"; wc.style.height = "auto"; wc.scrollTop = 0; }
+            const scrollEl = dlg.element.querySelector("[style*='overflow-y:auto']");
+            if (scrollEl) scrollEl.scrollTop = 0;
+            // Section toggles — accordion: only one open at a time
+            const toggleSection = (btn) => {
+              const sectionId = btn.dataset.section;
+              const thisSub   = dlg.element.querySelector(`.aflp-pos-submenu[data-for="${sectionId}"]`);
+              const isOpen    = thisSub && thisSub.style.display !== "none";
+              // Close all sections
+              dlg.element.querySelectorAll(".aflp-pos-submenu").forEach(s => { s.style.display = "none"; });
+              dlg.element.querySelectorAll(".aflp-pos-arrow-icon").forEach(a => { a.innerHTML = "&#9658;"; });
+              // Open this one if it was closed
+              if (!isOpen && thisSub) {
+                thisSub.style.display = "";
+                const arrow = btn.querySelector(".aflp-pos-arrow-icon");
+                if (arrow) arrow.innerHTML = "&#9660;";
+              }
+            };
+            dlg.element.querySelectorAll(".aflp-pos-header").forEach(btn => {
+              btn.addEventListener("click", () => toggleSection(btn));
+            });
+            // Group preset buttons
+            dlg.element.querySelectorAll(".aflp-gb-choice").forEach(btn => {
+              btn.addEventListener("click", () => {
+                resolved = true;
+                resolve({ type: "preset", id: btn.dataset.presetId });
+                dlg.close();
+              });
+            });
+            // Individual position buttons
+            dlg.element.querySelectorAll(".aflp-indiv-choice").forEach(btn => {
+              btn.addEventListener("click", () => {
+                resolved = true;
+                resolve({ type: "individual", posId: btn.dataset.posId });
+                dlg.close();
+              });
+            });
+          },
+        }, { classes: ["aflp-dialog"] });
+      });
+
+      if (!result) {
+        // Cancelled: new attacker shows "Watching" state (no position set)
+        return;
+      }
+
+      if (result.type === "individual") {
+        // Apply only to the new attacker (or the one whose chip was clicked)
+        const targetSlot = newAtk ?? perfs.find(a => !a.position) ?? perfs[0];
+        if (targetSlot) {
+          const prevPos = targetSlot.position;
+          targetSlot.position      = result.posId;
+          targetSlot._prevPosition = result.posId;
+          _saveSceneState();
+          const card = _cardFor(scene);
+          if (card) { _refreshPortraits(card, scene); _refreshArousalBars(card, scene); }
+          const posEntry = AFLP.getPosition(result.posId);
+          if (posEntry) {
+            const phrase = posEntry.logPhrase?.(targetSlot.name, recvName, tgtPronouns);
+            if (phrase) AFLP.HScene.addProse(recvId, phrase, "action");
+          }
+        }
+        return;
+      }
+
+      if (result.type === "preset") {
+        const preset = (AFLP.gangbangPresets ?? []).find(p => p.id === result.id);
+        if (!preset) return;
+
+        // Determine slot assignment order - check if auto-assign is on
+        const autoAssign = AFLP.Settings.gangbangAutoAssign ?? false;
+        let slotOrder = [...perfs]; // default: in join order (this receiver-group only)
+
+        if (!autoAssign && preset.slots.length >= 2) {
+          // Show slot assignment confirmation dialog
+          const confirmed = await AFLP.HScene._promptSlotAssignment(scene, preset, tgtPronouns, perfs);
+          if (!confirmed) return;
+          slotOrder = confirmed; // array of attacker entries in slot order
+        }
+
+        // Apply slot assignments
+        for (let i = 0; i < slotOrder.length; i++) {
+          const atk  = slotOrder[i];
+          // Train/Bukakke presets have only 1 slot - all attackers share it
+          const slot = preset.slots.length === 1
+            ? preset.slots[0]
+            : (preset.slots[i] ?? preset.slots[preset.slots.length - 1]);
+          if (!slot) continue;
+          atk.position      = slot.position;
+          atk._prevPosition = slot.position;
+        }
+        _saveSceneState();
+        const card = _cardFor(scene);
+        if (card) { _refreshPortraits(card, scene); _refreshArousalBars(card, scene); }
+
+        // Chat card
+        const slotDesc = slotOrder.map((atk, i) => {
+          const slot = preset.slots.length === 1
+            ? preset.slots[0]
+            : (preset.slots[i] ?? preset.slots[preset.slots.length - 1]);
+          return `<li><strong>${atk.name}</strong>: ${slot?.label ?? "free"}</li>`;
+        }).join("");
+        ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p>The actors reposition themselves... <strong>${preset.name}</strong></p><ul style="margin:4px 0 0 16px;">${slotDesc}</ul></div>`,
+          speaker: { alias: "AFLP" },
+        });
+      }
+    },
+
+    // Show slot assignment confirmation dialog for a group preset
+    // Returns array of attacker entries in slot order, or null if cancelled.
+    async _promptSlotAssignment(scene, preset, tgtPronouns, perfs = null) {
+      const atks = perfs ?? atks;
+      if (!preset.slots.length) return [...atks];
+
+      const nSlots = Math.min(preset.slots.length, atks.length);
+      // Build a simple assignment UI: for each slot, a select of who fills it
+      const atkOptions = atks.map((a, i) =>
+        `<option value="${i}">${a.name}</option>`
+      ).join("");
+
+      const rows = preset.slots.slice(0, nSlots).map((slot, i) =>
+        `<tr>
+          <td style="padding:4px 8px;color:#c9a96e;font-size:11px;">${slot.label}</td>
+          <td><select data-slot="${i}" style="width:100%;background:#1a1a2e;color:#f0e8d0;border:1px solid rgba(200,160,80,0.3);border-radius:3px;padding:4px;">
+            ${atks.map((a, ai) => `<option value="${ai}" ${ai === i ? "selected" : ""}>${a.name}</option>`).join("")}
+          </select></td>
+        </tr>`
+      ).join("");
+
+      const content = `<div style="padding:4px 0;">
+        <p style="font-size:11px;color:#aaa;margin-bottom:8px;">Assign performers to slots for <strong>${preset.name}</strong>. Any unassigned performers will share the last slot.</p>
+        <table style="width:100%;border-collapse:collapse;">${rows}</table>
+      </div>`;
+
+      let resolved = false;
+      return new Promise(resolve => {
+        foundry.applications.api.DialogV2.wait({
+          window:   { title: "Assign Slots - " + preset.name },
+          position: { width: 360 },
+          content,
+          buttons: [
+            { action: "confirm", label: "Confirm", default: true, callback: (ev, btn, dlg) => {
+              const selects = dlg.element.querySelectorAll("select[data-slot]");
+              const order = new Array(atks.length).fill(null);
+              selects.forEach(sel => {
+                const slotIdx = parseInt(sel.dataset.slot);
+                const atkIdx  = parseInt(sel.value);
+                order[slotIdx] = atks[atkIdx];
+              });
+              // Fill unassigned with remaining attackers in order
+              const assigned = new Set(order.filter(Boolean).map(a => a.id));
+              const remaining = atks.filter(a => !assigned.has(a.id));
+              const result = [...order.filter(Boolean), ...remaining];
+              resolved = true;
+              resolve(result);
+            }},
+            { action: "cancel", label: "✕ Cancel", callback: () => resolve(null) },
+          ],
+          close: () => { if (!resolved) resolve(null); },
+        }, { classes: ["aflp-dialog"] });
+      });
+    },
+
+    async _showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, topCount = 1) {
         const atkName    = atkActor?.name  ?? "Attacker";
         const tgtName    = targetActor?.name ?? "Target";
         const atkImg     = atkActor?.img   ?? "";
         const tgtImg     = targetActor?.img ?? "";
 
-        // Self-scene (Ouroboros): show all positions regardless of anatomy
-        const isSelfScene = atkActor?.id === targetActor?.id;
+        const isSelfScene  = atkActor?.id === targetActor?.id;
+        const tgtPronouns  = targetPronouns;
+        const FLAG         = AFLP.FLAG_SCOPE;
+        const tgtHasPussy  = !!targetActor?.getFlag(FLAG, "pussy");
+        const tgtHasCock   = !!targetActor?.getFlag(FLAG, "cock");
+        const atkHasPussy  = !!atkActor?.getFlag(FLAG, "pussy");
+        // True if any cock is present between the two actors
+        const anyCock      = hasCock || tgtHasCock || isSelfScene;
 
-        const tgtPronouns = targetPronouns;
-        const tgtHasPussy = !!targetActor?.getFlag(AFLP.FLAG_SCOPE, "pussy");
-        const tgtHasCock  = !!targetActor?.getFlag(AFLP.FLAG_SCOPE, "cock");
-
-        const makeBtn = (posId, label) =>
-          `<button type="button" class="aflp-pos-choice" data-pos-id="${posId}"
-            style="display:block;width:100%;text-align:left;
+        // Auto-inject description from the position cache
+        const makeBtn = (posId, label) => {
+          const posDesc = AFLP.getPositionDesc?.(posId) ?? null;
+          const descHtml = posDesc
+            ? `<span style="display:block;color:rgba(200,170,120,0.6);font-size:10px;margin-top:2px;line-height:1.35;">${posDesc}</span>`
+            : "";
+          return `<button type="button" class="aflp-pos-choice" data-pos-id="${posId}"
+            style="display:block;width:100%;box-sizing:border-box;min-height:0;height:auto;text-align:left;
                    background:rgba(255,255,255,0.07);border:1px solid rgba(200,160,80,0.3);
                    border-radius:4px;color:#f0e8d0;cursor:pointer;font-size:12px;
-                   padding:5px 10px;margin-bottom:4px;font-family:var(--font-primary,serif);"
-          >${label}</button>`;
+                   padding:5px 10px 8px;margin-bottom:6px;font-family:var(--font-primary,serif);"
+          >${label}${descHtml}</button>`;
+        };
 
-        const makeSection = (id, title, buttons) =>
+        const makeSection = (id, title, buttons, startOpen = false) =>
           `<div class="aflp-pos-section" style="margin-bottom:6px;">
             <button type="button" class="aflp-pos-header" data-section="${id}"
               style="display:flex;align-items:center;justify-content:space-between;width:100%;
                      background:none;border:none;border-bottom:1px solid rgba(200,160,80,0.25);
                      padding:4px 0;cursor:pointer;font-size:10px;letter-spacing:0.08em;
                      text-transform:uppercase;color:rgba(200,160,80,0.85);font-family:var(--font-primary,serif);">
-              <span>${title}</span><span class="aflp-pos-arrow-icon" style="font-size:9px;">\u25b6</span>
+              <span>${title}</span><span class="aflp-pos-arrow-icon" style="font-size:9px;">${startOpen ? "&#9660;" : "&#9658;"}</span>
             </button>
-            <div class="aflp-pos-submenu" data-for="${id}" style="display:none;padding:6px 0 2px;">
+            <div class="aflp-pos-submenu" data-for="${id}" style="display:${startOpen ? "" : "none"};padding:6px 0 2px;">
               ${buttons}
             </div>
           </div>`;
 
-        // Penetration: show if attacker has cock OR pussy (riding), or self-scene
-        const hasPenetration = hasCock || atkHasPussy || isSelfScene;
-        const penetrationBtns = hasPenetration ? [
-          // Attacker has cock — can pound target's holes
-          ...(hasCock || isSelfScene ? [
-            (tgtHasPussy || isSelfScene) ? makeBtn("vaginal",      `Pounding ${tgtPronouns.possessive} pussy`) : "",
-            makeBtn("anal",         `Anal drilling`),
-            makeBtn("oral-receive", `Face fuck`),
-            makeBtn("facial",       `Facial tribute`),
-          ] : []),
-          // Attacker has pussy — can ride target's cock
-          ...(atkHasPussy && (tgtHasCock || isSelfScene) ? [
-            makeBtn("riding-vaginal", `Riding ${tgtName} (pussy)`),
-            makeBtn("riding-anal",    `Riding ${tgtName} (ass)`),
-          ] : []),
-          (!hasCock && !atkHasPussy && isSelfScene && tgtHasCock) ? makeBtn("oral-give", "Going down") : "",
-        ].filter(Boolean).join("") : null;
+        // ── Build position list from registry ───────────────────────────
+        // Get the positions allowed for this attacker based on their body type
+        const allowedIds = AFLP.getActorPositions(atkActor);
+        const allPositions = AFLP.positions ?? [];
+        // topCount passed in from caller — how many tops are already in the scene
 
-        const oralGiveExtra = (!hasCock && !atkHasPussy && !isSelfScene && tgtHasCock) ?
-          makeBtn("oral-give", "Going down") : "";
+        // Groups: vaginal, anal, oral, foreplay
+        const groups = { vaginal: [], anal: [], oral: [], foreplay: [] };
 
-        // Foreplay: groping + licking + fingering merged
-        const foreplayBtns = [
-          makeBtn("groping",         "Groping"),
-          makeBtn("licking",         "Licking"),
-          tgtHasPussy ? makeBtn("fingering-pussy", "Fingering Pussy")
-            : (tgtHasCock ? makeBtn("fingering-cock", "Cock Play") : ""),
-          makeBtn("fingering-anal",  "Fingering Ass"),
-          oralGiveExtra,
-        ].filter(Boolean).join("");
+        for (const posId of allowedIds) {
+          const entry = allPositions.find(p => p.id === posId);
+          if (!entry) continue;
+          // Skip positions that require multiple tops when there's only one top
+          if ((entry.minTops ?? 1) > 1 && topCount < 2) continue;
 
+          const hole = entry.hole ?? entry.holeId ?? null;
+          const label = entry.label?.(tgtPronouns) ?? posId;
+
+          // Anatomy filter: penile positions need a cock present somewhere
+          if (entry.penile && !anyCock) continue;
+          // Vaginal positions need a pussy target (or attacker for riding, or self-scene)
+          if (hole === "vaginal" && !tgtHasPussy && !atkHasPussy && !isSelfScene) continue;
+
+          if (hole === "vaginal")      groups.vaginal.push({ posId, label });
+          else if (hole === "anal")    groups.anal.push({ posId, label });
+          else if (hole === "oral" || hole === "facial") groups.oral.push({ posId, label });
+          else                         groups.foreplay.push({ posId, label });
+        }
+
+        // Toy section: weapon-based, unchanged
         const heldWeapon = atkActor?.items?.find(i => i.type === "weapon" && i.system?.equipped?.carryType === "held");
         const weaponName = heldWeapon?.name ?? null;
         const _wn = weaponName?.toLowerCase() ?? "";
         const weaponPart = !weaponName ? null
-          : (_wn.includes("sword") || _wn.includes("blade") || _wn.includes("dagger") || _wn.includes("knife") || _wn.includes("shiv") || _wn.includes("saber") || _wn.includes("rapier"))
-            ? "hilt"
-          : (_wn.includes("axe") || _wn.includes("ax") || _wn.includes("maul") || _wn.includes("hammer") || _wn.includes("mace") || _wn.includes("club"))
-            ? "handle"
-          : (_wn.includes("spear") || _wn.includes("staff") || _wn.includes("pole") || _wn.includes("halberd") || _wn.includes("lance"))
-            ? "shaft"
-          : (_wn.includes("bow") || _wn.includes("crossbow"))
-            ? "grip"
+          : (_wn.includes("sword") || _wn.includes("blade") || _wn.includes("dagger") || _wn.includes("knife") || _wn.includes("shiv") || _wn.includes("saber") || _wn.includes("rapier")) ? "hilt"
+          : (_wn.includes("axe") || _wn.includes("ax") || _wn.includes("maul") || _wn.includes("hammer") || _wn.includes("mace") || _wn.includes("club")) ? "handle"
+          : (_wn.includes("spear") || _wn.includes("staff") || _wn.includes("pole") || _wn.includes("halberd") || _wn.includes("lance")) ? "shaft"
+          : (_wn.includes("bow") || _wn.includes("crossbow")) ? "grip"
           : "handle";
         const toyLabel = weaponName ? `${weaponName} (${weaponPart})` : "Toy";
-        const toyBtns = [
-          tgtHasPussy ? makeBtn("toy-pussy", `${toyLabel} — Pussy`) : "",
-          makeBtn("toy-anal",  `${toyLabel} — Ass`),
+
+        const vaginalBtns  = groups.vaginal.map(p => makeBtn(p.posId, p.label)).join("");
+        const analBtns     = groups.anal.map(p => makeBtn(p.posId, p.label)).join("");
+        const oralBtns     = groups.oral.map(p => makeBtn(p.posId, p.label)).join("");
+        const foreplayBtns = groups.foreplay.map(p => makeBtn(p.posId, p.label)).join("");
+        const toyBtns      = [
+          tgtHasPussy || atkHasPussy ? makeBtn("toy-pussy", `${toyLabel} — Pussy`) : "",
+          makeBtn("toy-anal", `${toyLabel} — Ass`),
         ].filter(Boolean).join("");
 
         const sections = [
-          penetrationBtns ? makeSection("penetration", "Penetration",    penetrationBtns) : "",
-          makeSection("foreplay",       "Foreplay",        foreplayBtns),
-          makeSection("toy",            "Toy / Implement", toyBtns),
+          vaginalBtns  ? makeSection("vaginal",  "Vaginal",        vaginalBtns,  true) : "",
+          analBtns     ? makeSection("anal",     "Anal",           analBtns,     false) : "",
+          oralBtns     ? makeSection("oral",     "Oral / Facial",  oralBtns,     false) : "",
+          foreplayBtns ? makeSection("foreplay", "Foreplay",       foreplayBtns, false) : "",
+          makeSection("toy", "Toy / Implement", toyBtns, false),
         ].join("");
 
         const content = `
-          <div style="background:rgba(10,8,6,0.6);border-radius:4px;padding:0 0 4px;max-width:320px;overflow:hidden;">
+          <div style="background:rgba(10,8,6,0.6);border-radius:4px;padding:0 0 4px;max-width:320px;">
             <div style="display:flex;align-items:center;gap:10px;padding:10px 10px 8px;border-bottom:1px solid rgba(200,160,80,0.2);margin-bottom:10px;">
               <div style="width:44px;height:44px;border-radius:4px;overflow:hidden;border:1px solid rgba(200,160,80,0.4);flex-shrink:0;">
                 <img src="${atkImg}" alt="${atkName}" style="pointer-events:none;width:100%;height:100%;object-fit:cover;object-position:top;"/>
@@ -3102,7 +5476,7 @@ AFLP.HScene = (() => {
                 <div style="font-size:10px;color:#aaa;margin-top:1px;">with ${tgtName}</div>
               </div>
             </div>
-            <div style="padding:0 10px 6px;">${sections}</div>
+            <div class="aflp-pos-scroll" style="padding:0 10px 6px;overflow-y:auto;max-height:calc(80vh - 160px);">${sections}</div>
           </div>`;
 
         let resolvePos;
@@ -3112,22 +5486,36 @@ AFLP.HScene = (() => {
           window:   { title: "Select Position" },
           position: { width: 340 },
           content,
-          buttons: [{ action: "skip", label: "Skip", callback: async () => resolvePos(null) }],
+          buttons: [{ action: "skip", label: "Skip for now", callback: async () => resolvePos(null) }],
           close:    async () => resolvePos(null),
           render(ev, dlg) {
             const el = dlg.element;
+            // Fix Foundry's window-content overflow:hidden which blocks scrolling
+            const wc = el.querySelector(".window-content");
+            if (wc) {
+              wc.style.overflow = "visible";
+              wc.style.height   = "auto";
+              wc.scrollTop = 0;
+            }
+            // Ensure inner scroll area starts at top
+            const scrollEl = el.querySelector(".aflp-pos-scroll");
+            if (scrollEl) scrollEl.scrollTop = 0;
             el.querySelectorAll(".aflp-pos-header").forEach(hdr => {
               hdr.addEventListener("click", () => {
-                const sub = el.querySelector(`.aflp-pos-submenu[data-for="${hdr.dataset.section}"]`);
-                const arrow = hdr.querySelector(".aflp-pos-arrow-icon");
-                const open = sub.style.display !== "none";
-                sub.style.display = open ? "none" : "block";
-                if (arrow) arrow.textContent = open ? "\u25b6" : "\u25bc";
+                const id     = hdr.dataset.section;
+                const sub    = el.querySelector(`.aflp-pos-submenu[data-for="${id}"]`);
+                const isOpen = sub && sub.style.display !== "none";
+                // Accordion: close all
+                el.querySelectorAll(".aflp-pos-submenu").forEach(s => { s.style.display = "none"; });
+                el.querySelectorAll(".aflp-pos-arrow-icon").forEach(a => { a.innerHTML = "&#9658;"; });
+                // Open clicked if it was closed
+                if (!isOpen && sub) {
+                  sub.style.display = "";
+                  const arrow = hdr.querySelector(".aflp-pos-arrow-icon");
+                  if (arrow) arrow.innerHTML = "&#9660;";
+                }
               });
             });
-            // Auto-expand first section
-            const first = el.querySelector(".aflp-pos-header");
-            if (first) first.click();
             el.querySelectorAll(".aflp-pos-choice").forEach(btn => {
               btn.addEventListener("click", () => { resolvePos(btn.dataset.posId); dlg.close(); });
             });
@@ -3153,7 +5541,7 @@ AFLP.HScene = (() => {
         });
         const hasCock = !!atkActor?.getFlag(AFLP.FLAG_SCOPE, "cock");
         const targetPronouns = AFLP.getPronouns(targetActor);
-        const positionId = await AFLP.HScene._showPositionDialog(atkActor, targetActor, hasCock, targetPronouns);
+        const positionId = await AFLP.HScene._showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, scene?.attackers?.length ?? 1);
         if (!positionId) return; // user cancelled — don't fire SA
         atkData.position = positionId;
         atkData._prevPosition = positionId;
@@ -3164,7 +5552,7 @@ AFLP.HScene = (() => {
           AFLP.HScene.addProse(scene.targetId, phrase, "action");
         }
 
-        const card = _container?.querySelector(`[data-target-id="${scene.targetId}"]`);
+        const card = _cardFor(scene);
         if (card) _refreshArousalBars(card, scene);
       }
 
@@ -3214,11 +5602,10 @@ AFLP.HScene = (() => {
       this.startScene(attacker, target);
 
       // Post scene start to scene log only
-      if (game.user.isGM && AFLP.HScene._scenes) {
-        const sceneEntry = [...AFLP.HScene._scenes.entries()]
-          .find(([, sc]) => sc.targetActorId === (target.actorId ?? target.id));
-        if (sceneEntry) {
-          AFLP.HScene.addProse(sceneEntry[0], `${attacker.name} begins an H scene with ${target.name}.`, "action");
+      if (game.user.isGM) {
+        const scene = _sceneForToken(target.id, target.actorId);
+        if (scene) {
+          AFLP.HScene.addProse(scene.id, `${attacker.name} begins an H scene with ${target.name}.`, "action");
         }
       }
     },

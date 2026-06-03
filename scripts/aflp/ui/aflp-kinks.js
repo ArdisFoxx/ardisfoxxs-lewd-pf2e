@@ -152,8 +152,8 @@ AFLP.Kinks = {
           const optionsHtml = typeList.map(t =>
             `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
           ).join("");
-          const dlg = new Dialog({
-            title: "Mind Break — Creature Fetish",
+          foundry.applications.api.DialogV2.wait({
+            window: { title: "Mind Break — Creature Fetish" },
             content: `
               <p style="margin-bottom:8px;">
                 <strong>${item.actor.name}</strong> has broken. Choose the creature type
@@ -163,20 +163,22 @@ AFLP.Kinks = {
                 <label style="flex-shrink:0;">Creature type:</label>
                 <select id="aflp-mb-type" style="flex:1;">${optionsHtml}</select>
               </div>`,
-            buttons: {
-              ok: {
+            buttons: [
+              {
+                action: "ok",
                 label: "Confirm",
-                callback: html => resolve(html.find("#aflp-mb-type").val()),
+                default: true,
+                callback: (ev, btn, dlg) => resolve(dlg.element.querySelector("#aflp-mb-type")?.value ?? null),
               },
-              none: {
+              {
+                action: "none",
                 label: "No Fetish",
                 callback: () => resolve(null),
               },
-            },
-            default: "ok",
+            ],
             close: () => resolve(null),
+            rejectClose: false,
           });
-          dlg.render(true);
         });
 
         if (chooseType) {
@@ -632,6 +634,39 @@ AFLP.Kinks = {
   //
   // context.isMasturbation = true enables Edge Master L3 auto-succeed.
   // -----------------------------------------------
+
+  // buttonEdge — invoked by the in-card Edge button (no confirmation dialog).
+  // Resolves the Edge reaction immediately and returns true on success.
+  // Mirrors the resolution paths in tryEdge but skips the prompt, since the
+  // click IS the confirmation. Honors Edge Master L3 masturbation auto-success
+  // and the Animated Bitchsuit block.
+  async buttonEdge(actor, tokenId = null, context = {}) {
+    const liveActor  = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
+    const actorLevel = actor.system?.details?.level?.value ?? 1;
+    const actorName  = actor.name;
+
+    // Animated Bitchsuit: blocks Edge entirely
+    if (window.AFLP_Bitchsuit?.blocksEdge?.(actor)) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card">
+          <p><strong>${actor.name}</strong> cannot Edge. The Animated Bitchsuit does not permit denial..</p>
+        </div>`,
+        speaker: { alias: "AFLP" },
+      });
+      return false;
+    }
+
+    // Edge Master L3: auto-succeed if this cum was triggered by masturbation.
+    const edgeMasterLevel = AFLP.getKinkLevel(actor, "edge-master");
+    if (edgeMasterLevel >= 3 && context.isMasturbation) {
+      await AFLP.Kinks._resolveEdgeSuccess(actor, liveActor, tokenId, actorName, actorLevel, "auto (Edge Master L3)");
+      return true;
+    }
+
+    const skPenalty = AFLP.Kinks.getStretchKingEdgePenalty?.(actor, tokenId) ?? null;
+    return await AFLP.Kinks._rollEdge(actor, liveActor, tokenId, actorName, actorLevel, skPenalty?.dcModifier ?? 0);
+  },
+
   async tryEdge(actor, tokenId = null, context = {}) {
     if (!AFLP.Settings.automation) return false;
     if (!AFLP.Settings.edgeAuto)   return false;
@@ -725,7 +760,7 @@ AFLP.Kinks = {
 
     if (!roll) {
       // Fallback: plain d20 roll posted to chat
-      roll = await new Roll("1d20").evaluate({async: true});
+      roll = await new Roll("1d20").evaluate();
       await roll.toMessage({
         speaker: ChatMessage.getSpeaker({ actor }),
         flavor:  `<strong>${actorName}</strong> attempts to Edge (Fortitude DC ${dc})`,

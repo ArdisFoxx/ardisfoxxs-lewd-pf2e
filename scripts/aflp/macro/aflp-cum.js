@@ -12,22 +12,28 @@
   const GANGBANG_MESSAGES = AFLP_PROSE.gangbangs;
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
-  const sourceTokens = canvas.tokens.controlled;
+  // Source tokens: prefer the ids handed over by _onArousalMax (auto-cum flow)
+  // so we never need to change the GM's on-screen selection. Fall back to the
+  // controlled tokens for a manual macro run.
+  const _autoSrcIds = Array.isArray(window._aflpCumSourceTokenIds) ? window._aflpCumSourceTokenIds : null;
+  const sourceTokens = (_autoSrcIds && _autoSrcIds.length)
+    ? _autoSrcIds.map(id => canvas.tokens.get(id)).filter(Boolean)
+    : canvas.tokens.controlled;
+  window._aflpCumSourceTokenIds = null; // consume
   if (!sourceTokens.length) return ui.notifications.warn("Select at least one source token.");
-  const targets = Array.from(game.user.targets);
-  if (targets.length !== 1) return ui.notifications.warn("Target exactly one token.");
 
-  // If _onArousalMax pre-set an authoritative target token ID, validate that
-  // game.user.targets matches it. If not (race with another scene), correct it.
+  // Target token: prefer the authoritative target id set by _onArousalMax;
+  // otherwise require exactly one manually-targeted token.
   const _intendedTargetId = window._aflpCumTargetTokenId ?? null;
-  let resolvedTargetToken = targets[0];
-  if (_intendedTargetId && resolvedTargetToken.id !== _intendedTargetId) {
-    const corrected = canvas.tokens.get(_intendedTargetId);
-    if (corrected) {
-      resolvedTargetToken = corrected;
-      console.warn(`AFLP | Cum macro: corrected target from ${targets[0].id} to ${_intendedTargetId} (multi-scene race)`);
-    }
+  const manualTargets = Array.from(game.user.targets);
+  let resolvedTargetToken;
+  if (_intendedTargetId) {
+    resolvedTargetToken = canvas.tokens.get(_intendedTargetId) ?? manualTargets[0];
+  } else {
+    if (manualTargets.length !== 1) return ui.notifications.warn("Target exactly one token.");
+    resolvedTargetToken = manualTargets[0];
   }
+  if (!resolvedTargetToken) return ui.notifications.warn("Target exactly one token.");
   window._aflpCumTargetTokenId = null; // consume
 
   const targetActor = resolvedTargetToken.actor?.getWorldActor?.() ?? resolvedTargetToken.actor;
@@ -41,15 +47,23 @@
   // If ALL cock-having sources have a penile position, skip the dialog entirely.
   const _storedPositions = new Map(); // token.id → holeId
   if (AFLP.Settings.positionTracking && AFLP.Settings.hsceneEnabled) {
-    const hscene = AFLP.HScene._getScene?.(targetActor.id);
+    // Unified model: each SOURCE (cummer) carries its OWN position on its scene
+    // participant - whether it projects as the legacy target or an attacker. So
+    // read positions from the battlemap scene's participants by source token id,
+    // not from the projected attackers list (which would miss a cummer that
+    // happens to project as the scene target in a cross-pair).
+    const sourceIds = new Set(sourceTokens.map(t => t.id));
+    let hscene = null;
+    for (const s of (AFLP.HScene._scenes?.values?.() ?? [])) {
+      if ((s.participants ?? []).some(p => sourceIds.has(p.tokenId))) { hscene = s; break; }
+    }
     if (hscene) {
-      for (const atk of (hscene.attackers ?? [])) {
-        const posEntry = atk.position ? AFLP.getPosition(atk.position) : null;
-        if (posEntry?.holeId) {
-          // Penile position with a hole mapping — use it
-          _storedPositions.set(atk.id, posEntry.holeId);
-        }
-        // Non-penile position → holeId is null → will show dialog for this source
+      for (const t of sourceTokens) {
+        const p = (hscene.participants ?? []).find(pp => pp.tokenId === t.id);
+        const posEntry = p?.position ? AFLP.getPosition(p.position) : null;
+        const hole = posEntry?.hole ?? posEntry?.holeId;
+        if (hole) _storedPositions.set(t.id, hole); // penile position with a hole mapping
+        // Non-penile / no position → not set → dialog will prompt for this source
       }
     }
   }
@@ -82,7 +96,8 @@
   }
 
   // ── Check if we can skip the dialog entirely ─────────────────────────────
-  // All cock-having sources have a penile position stored → skip dialog.
+  // Only when the GM has opted in via "Auto-Choose Cum Hole from Position".
+  // All cock-having sources must have a penile position stored to skip.
   // Exception: the bothHaveCocks reverse direction still needs a dialog.
   const _cockSources = sourceTokens.filter(t => {
     const a = t.actor?.getWorldActor?.() ?? t.actor;
@@ -93,7 +108,11 @@
 
   let dialogResult;
 
-  if (_allHaveStoredPosition && !bothHaveCocks) {
+  // If every cumming source has a known penile position, route straight to those
+  // holes - no dialog - even when both partners have cocks. The cum macro is
+  // always driven by ONE clicked cummer (or a resolved gangbang); the partner's
+  // own climax is a separate event, so there is nothing to disambiguate here.
+  if (AFLP.Settings.cumHoleFromPosition && _allHaveStoredPosition) {
     // Build holeAssignments directly from stored positions — no dialog
     const autoHoles = {};
     for (const t of _cockSources) {
@@ -115,8 +134,8 @@
       { value: "anal",   label: "Ass" },
       { value: "facial", label: "Facial" },
       ...(targetHasPaizuri ? [{ value: "paizuri", label: "Paizuri" }] : []),
-      { value: "ground", label: "Ground", special: true },
-      { value: "vial",   label: "Into a Vial", special: true },
+      { value: "ground", label: "On the ground" },
+      { value: "vial",   label: "Into a Vial" },
     ];
     // Holes available to cum INTO the source (when target also has a cock)
     const sourceActor0Pussy = sourceActor0?.getFlag(FLAG, "pussy") === true;
@@ -162,26 +181,7 @@
 
     let formContent = "";
 
-    if (!isMultiSource && bothHaveCocks) {
-      const mkCol = (opts, prefix, actorName, actorImg, isSrc) =>
-        `<div style="flex:1;min-width:120px;">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-            ${isSrc ? portraitImg(actorImg, actorName) : targetPortraitImg(actorImg, actorName)}
-            <div>
-              <div style="font-size:12px;font-weight:bold;color:#f0e8d0;">${actorName}</div>
-              <div style="font-size:10px;color:#aaa;">cums into…</div>
-            </div>
-          </div>
-          ${opts.map(h => makeHoleBtn(h, prefix)).join("")}
-        </div>`;
-      formContent = `
-        <div style="display:flex;gap:12px;">
-          ${mkCol(targetHoleOptions, "src-", sourceActor0Name, sourceActor0Img, true)}
-          <div style="width:1px;background:rgba(200,160,80,0.2);flex-shrink:0;margin:0 2px;"></div>
-          ${mkCol(sourceHoleOptions, "tgt-", targetActor.name, targetActorImg, false)}
-        </div>
-        <p style="margin:8px 0 0;font-size:10px;color:#888;font-style:italic;">Leave a column empty if that actor doesn't cum.</p>`;
-    } else if (!isMultiSource) {
+    if (!isMultiSource) {
       formContent = `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;
                     border-bottom:1px solid rgba(200,160,80,0.2);padding-bottom:8px;">
@@ -303,20 +303,6 @@
           cumBtn.addEventListener("click", async (e) => {
             e.stopImmediatePropagation();
             e.preventDefault();
-
-            if (!isMultiSource && bothHaveCocks) {
-              const srcHoles = {};
-              const tgtHoles = {};
-              el.querySelectorAll("input[type=checkbox][name^='src-']:checked").forEach(cb => { srcHoles[cb.value] = 1; });
-              el.querySelectorAll("input[type=checkbox][name^='tgt-']:checked").forEach(cb => { tgtHoles[cb.value] = 1; });
-              if (!Object.keys(srcHoles).length && !Object.keys(tgtHoles).length) {
-                ui.notifications.warn("Select at least one hole for at least one actor.");
-                return;
-              }
-              resolveDialog({ sourceHoles: srcHoles, targetHoles: tgtHoles });
-              dlg.close();
-              return;
-            }
 
             const result = {};
             if (!isMultiSource) {
