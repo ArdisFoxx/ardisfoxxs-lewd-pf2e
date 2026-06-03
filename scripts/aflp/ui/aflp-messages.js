@@ -226,21 +226,20 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
 
   async _renderHTML() {
     const custom = this._load();
-    const D = [
-      { w: "LEAKING",     t: "Tier 2" },
-      { w: "STRETCHED",   t: "Tier 4" },
-      { w: "CUMBUCKET",   t: "Tier 6" },
-      { w: "CUMPREGNANT", t: "Tier 8" },
-      { w: "CUMTOILET", t: "Tier 8 + Facial 8" },
-    ];
+    // Single source of truth: the H Scene card's CF_LABEL_DEFAULTS, exposed on AFLP.
+    // Word and tier come straight from the card so this menu can never drift from it.
+    const D = (AFLP.CF_LABEL_DEFAULTS ?? []).map(e => ({
+      w: e.word,
+      t: e.minTier >= 9 ? "Tier 8 + Facial 8" : "Tier " + e.minTier,
+    }));
     const rows = D.map((d, i) => {
-      const c = custom[i]?.w || d.w;
+      const c = custom[i]?.w ?? "";
       return `<tr>
         <td style="color:#aaa;font-size:11px;padding:4px 8px 4px 0;white-space:nowrap;">${this._esc(d.t)}</td>
         <td style="color:#666;font-size:10px;padding:4px 8px;font-style:italic;">${this._esc(d.w)}</td>
-        <td><input type="text" data-i="${i}" value="${this._esc(c)}"
+        <td><input type="text" data-i="${i}" value="${this._esc(c)}" placeholder="${this._esc(d.w)}"
           style="width:150px;background:#111;color:#e0c8a0;border:1px solid rgba(200,160,80,0.3);
-          border-radius:3px;padding:3px 6px;font-size:11px;font-weight:700;text-transform:uppercase;"/></td>
+          border-radius:3px;padding:3px 6px;font-size:11px;font-weight:700;"/></td>
       </tr>`;
     }).join("");
     const el = document.createElement("div");
@@ -274,7 +273,7 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
   _onRender(context, options) {
     const el = this.element;
     el.querySelector(".aflp-cf-s")?.addEventListener("click", async () => {
-      const c = [...el.querySelectorAll("input[data-i]")].map(x => ({ w: x.value.trim().toUpperCase() || "" }));
+      const c = [...el.querySelectorAll("input[data-i]")].map(x => ({ w: x.value.trim() }));
       await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS, JSON.stringify(c));
       ui.notifications.info("AFLP | Cumflation labels saved.");
     });

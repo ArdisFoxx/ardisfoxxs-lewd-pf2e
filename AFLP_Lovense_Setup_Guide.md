@@ -1,4 +1,4 @@
-# AFLP Lovense Integration — Setup Guide
+# AFLP Lovense Integration - Setup Guide
 **Version 5.4 | ArdisFoxXx's Lewd PF2e**
 
 AFLP can connect to Lovense toys in two ways. The **Setup Wizard** inside Foundry handles both options and recommends the right one for your setup automatically. Open it from the AFLP character sheet tab by clicking the 🖤 button.
@@ -70,9 +70,9 @@ GIFT is a free Windows app that watches your browser's console log and triggers 
 - [GameInterfaceForToys 1.4.7+](https://github.com/MinLL/GameInterfaceForToys/releases/latest) downloaded and extracted
 - Lovense Remote open with your toy connected
 
-### ⚠️ The logging browser — read this first
+### ⚠️ The logging shortcut - read this first
 
-GIFT works by watching a log file that Chrome writes to disk. Chrome only writes that file when launched with special command-line flags. **You must open Foundry using the `Browser - Chrome with Logging.lnk` shortcut inside the GIFT folder** every session. Your regular Chrome shortcut does not enable logging, so GIFT will see nothing and your toy will not respond.
+GIFT works by watching a log file that Chrome writes to disk. Chrome only writes that file when launched with a logging flag, so you need a one-time logging shortcut. Right-click your Chrome shortcut, choose **Create shortcut**, open the new shortcut's **Properties**, and add `--enable-logging --v=1` to the end of the Target field (after the quoted chrome.exe path). Launch Foundry with that shortcut every session. Your regular Chrome shortcut does not enable logging, so GIFT will see nothing and your toy will not respond.
 
 ### Setup steps
 
@@ -93,7 +93,7 @@ Launch `GameInterfaceForToys.exe` and click **Configuration**:
 
 - **Log File:** Click *Select Log File*. In the file picker's address bar at the top, paste:
   `%localappdata%\Google\Chrome\User Data\chrome_debug.log`
-  Press Enter to navigate there, then select the file. Note: this file only exists after you have used the logging browser shortcut at least once. If it is not there, complete Step 5 first, then return here.
+  Press Enter to navigate there, then select the file. Note: this file only exists after you have launched Foundry with your logging shortcut at least once. If it is not there, complete Step 5 first, then return here.
 - **Character Name:** Enter your character name exactly as you entered it in the wizard (case-sensitive)
 - **Toy Type:** Lovense
 - **Lovense Host:**
@@ -102,8 +102,8 @@ Launch `GameInterfaceForToys.exe` and click **Configuration**:
 
 Click Save.
 
-**Step 5: Open Foundry using the logging browser**
-From your GIFT folder, open `Browser - Chrome with Logging.lnk`. Use this browser to access Foundry every session. Do not use your regular Chrome shortcut.
+**Step 5: Open Foundry using the logging shortcut**
+Launch Foundry using the Chrome logging shortcut you made above (Chrome started with `--enable-logging --v=1`). Use that shortcut to access Foundry every session. Do not use your regular Chrome shortcut, which does not write the log file.
 
 **Step 6: Test**
 In Foundry: AFLP tab → 🖤 → Lovense Settings. Click a Test button next to any event. Your toy should respond.
@@ -122,13 +122,13 @@ Chaster is a digital chastity platform. When enabled, GIFT can automatically add
 
 **Requirements:**
 - GIFT mode (Chaster does not work in Direct-only mode)
-- A Chaster developer token — apply at [chaster.app](https://chaster.app) developer settings
+- A Chaster developer token - apply at [chaster.app](https://chaster.app) developer settings
 - Token and lock name entered in GIFT's Configuration screen
 
 **Setup:**
 1. In the AFLP Lovense settings panel (🖤 after initial setup), expand the **Chaster** section
 2. Enable Chaster and configure the time ranges for each event
-3. Re-download your config pack from the settings panel — the updated `aflp.yaml` will include the Chaster entries
+3. Re-download your config pack from the settings panel - the updated `aflp.yaml` will include the Chaster entries
 4. Enter your Chaster token and lock name in GIFT → Configuration
 
 ---
@@ -150,9 +150,9 @@ You can also disable individual events, or test any event without triggering it 
 - Did you click Allow on the Chrome network access prompt? It only appears once per browser session.
 
 **Toy not responding (GIFT mode)**
-- Are you using `Browser - Chrome with Logging.lnk` from the GIFT folder, not regular Chrome?
+- Are you launching Foundry with your Chrome logging shortcut (the one with `--enable-logging`), not regular Chrome?
 - Does the log file exist? Open File Explorer and paste `%localappdata%\Google\Chrome\User Data\chrome_debug.log` into the address bar to check.
-- Open the log file in Notepad — it should be updating as you use the browser. If it is empty or not changing, the logging browser is not being used.
+- Open the log file in Notepad - it should be updating as you use the browser. If it is empty or not changing, the logging shortcut is not being used.
 - Does the character name in GIFT exactly match the one in AFLP? It is case-sensitive.
 
 **Wrong character triggers the toy**

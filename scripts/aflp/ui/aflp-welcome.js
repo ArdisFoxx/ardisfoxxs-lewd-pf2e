@@ -77,7 +77,7 @@ async function aflpShowWelcome() {
       <li><strong>Role selection on scene start</strong> - When an H scene begins, the GM is prompted: Attacker is Dominating, Target is Dominating, or <em>No one is Dominating (Consensual Sex)</em>. The third option starts the scene with no Dominating or Submitting conditions applied.</li>
       <li><strong>Visual mode banner</strong> - The H scene card header now shows either <strong>💗 Consensual H Scene in Progress</strong> or <strong>🔒 Noncon H Scene in Progress</strong> at all times, making the nature of the scene immediately visible to the whole table.</li>
       <li><strong>Equal control in consensual scenes</strong> - In a consensual scene, any participant's owner can click their own hole chips and position label, not just the GM. In non-consensual scenes, only the Dominating attacker's owner and the GM have control.</li>
-      <li><strong>Voyeurism/Cuck Support</strong> - Tops who have joined a multi-attacker scene but have not yet been assigned a position show as "Watching" rather than the old "Set Position" placeholder, making it clear they're in the scene but on the sidelines for now.</li>
+      <li><strong>Concurrent pairings (voyeur-friendly)</strong> - Every pairing on the battlemap is tracked independently, so your card can focus one pairing while others (your partner with someone else, the rest of the room) play out live as Nearby blocks you can tap to follow.</li>
     </ul>
   </div>
 
@@ -311,7 +311,7 @@ async function aflpShowSessionZero() {
     {
       level: 4, name: "Lewd Level 4: Skyrim with Defeat Mods", color: "#c060c0",
       desc: "Monsters may physically have sex with you in combat. Sexual defeat becomes part of the game. NPC Edge automation on, Edge rolls without prompting. Full automation, no brakes. Uses <strong>AFLP Classic</strong> scene UI for PC/NPC scenes and <strong>Fuck a Mon'</strong> for monster targets.",
-      settings: { automation: true, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: true, cumflationHscene: true, edgeAuto: true, edgeSkip: true, edgeNpc: true, titles: true, titlesShow: true },
+      settings: { automation: true, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: true, cumflationHscene: true, edgeAuto: true, edgeSkip: false, edgeNpc: true, titles: true, titlesShow: true },
     },
   ];
 

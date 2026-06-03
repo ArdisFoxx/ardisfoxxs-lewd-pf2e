@@ -34,6 +34,10 @@ AFLP.HScene = (() => {
     { minTier: 9, word: "Splattered Cum Toilet", color: "rgba(255,40,60,1)",  glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
   ];
 
+  // Expose the canonical label set so the Cumflation Status Labels settings menu
+  // reads its defaults from here - one source of truth, no drift.
+  AFLP.CF_LABEL_DEFAULTS = CF_LABEL_DEFAULTS;
+
   function _getCFLabels() {
     try {
       const raw = game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS) ?? "";
@@ -2261,8 +2265,8 @@ AFLP.HScene = (() => {
       domRow.className = "aflp-po-dom-row";
       for (const atk of attackers) {
         const safeAtkName = _safeName(atk.name).split(" ").slice(0,2).join(" ");
-        const posStr     = _posLabelShort(atk.position) ?? (attackers.length > 1 ? "Watching" : "+ set position");
-        const posTooltip = atk.position ? (AFLP.getPositionDesc?.(atk.position) ?? "") : (attackers.length > 1 ? "Watching the scene - click to join in" : "Click to set a position");
+        const posStr     = _posLabelShort(atk.position) ?? (attackers.length > 1 ? "+ set position" : "+ set position");
+        const posTooltip = atk.position ? (AFLP.getPositionDesc?.(atk.position) ?? "") : (attackers.length > 1 ? "Set a position" : "Click to set a position");
         const col = document.createElement("div");
         col.className = "aflp-po-dom-col";
         col.dataset.atkId = atk.id;
@@ -3020,7 +3024,7 @@ AFLP.HScene = (() => {
       const atkHasCock = !!atkActorFM?.getFlag?.(FLAG, "cock");
       const posEntry   = atk.position ? AFLP.getPosition(atk.position) : null;
       const moveName   = posEntry ? (_posLabelShort(atk.position) ?? posEntry.label?.(safePron) ?? atk.position)
-                                  : (attackers.length > 1 ? "Watching" : null);
+                                  : (attackers.length > 1 ? "+ set position" : null);
       const cockActive = atkHasCock && !!(posEntry?.penile);
 
       const row = document.createElement("div");
@@ -5238,7 +5242,7 @@ AFLP.HScene = (() => {
       });
 
       if (!result) {
-        // Cancelled: new attacker shows "Watching" state (no position set)
+        // Cancelled: new attacker shows "+ set position" state (no position set)
         return;
       }
 
