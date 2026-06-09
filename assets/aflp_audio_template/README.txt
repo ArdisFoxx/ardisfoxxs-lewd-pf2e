@@ -1,40 +1,43 @@
-AFLP VOICE + AMBIENT SFX - ALPHA AUDIO GUIDE
-============================================
+AFLP VOICE PROFILES - CUSTOM AUDIO GUIDE
+========================================
 
-This pack has two independent layers. Both are silent until you add audio, so
-you can set up either one on its own.
+Voice and ambient SFX audio ships in the free AFLP Soundpack module and loads
+automatically once that module is installed and enabled. You do NOT need to add
+any files here for the built-in audio to work.
 
-  1) VOICE PROFILES  - per-actor character voice (moans, climax, reactions)
-  2) AMBIENT SFX     - global act sounds (plaps, gluk) + event stings
+This folder is only for adding your OWN extra voice profiles, on top of the ones
+the soundpack provides. Ambient SFX cannot be customised - it is supplied by the
+soundpack only - so there is no SFX setup here.
 
-Supported file types everywhere: .ogg .mp3 .wav .m4a .webm .flac .opus .aac
+Supported file types: .ogg .mp3 .wav .m4a .webm .flac .opus .aac
 A random file is chosen from a folder each time it fires. README/text files and
 any other non-audio files are ignored, so leave these notes in place if you like.
 
 
 --------------------------------------------------------------------------------
-1) VOICE PROFILES
+ADDING YOUR OWN VOICE PROFILES
 --------------------------------------------------------------------------------
 A "profile" is one folder of voice clips for a character. You can have as many as
-you want (one per VA, per creature type, per mood, whatever).
+you want (one per VA, per creature type, per mood, whatever). A profile here with
+the same name as a bundled soundpack profile overrides it.
 
 SETUP
   - Pick a base voice folder somewhere in your Foundry data (e.g. an "aflp-voices"
-    folder under uploads).
-  - In module settings, set "Voice - Sound Folder" to that base folder.
+    folder under your user data).
+  - In Module Settings, set "Voice Profiles - Extra Custom Folder" to that base.
   - Each subfolder of the base is one profile (the folder name is the profile name).
   - On an actor's AFLP sheet tab, pick the profile from the Voice dropdown.
     Test steps through the clips one per click; Rescan re-reads the folder.
 
 PROFILE FOLDER LAYOUT  (see voice-profile-template/ExampleProfile)
   <base>/<ProfileName>/
-    moan/1 .. moan/6   the actor's act vocalization. Fires on arousal climbs AND on
-                       every sexual advance (a moan at the current tier). 1 = soft, 6 = peak.
-                       This is the single source for "sounds during the act" - there is
-                       no separate advance folder.
+    moan/1 .. moan/6   the actor's act vocalisation. Fires on arousal climbs AND on
+                       every sexual advance (a moan at the current tier). 1 = soft,
+                       6 = peak. This is the single source for "sounds during the
+                       act" - there is no separate advance folder.
     climax/        orgasm
-    oral/          being orally used (gag / blowjob VO) - plays instead of a moan when a
-                   partner is in an oral position on this actor
+    oral/          being orally used (gag / blowjob VO) - plays instead of a moan when
+                   a partner is in an oral position on this actor
     struggle/      entered a Dominating / Submitting role
     defeated/      gained Defeated
     mindbreak/     gained Mind Break
@@ -47,62 +50,23 @@ PROFILE FOLDER LAYOUT  (see voice-profile-template/ExampleProfile)
 
 HARVESTING THE OpenNSFW VA PACKS
   The VA packs are not uniform, so this is a manual copy. Rough mapping:
-    VA "orgasm"                  -> climax/
-    VA "moans" / "moaning"       -> spread across moan/1..6 (soft -> intense)
-    VA pitch packs (high/med/low)-> use as moan tiers (low = 1-2, high = 5-6)
-    VA "breathing" / "breaths"   -> moan/1
-    VA "oral" / "blowjob"        -> oral/
-    VA "gasping"                 -> moan/2-3
-    VA "dialogue" / "dirty talk" -> skip (or a future dialogue feature)
-    VA "pain" / "strained"       -> struggle/ or defeated/
+    VA "orgasm"                   -> climax/
+    VA "moans" / "moaning"        -> spread across moan/1..6 (soft -> intense)
+    VA pitch packs (high/med/low) -> use as moan tiers (low = 1-2, high = 5-6)
+    VA "breathing" / "breaths"    -> moan/1
+    VA "oral" / "blowjob"         -> oral/
+    VA "gasping"                  -> moan/2-3
+    VA "dialogue" / "dirty talk"  -> skip (or a future dialogue feature)
+    VA "pain" / "strained"        -> struggle/ or defeated/
 
 
 --------------------------------------------------------------------------------
-2) AMBIENT SFX
+SETTINGS RECAP (voice)
 --------------------------------------------------------------------------------
-Global, profile-independent act sounds and event stings. Driven by the position's
-HOLE, so every penetrative/oral position is covered automatically.
+  Voice Profiles - Enable                 (on)
+  Voice Profiles - Extra Custom Folder    your extra profiles base (optional)
+  Voice Profiles - Volume / Mute (local)  per-client
 
-CATEGORIES  (see ambient-sfx-template/assets/sfx)
-    plap/        any vaginal or anal position (penetration)
-    gluk/        any oral position
-    schlick/     fingering
-    cum/         plays once on climax
-    inflation/   plays once on a cumflation tier-up
-    title/       plays once when any actor earns a new Title
-
-SETUP - two ways, pick one:
-
-  A) DROP THE OpenNSFW SFX PACK IN AS-IS  (easiest)
-     - Put the whole "OpenNSFW SFX" folder wherever you want, or copy it into the
-       module at modules/ardisfoxxs-lewd-pf2e/assets/sfx.
-     - In module settings set "Ambient SFX - Sound Folder" to that folder.
-     - The scan is recursive and recognizes the pack's own folder names, so these
-       are picked up automatically:
-         plap      <- Plaps, Skin Slides, Sliding In & Out, Wet Sounds, Squish & Knots
-         gluk      <- Oral - Mouth
-         schlick   <- Fingering & Grinding
-         cum       <- Cum
-         inflation <- Inflation & Vore
-       (title has no pack equivalent - add your own.)
-
-  B) CURATE INTO CLEAN CATEGORY FOLDERS
-     - Drop the bundled assets/sfx folder into the module (or set the SFX folder
-       to your own base) and put clips directly into plap/ gluk/ schlick/ cum/
-       inflation/ title/. Subfolders inside each are scanned recursively too.
-
-You can mix both: clean folders and pack folders are both scanned.
-
-
---------------------------------------------------------------------------------
-SETTINGS RECAP
---------------------------------------------------------------------------------
-  Voice - Enable                 (on)
-  Voice - Sound Folder           your voice profiles base
-  Voice - Volume / Mute (local)  per-client
-  Ambient SFX - Enable           (on)
-  Ambient SFX - Sound Folder     blank = module assets/sfx, or point at a pack
-  Ambient SFX - Volume           per-client
-
-After adding or moving files, hit Rescan on a sheet (voices) or just reload;
-SFX rescans automatically when the folder setting changes.
+Ambient SFX (plaps, gluk, cum/cumflation stings, etc.) is provided by the AFLP
+Soundpack and controlled by the separate "Ambient SFX - Enable" setting; it has no
+custom folder. After adding or moving voice files, hit Rescan on a sheet or reload.
