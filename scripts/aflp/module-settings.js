@@ -5,6 +5,10 @@
 // Called from index.js in the "init" hook.
 // Settings are ordered by the Lewd Level at which they become relevant.
 
+// Single source of truth for the AFLP Soundpack download link, used by both the
+// welcome screen and the settings menu button below. Update the link here only.
+AFLP.SOUNDPACK_URL = "https://mega.nz/file/1d5lxbZQ#_jH1AfpTqrP8rddGV94Wrr705RTnRzTtWBtSA6OF_i0";
+
 AFLP.Settings = {
 
   ID: "ardisfoxxs-lewd-pf2e",
@@ -40,6 +44,19 @@ AFLP.Settings = {
     HSCENE_MESSAGES:     "hsceneCustomMessages",
     TITLES_CONFIG:       "titlesCustomConfig",
     CF_LABELS:           "cumflationLabels",
+    SPLATTER_ENABLED:    "splatterEnabled",
+    SPLATTER_INTENSITY:  "splatterIntensity",
+    CARD_FONT_BOOST:     "cardFontBoost",
+    SPLATTER_INCLUDE_NPC: "splatterIncludeNpc",
+    SPLATTER_COLOR:      "splatterColor",
+    SPLATTER_HIDE_LOCAL: "splatterHideLocal",
+    SPLATTER_QUALITY:    "splatterQuality",
+    VOICE_ENABLED:       "voiceEnabled",
+    VOICE_FOLDER:        "voiceFolder",
+    VOICE_VOLUME:        "voiceVolume",
+    VOICE_MUTE_LOCAL:    "voiceMuteLocal",
+    SFX_ENABLED:         "sfxEnabled",
+    SFX_VOLUME:          "sfxVolume",
   },
 
   register() {
@@ -68,6 +85,68 @@ AFLP.Settings = {
       icon:       "fas fa-cog",
       type:       SessionZeroLauncher,
       restricted: true,
+    });
+
+    // ── AFLP Soundpack helpers (shared by the settings menu button, the
+    // welcome screen link, and the "audio on but pack missing" notice) ────
+    const aflpSoundpackActive = () => !!game.modules?.get?.("aflp-soundpack")?.active;
+    const aflpShowSoundpackDialog = () => {
+      const url = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
+      foundry.applications.api.DialogV2.wait({
+        window: { title: "AFLP Soundpack - Free Download" },
+        content: `<div style="font-size:13px; line-height:1.6; max-width:480px;">
+          <p>The <strong>AFLP Soundpack</strong> is a free companion module containing the voice profiles and ambient SFX used by AFLP's audio features. AFLP runs fine without it - install it to enable voice and SFX.</p>
+          <p style="text-align:center; margin:14px 0;">
+            <a href="${url}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; border-radius:5px; text-decoration:none;">Download the AFLP Soundpack</a>
+          </p>
+          <p style="margin:0 0 4px;"><strong>To install (one-time):</strong></p>
+          <ol style="margin:0 0 10px; padding-left:18px;">
+            <li>Download and unzip the file above.</li>
+            <li>Move the <code>aflp-soundpack</code> folder into your Foundry <code>Data/modules</code> folder.</li>
+            <li>Restart Foundry, then enable <strong>AFLP Soundpack</strong> under Manage Modules.</li>
+          </ol>
+          <p style="font-size:11px; opacity:0.8;">Audio: OpenNSFW Sound Pack (CC BY 4.0). Full contributor credits ship with the soundpack.</p>
+        </div>`,
+        buttons: [{ action: "close", label: "Close", default: true }],
+      });
+    };
+    // When audio is enabled but the soundpack isn't installed/active there is
+    // nothing to play. openDialog=true (on toggle) shows the actionable dialog;
+    // openDialog=false (on load) shows a passive warning. Returns true if missing.
+    const aflpAudioNeedsSoundpack = (openDialog = false) => {
+      if (aflpSoundpackActive()) return false;
+      if (openDialog) aflpShowSoundpackDialog();
+      else ui.notifications?.warn("AFLP: Voice/Ambient SFX is enabled, but the AFLP Soundpack module is not installed or active - there is no audio to play. Open Module Settings and use 'Get the AFLP Soundpack' to download it.", { permanent: true });
+      return true;
+    };
+
+    // ── AFLP Soundpack download — accessible from module settings ─────────
+    const SoundpackLink = class extends foundry.applications.api.ApplicationV2 {
+      static DEFAULT_OPTIONS = {
+        id: "aflp-soundpack-link",
+        window: { title: "Get the AFLP Soundpack" },
+      };
+      async _renderHTML() { return document.createElement("div"); }
+      _replaceHTML(result, content) { content.replaceChildren(result); }
+      _onRender() { setTimeout(() => this.close(), 0); aflpShowSoundpackDialog(); }
+    };
+    game.settings.registerMenu(S.ID, "getSoundpack", {
+      name:       "AFLP Soundpack (Audio)",
+      label:      "Get the AFLP Soundpack",
+      hint:       "Download the free AFLP Soundpack companion module - the voice profiles and ambient SFX used by AFLP's audio. Install and enable it alongside AFLP.",
+      icon:       "fas fa-download",
+      type:       SoundpackLink,
+      restricted: true,
+    });
+
+    // One-time check on load: if audio is enabled but the pack is absent, warn the GM.
+    Hooks.once("ready", () => {
+      try {
+        if (!game.user?.isGM) return;
+        const vOn = game.settings.get(S.ID, S.KEYS.VOICE_ENABLED) === true;
+        const sOn = game.settings.get(S.ID, S.KEYS.SFX_ENABLED) === true;
+        if (vOn || sOn) aflpAudioNeedsSoundpack(false);
+      } catch (_) {}
     });
 
     // =====================================================================
@@ -463,6 +542,140 @@ AFLP.Settings = {
       default: "",
     });
 
+    // ── Cum Splatter visuals ───────────────────────────────────────────────
+    game.settings.register(S.ID, S.KEYS.SPLATTER_ENABLED, {
+      name:    "Cum Splatter - Enable Token Splatter Visuals",
+      hint:    "[Lewd 3+] Coat cumflated tokens and splatter the ground beneath them. Intensity scales with cumflation tier. Purely visual; turns off all splatter when disabled.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: () => window.AFLP_Splatter?.refreshAll?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.SPLATTER_QUALITY, {
+      name:    "Cum Splatter - Render Quality",
+      hint:    "Performance vs fidelity for the cum coat and ground puddles. High is the original full-detail render. Medium (default) lowers texture resolution, blur passes and puddle detail for a large performance gain while the cumflation still reads clearly. Low is lightest - half-resolution textures, minimal blur, fewer layers, and no wet-film or pooled-cum extras - for weaker machines or scenes with many puddles.",
+      scope:   "world",
+      config:  true,
+      type:    String,
+      choices: { high: "High (full detail)", medium: "Medium (balanced - default)", low: "Low (best performance)" },
+      default: "medium",
+      onChange: () => window.AFLP_Splatter?.refreshAll?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.SPLATTER_INTENSITY, {
+      name:    "Cum Splatter - Intensity",
+      hint:    "Multiplier for splatter coverage, blob count and puddle size. 1.0 = default.",
+      scope:   "world",
+      config:  true,
+      type:    Number,
+      range:   { min: 0.25, max: 2.5, step: 0.25 },
+      default: 1.0,
+      onChange: () => window.AFLP_Splatter?.refreshAll?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.CARD_FONT_BOOST, {
+      name:    "H Scene Card - Larger Font (+2)",
+      hint:    "Increase the H Scene card text by +2pt across all themes for readability. Layout and card sizing are unchanged.",
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      default: false,
+      onChange: () => { try { const H = window.AFLP?.HScene; if (H?._scenes) for (const [sid] of H._scenes) H.refreshScene?.(sid); } catch (_) {} },
+    });
+
+    game.settings.register(S.ID, S.KEYS.SPLATTER_INCLUDE_NPC, {
+      name:    "Cum Splatter - Apply to NPCs",
+      hint:    "Also splatter non-player-owned (NPC / monster) tokens. When off, only player-owned tokens are splattered.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: () => window.AFLP_Splatter?.refreshAll?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.SPLATTER_COLOR, {
+      name:    "Cum Splatter - Colour",
+      hint:    "Hex colour for the splatter (default off-white #f2efe6).",
+      scope:   "world",
+      config:  true,
+      type:    String,
+      default: "#f2efe6",
+      onChange: () => window.AFLP_Splatter?.refreshAll?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.SPLATTER_HIDE_LOCAL, {
+      name:    "Cum Splatter - Hide On My Client",
+      hint:    "Per-user: hide all cum splatter for yourself only, without changing what other players see.",
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      default: false,
+      onChange: () => window.AFLP_Splatter?.refreshAll?.(),
+    });
+
+    // ── Voice profiles ─────────────────────────────────────────────────────
+    game.settings.register(S.ID, S.KEYS.VOICE_ENABLED, {
+      name:    "Voice Profiles - Enable",
+      hint:    "Play per-actor voice clips on climax, Sexual Advance, Struggle Snuggle and cumflation milestones. Assign a profile per actor from the dropdown on their AFLP sheet tab. Voices load from the free AFLP Soundpack module. (No audio plays until the soundpack is installed and a profile is assigned, so leaving this on is harmless if unconfigured.)",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: (v) => { if (v) aflpAudioNeedsSoundpack(true); },
+    });
+
+    game.settings.register(S.ID, S.KEYS.VOICE_FOLDER, {
+      name:    "Voice Profiles - Extra Custom Folder",
+      hint:    "Optional. The shipped soundpack's voice profiles load automatically from the AFLP Soundpack module (modules/aflp-soundpack/aflp-voices). Use this only to add your OWN extra profiles kept in a separate folder. Each subfolder is one profile, with per-event subfolders inside it: <Profile>/moan/1..6 (act vocalisation, 1 soft to 6 peak), plus <Profile>/climax, <Profile>/oral, <Profile>/struggle, <Profile>/cumflation, <Profile>/edge, <Profile>/defeated, <Profile>/mindbreak. A profile here with the same name as a bundled one overrides it.",
+      scope:   "world",
+      config:  true,
+      type:    String,
+      filePicker: "folder",
+      default: "",
+      onChange: () => window.AFLP_Voice?.scan?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.VOICE_VOLUME, {
+      name:    "Voice Profiles - Volume (my client)",
+      hint:    "Per-user playback volume for voice clips. 0 mutes them for you.",
+      scope:   "client",
+      config:  true,
+      type:    Number,
+      range:   { min: 0, max: 1, step: 0.05 },
+      default: 0.8,
+    });
+
+    game.settings.register(S.ID, S.KEYS.VOICE_MUTE_LOCAL, {
+      name:    "Voice Profiles - Mute On My Client",
+      hint:    "Per-user: silence all AFLP voice clips for yourself only.",
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      default: false,
+    });
+
+    game.settings.register(S.ID, S.KEYS.SFX_ENABLED, {
+      name:    "Ambient SFX - Enable",
+      hint:    "Layer generic activity sounds (plap for pussy/anal, gluk for oral, etc.) on top of voices, chosen by each actor's current H Scene position. These play even for actors with no voice profile. Files load from the AFLP Soundpack module at modules/aflp-soundpack/aflp-sfx.",
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: (v) => { window.AFLP_Voice?.scanSfx?.(); if (v) aflpAudioNeedsSoundpack(true); },
+    });
+
+    game.settings.register(S.ID, S.KEYS.SFX_VOLUME, {
+      name:    "Ambient SFX - Volume (my client)",
+      hint:    "Per-user playback volume for the ambient activity sounds. 0 mutes them for you.",
+      scope:   "client",
+      config:  true,
+      type:    Number,
+      range:   { min: 0, max: 1, step: 0.05 },
+      default: 0.7,
+    });
+
   },
 
   // ── Convenience getters ──────────────────────────────────────────────────
@@ -489,6 +702,19 @@ AFLP.Settings = {
   get cumflationMl()         { return AFLP.Settings.cumflationEnabled && game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUMFLATION_ML); },
   /** Apply cumflation tiers when cum macro fires */
   get cumflationInHscene()   { return AFLP.Settings.cumflationEnabled && game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUMFLATION_HSCENE); },
+  get splatterEnabled()      { return AFLP.Settings.cumflationEnabled && game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SPLATTER_ENABLED); },
+  get splatterIntensity()    { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SPLATTER_INTENSITY) ?? 1.0; },
+  get cardFontBoost()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CARD_FONT_BOOST) ?? false; },
+  get splatterIncludeNpc()   { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SPLATTER_INCLUDE_NPC) ?? true; },
+  get splatterColor()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SPLATTER_COLOR) ?? "#f2efe6"; },
+  get splatterHideLocal()    { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SPLATTER_HIDE_LOCAL) ?? false; },
+  get splatterQuality()      { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SPLATTER_QUALITY) ?? "medium"; },
+  get voiceEnabled()         { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.VOICE_ENABLED) === true; },
+  get voiceFolder()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.VOICE_FOLDER) ?? ""; },
+  get voiceVolume()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.VOICE_VOLUME) ?? 0.8; },
+  get voiceMuteLocal()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.VOICE_MUTE_LOCAL) ?? false; },
+  get sfxEnabled()           { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SFX_ENABLED) === true; },
+  get sfxVolume()            { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SFX_VOLUME) ?? 0.7; },
   get titlesAutomation()     { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.TITLES_AUTOMATION); },
   get titlesShow()           { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.TITLES_SHOW); },
   get edgeAuto()             { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.EDGE_AUTO); },

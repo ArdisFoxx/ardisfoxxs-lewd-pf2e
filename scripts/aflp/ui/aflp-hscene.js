@@ -24,14 +24,18 @@ AFLP.HScene = (() => {
   // ── Cumflation status word (for HUD display and sheet) ─────────────────────
   // Based on total tier sum across all holes (max 32).
   // Labels are configurable via Module Settings → Edit Cumflation Labels.
-  // CF_LABEL_DEFAULTS thresholds are per-hole tiers (highest single primary hole, 1-8 scale).
-  // Tier 5 means "facial 8 also at 8" for the top tier (checked separately in _cumflationWord).
+  // CF_LABEL_DEFAULTS thresholds are Overall cumflation tiers = floor((anal+oral+vaginal)/3), 1-8.
+  // minTier 9 is virtual: Overall tier 8 AND facial at 8 (checked separately in _cumflationWord).
   const CF_LABEL_DEFAULTS = [
-    { minTier: 2, word: "Oozing Out",         color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
-    { minTier: 4, word: "Stretched Belly",    color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
-    { minTier: 6, word: "Full Cum Bucket",    color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
-    { minTier: 8, word: "Public Cum Dump",    color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
-    { minTier: 9, word: "Splattered Cum Toilet", color: "rgba(255,40,60,1)",  glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
+    { minTier: 1, word: "Freshly Filled",       color: "rgba(190,180,110,0.9)", glow: "rgba(190,180,110,0.35)" },
+    { minTier: 2, word: "Oozing Out",           color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
+    { minTier: 3, word: "Sloshing Full",        color: "rgba(210,145,70,0.9)",  glow: "rgba(210,145,70,0.4)" },
+    { minTier: 4, word: "Stretched Belly",      color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
+    { minTier: 5, word: "Cum Bloated",          color: "rgba(220,110,90,0.92)", glow: "rgba(220,110,90,0.45)" },
+    { minTier: 6, word: "Full Cum Bucket",      color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
+    { minTier: 7, word: "Bred to the Hilt",     color: "rgba(225,75,100,0.97)", glow: "rgba(225,75,100,0.55)" },
+    { minTier: 8, word: "Public Cum Dump",      color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
+    { minTier: 9, word: "Splattered Cum Toilet", color: "rgba(255,40,60,1)",    glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
   ];
 
   // Expose the canonical label set so the Cumflation Status Labels settings menu
@@ -51,9 +55,9 @@ AFLP.HScene = (() => {
     } catch { return CF_LABEL_DEFAULTS; }
   }
 
-  // _cumflationWord: uses the Overall tier (average of 3 primary holes, floor, capped at 8)
-  // matching the "Total Cumflation" column in the CF Labels module settings editor.
-  // Tier 9 (virtual) = Overall tier 8 AND facial tier 8.
+  // _cumflationWord: uses the Overall tier = floor average of the three primary
+  // holes (anal/oral/vaginal), capped at 8, matching the mechanical Total Cumflation
+  // tier. Virtual tier 9 = Overall tier 8 AND facial tier 8.
   function _cumflationWord(cf) {
     if (!cf) return null;
     const anal    = cf.anal    ?? 0;
@@ -67,6 +71,25 @@ AFLP.HScene = (() => {
     const labels = _getCFLabels();
     const sorted = [...labels].sort((a, b) => b.minTier - a.minTier);
     return sorted.find(l => effectiveTier >= l.minTier) ?? null;
+  }
+
+  // Build, update, or remove the cumflation status pill within `host`.
+  // Both the displayed percentage and the word derive from the highest single
+  // primary hole, so they always agree. Used by every card theme that shows it.
+  function _renderCumflationStatus(host, cf) {
+    if (!host) return;
+    const existing = host.querySelector(".aflp-po-cumflation-status");
+    const word = _cumflationWord(cf);
+    if (!word) { if (existing) existing.remove(); return; }
+    const pct = Math.round(((cf?.anal ?? 0) + (cf?.oral ?? 0) + (cf?.vaginal ?? 0)) / (3 * 8) * 100);
+    const el = existing ?? document.createElement("div");
+    el.className = "aflp-po-cumflation-status";
+    el.textContent = `Cumflation ${pct}%: ${word.word}`;
+    el.style.color = word.color;
+    el.style.border = `1px solid ${word.glow}`;
+    el.style.background = word.glow.replace(/[\d.]+\)$/, "0.12)");
+    el.style.boxShadow = `0 0 8px ${word.glow}`;
+    if (!existing) host.appendChild(el);
   }
 
   AFLP.cumflationWord = function(actor) {
@@ -703,7 +726,7 @@ AFLP.HScene = (() => {
   // Flavour prose generator
   // Returns a string or null if flavor disabled.
   // -----------------------------------------------
-  function _generateProse(type, attackerActor, targetActor) {
+  function _generateProse(type, attackerActor, targetActor, position = null) {
     if (!AFLP.Settings.proseFlavor) return null;
 
     const attackerName = attackerActor?.name ?? "???";
@@ -760,6 +783,26 @@ AFLP.HScene = (() => {
     }
 
     if (type === "sexual-advance") {
+      // Position-accurate prose: use the chosen position's own log phrase from the
+      // schema registry so the narration matches the actual act (vaginal vs anal vs
+      // oral vs doggy vs facefuck, etc.) instead of guessing from genitalia.
+      const posDef = position ? (window.AFLP?.getPosition?.(position)) : null;
+      if (posDef?.logPhrase) {
+        const sp = { subject: "they", object: "them", possessive: "their", reflexive: "themselves" };
+        let phrase = null;
+        try { phrase = posDef.logPhrase(attackerName, targetName, sp); } catch (_) {}
+        if (phrase) {
+          const flourishes = [
+            ".",
+            ", drawing a helpless moan from them.",
+            ", slow and deliberate until they whimper.",
+            ", setting a relentless pace.",
+            ", coaxing a desperate sound free.",
+          ];
+          return phrase + flourishes[Math.floor(Math.random() * flourishes.length)];
+        }
+      }
+      // Fallback when no position is set: genitalia-based, plus generic.
       const lines = [];
 
       if (hasCock && targetHasPussy) {
@@ -1404,10 +1447,6 @@ AFLP.HScene = (() => {
         border-bottom: 1px solid rgba(200,50,80,0.25);
               display: flex; align-items: center; justify-content: flex-end;
       }
-      .aflp-theme-aflp-classic .aflp-scene-status-label {
-        color: rgba(220,100,130,0.9); text-shadow: 0 0 8px rgba(200,50,80,0.4);
-        letter-spacing: 0.2em;
-      }
       .aflp-theme-aflp-classic .aflp-card-btn {
         border-color: rgba(200,50,80,0.4); color: rgba(220,100,130,0.85);
         background: rgba(200,50,80,0.1);
@@ -1509,10 +1548,6 @@ AFLP.HScene = (() => {
         padding: 5px 8px; background: rgba(5,12,7,0.8);
         border-bottom: 1px solid rgba(30,80,40,0.35);
         display: flex; align-items: center; justify-content: flex-end;
-      }
-      .aflp-theme-dossier .aflp-scene-status-label {
-        color: rgba(80,180,80,0.85); font-family:'Courier New',monospace;
-        font-size: 11px; letter-spacing: 0.2em; text-shadow: 0 0 6px rgba(40,140,40,0.5);
       }
       .aflp-theme-dossier .aflp-card-btn {
         font-family: 'Courier New',monospace; font-size: 10px;
@@ -1721,9 +1756,81 @@ AFLP.HScene = (() => {
     _container.style.width = w + "px";
   }
 
+  // Coalesce bursts of refresh calls into a single rebuild. A single Sexual Advance
+  // fires several hooks (arousal on both actors, plus the condition creates) spread over
+  // ~140ms because the macro awaits between operations, so each one previously ran a full
+  // innerHTML portrait rebuild and the portraits strobed on every theme. We debounce per
+  // card (latest scene wins): a trailing wait longer than the observed max inter-rebuild
+  // gap (~80ms) collapses the whole burst into one rebuild, bounded by a max wait so a
+  // stream of updates cannot starve the render.
+  const _REFRESH_DEBOUNCE_MS = 150;
+  const _REFRESH_MAX_WAIT_MS = 400;
+  const _refreshQueue = new Map(); // card -> { scene, portraits, bars, timer, firstAt }
+  function _flushRefresh(card) {
+    const job = _refreshQueue.get(card);
+    if (!job) return;
+    _refreshQueue.delete(card);
+    if (job.timer) { clearTimeout(job.timer); job.timer = null; }
+    try {
+      if (job.portraits) _refreshPortraitsNow(card, job.scene);
+      if (job.bars)      _refreshArousalBarsNow(card, job.scene);
+    } catch (e) { console.error("AFLP | coalesced refresh failed", e); }
+  }
+  function _scheduleRefresh(card, scene, portraits, bars) {
+    if (!card) return;
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    let job = _refreshQueue.get(card);
+    if (!job) {
+      job = { scene, portraits, bars, timer: null, firstAt: now };
+      _refreshQueue.set(card, job);
+    } else {
+      job.scene = scene;
+      job.portraits = job.portraits || portraits;
+      job.bars      = job.bars      || bars;
+    }
+    if (job.timer) clearTimeout(job.timer);
+    const wait = Math.min(_REFRESH_DEBOUNCE_MS, Math.max(0, _REFRESH_MAX_WAIT_MS - (now - job.firstAt)));
+    job.timer = setTimeout(() => _flushRefresh(card), wait);
+  }
+  function _refreshPortraits(card, scene)  { _scheduleRefresh(card, scene, true,  false); }
+  function _refreshArousalBars(card, scene) { _scheduleRefresh(card, scene, false, true); }
+
   // -----------------------------------------------
   // ─── Lewd Lite renderer ─ PF2e-style combatant tracker rows ─────────
-  function _refreshPortraits(card, scene) {
+  // Font scaling for the H scene card: AFLP Classic gets a baseline +2pt bump, plus
+  // the "Card Font Boost" setting (+N applied to every theme). Implemented by walking
+  // the freshly-rendered card and nudging inline px font sizes only - layout/sizing is
+  // untouched, and because each refresh rebuilds from base sizes the boost never
+  // compounds. Small fonts get a larger relative lift than already-large ones.
+  function _cardFontOffset(scene) {
+    const base  = _effectiveTheme(scene) === "aflp-classic" ? 1 : 0;   // Classic baseline +1
+    const boost = AFLP.Settings?.cardFontBoost ? 2 : 0;   // flat +2 toggle
+    return base + boost;
+  }
+  // Boost every text element in the card by `offset` px. Reads the COMPUTED size so
+  // both inline styles AND module.css class rules scale. The base size is stored on
+  // each element, so all reads use the base (inherited sizes aren't double-counted)
+  // and a re-boost after a partial refresh is safe. Each full refresh rebuilds from
+  // base, so the boost never compounds; layout/card sizing is untouched.
+  function _boostCardFonts(card, offset) {
+    if (!offset || !card?.querySelectorAll) return;
+    const els = [...card.querySelectorAll("*")];
+    const base = els.map(el => {
+      const stored = el.dataset ? el.dataset.aflpFsBase : null;
+      if (stored != null) return parseFloat(stored);
+      try { return parseFloat(getComputedStyle(el).fontSize); } catch (_) { return NaN; }
+    });
+    els.forEach((el, i) => {
+      if (isNaN(base[i])) return;
+      if (el.dataset) el.dataset.aflpFsBase = String(base[i]);
+      el.style.fontSize = (base[i] + offset) + "px";
+    });
+  }
+  function _refreshPortraitsNow(card, scene) {
+    _refreshPortraitsRender(card, scene);
+    try { _boostCardFonts(card, _cardFontOffset(scene)); } catch (_) {}
+  }
+  function _refreshPortraitsRender(card, scene) {
     const theme = _effectiveTheme(scene);
     if (theme === "status-strip")  { _refreshPortraits_StatusStrip(card, scene); return; }
     if (theme === "aflp-classic")  { _refreshPortraits_AflpClassic(card, scene); return; }
@@ -2353,31 +2460,10 @@ AFLP.HScene = (() => {
 
     // Cumflation status word on the receiver
     if (tgtActor) {
-      const cf = tgtActor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {};
-      const cfWord = _cumflationWord(cf);
-      const existingStatus = tgtDiv.querySelector(".aflp-po-cumflation-status");
-      if (cfWord) {
-        const cfPctNew = Math.round(((cf.anal??0) + (cf.oral??0) + (cf.vaginal??0)) / (3 * 8) * 100);
-        if (existingStatus) {
-          existingStatus.textContent = `Cumflation ${cfPctNew}%: ${cfWord.word}`;
-          existingStatus.style.color = cfWord.color;
-          existingStatus.style.border = `1px solid ${cfWord.glow}`;
-          existingStatus.style.background = cfWord.glow.replace(/[\d.]+\)$/, "0.12)");
-          existingStatus.style.boxShadow = `0 0 8px ${cfWord.glow}`;
-        } else {
-          const statusEl = document.createElement("div");
-          statusEl.className = "aflp-po-cumflation-status";
-          statusEl.textContent = `Cumflation ${cfPctNew}%: ${cfWord.word}`;
-          statusEl.style.color = cfWord.color;
-          statusEl.style.border = `1px solid ${cfWord.glow}`;
-          statusEl.style.background = cfWord.glow.replace(/[\d.]+\)$/, "0.12)");
-          statusEl.style.boxShadow = `0 0 8px ${cfWord.glow}`;
-          const infoDiv = tgtDiv.querySelector(".aflp-po-bottom-info");
-          if (infoDiv) infoDiv.appendChild(statusEl);
-        }
-      } else if (existingStatus) {
-        existingStatus.remove();
-      }
+      _renderCumflationStatus(
+        tgtDiv.querySelector(".aflp-po-bottom-info"),
+        tgtActor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {}
+      );
     }
   }
 
@@ -2434,6 +2520,8 @@ AFLP.HScene = (() => {
           });
         }
       }
+      const mActor = _resolveActor({ id: p.tokenId, actorId: p.actorId });
+      if (mActor) _renderCumflationStatus(side, mActor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {});
       row.appendChild(side);
 
       if (i === 0) {
@@ -2591,6 +2679,11 @@ AFLP.HScene = (() => {
       const ce = _buildCumEdgeButtons(scene, participant.tokenId, participant.actorId ?? participant.tokenId, "block");
       if (ce) row.querySelector(".aflp-do-info")?.appendChild(ce);
 
+      // Cumflation status pill on receivers (directed target + entangled members)
+      if (o.isReceiver ?? o.isTgt) {
+        _renderCumflationStatus(row.querySelector(".aflp-do-info"), actor?.getFlag?.(FLAG, "cumflation") ?? {});
+      }
+
       if (!o.isTgt && game.user.isGM) {
         const leaveBtn = document.createElement("div");
         leaveBtn.className = "aflp-leave-btn";
@@ -2620,7 +2713,7 @@ AFLP.HScene = (() => {
       focus.members.forEach((m, i) => {
         wrap.appendChild(subjectRow(m, {
           idLabel: `SUBJECT ${ALPHA[i] ?? `UNIT-${i}`} — ENTANGLED`,
-          isTgt: false, stampText: "ENTANGLED", stampCls: "dom",
+          isTgt: false, isReceiver: true, stampText: "ENTANGLED", stampCls: "dom",
           statusText: posLabel(m.position) ?? "Position: unassigned",
           recvId: null,
         }));
@@ -3232,7 +3325,7 @@ AFLP.HScene = (() => {
   // -----------------------------------------------
   // Render arousal bars
   // -----------------------------------------------
-  function _refreshArousalBars(card, scene) {
+  function _refreshArousalBarsNow(card, scene) {
     const area = card.querySelector(".aflp-card-arousal-bars");
     if (!area) return;
 
@@ -3363,7 +3456,7 @@ AFLP.HScene = (() => {
     if (isPorno) {
       // AFLP Classic: update cumflation status chip live
       const cfEl2 = card.querySelector(".aflp-po-cumflation-status");
-      if (cfEl2) {
+      if (cfEl2 && card.querySelectorAll(".aflp-po-cumflation-status").length === 1) {
         const cfAct = _resolveActor({id:scene.targetId,actorId:scene.targetActorId});
         const cfF   = cfAct?.getFlag?.(AFLP.FLAG_SCOPE,"cumflation") ?? {};
         const cfw   = _cumflationWord(cfF);
@@ -3436,6 +3529,9 @@ AFLP.HScene = (() => {
         if (vals[1])  vals[1].textContent = atkArCur + "/" + atkArMax;
       }
     }
+    // Keep CSS-styled bar text boosted after a partial refresh. Whole-card re-boost is
+    // safe here: each element's base size is stored, so this can't compound.
+    try { _boostCardFonts(card, _cardFontOffset(scene)); } catch (_) {}
   }
 
   // -----------------------------------------------
@@ -3629,6 +3725,9 @@ AFLP.HScene = (() => {
       }
       if (data.type === "hscene-shake") {
         AFLP.HScene.triggerShake(data.actorId);
+      }
+      if (data.type === "token-shake") {
+        AFLP.HScene.shakeToken(data.actorId, data.level, true);
       }
       if (data.type === "hscene-arousal-refresh") {
         AFLP.HScene.refreshArousalBars(data.targetId);
@@ -4030,6 +4129,37 @@ AFLP.HScene = (() => {
     // projected legacy view reproduce the real target. See the comment block
     // on _projectTarget. Inserting attacker-first here silently flips the
     // projected target in every 1v1 and breaks the legacy renderers.
+    // Current H-scene position slug for an actor (or null). Used by the voice
+    // layer to pick an activity-appropriate ambient SFX. Returns the first
+    // participant entry with a position across all live scenes.
+    positionForActor(actorId) {
+      if (!actorId) return null;
+      for (const scene of _scenes.values()) {
+        const p = (scene.participants ?? []).find(x => x && x.actorId === actorId && x.position);
+        if (p) return p.position;
+      }
+      return null;
+    },
+
+    // The hole this actor is currently RECEIVING in (a partner is performing a
+    // positioned act on them), or null. Used to route oral receiver VO. Looks for
+    // a performer whose partner is this actor and returns that position's hole.
+    receivedHoleForActor(actorId) {
+      if (!actorId) return null;
+      for (const scene of _scenes.values()) {
+        const parts = scene.participants ?? [];
+        for (const perf of parts) {
+          if (!perf.position || !perf.partnerId) continue;
+          const recv = parts.find(x => x.tokenId === perf.partnerId);
+          if (recv && recv.actorId === actorId) {
+            const hole = window.AFLP?.getPosition?.(perf.position)?.hole;
+            if (hole) return hole;
+          }
+        }
+      }
+      return null;
+    },
+
     startScene(attacker, target, fromSocket = false) {
       if (!AFLP.Settings.hsceneEnabled) return;
       _ensureContainer();
@@ -4292,13 +4422,19 @@ AFLP.HScene = (() => {
 
     // Generate and show flavour prose for an action
     generateAndShowProse(targetId, actionType, attackerActor, targetActor) {
-      const prose = _generateProse(actionType, attackerActor, targetActor);
+      let position = null;
+      if (actionType === "sexual-advance") {
+        const scene = _sceneByAnyId(targetId);
+        const parts = (scene?.participants ?? []).filter(p => p && p.actorId === attackerActor?.id && p.position);
+        position = (parts.find(p => p.partnerId === targetId) ?? parts[0])?.position ?? null;
+      }
+      const prose = _generateProse(actionType, attackerActor, targetActor, position);
       if (prose) this.addProse(targetId, prose, "flavor");
     },
 
     // Exposed for external callers (e.g. SA macro for masturbation prose)
-    _generateProse(type, attackerActor, targetActor) {
-      return _generateProse(type, attackerActor, targetActor);
+    _generateProse(type, attackerActor, targetActor, position = null) {
+      return _generateProse(type, attackerActor, targetActor, position);
     },
 
     // Shake the portrait of a specific actor across all cards
@@ -4334,6 +4470,45 @@ AFLP.HScene = (() => {
         game.socket.emit("module.ardisfoxxs-lewd-pf2e", {
           type: "hscene-shake", actorId
         });
+      }
+    },
+
+    // Subtle cosmetic shake of the token SPRITE on the canvas (cumflation feedback).
+    // Animates the visual mesh only - no document move, no DB write - and restores
+    // the exact position, so a later refresh can't leave it off-center. Broadcast so
+    // every client runs the wobble locally. level: base < tier < holemax < max8.
+    shakeToken(actorId, level = "base", fromSocket = false) {
+      const PRESET = {
+        base:    { amp: 0.05, dur: 280, freq: 9  },
+        tier:    { amp: 0.09, dur: 340, freq: 10 },
+        holemax: { amp: 0.14, dur: 430, freq: 11 },
+        max8:    { amp: 0.20, dur: 540, freq: 12 },
+      };
+      const p = PRESET[level] || PRESET.base;
+      try {
+        const ticker = canvas?.app?.ticker;
+        const g = canvas?.grid?.size || 100;
+        const amp = p.amp * g;
+        if (ticker) for (const token of (canvas?.tokens?.placeables ?? [])) {
+          if (token.actor?.id !== actorId || !token.mesh) continue;
+          const mesh = token.mesh;
+          // Cancel any in-flight shake on this token first so the base capture is clean.
+          if (token._aflpShake) { ticker.remove(token._aflpShake.fn); mesh.position.set(token._aflpShake.bx, token._aflpShake.by); token._aflpShake = null; }
+          const bx = mesh.position.x, by = mesh.position.y;
+          const start = performance.now();
+          const fn = () => {
+            const t = (performance.now() - start) / p.dur;
+            if (t >= 1) { mesh.position.set(bx, by); ticker.remove(fn); token._aflpShake = null; return; }
+            const decay = 1 - t;
+            const a = t * (p.dur / 1000) * p.freq * 2 * Math.PI;
+            mesh.position.set(bx + Math.sin(a) * amp * decay, by + Math.sin(a * 1.7) * amp * 0.35 * decay);
+          };
+          token._aflpShake = { fn, bx, by };
+          ticker.add(fn);
+        }
+      } catch (_) {}
+      if (!fromSocket && game.user.isGM) {
+        game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type: "token-shake", actorId, level });
       }
     },
 
@@ -4521,7 +4696,10 @@ AFLP.HScene = (() => {
       const edged = await AFLP.Kinks?.buttonEdge?.(actor, pending.tokenId, {
         isMasturbation: pending.isMasturbation,
       });
-      if (!edged) {
+      if (edged) {
+        // Climax held back — the denied/frustrated voice.
+        window.AFLP?.Voice?.play?.("edge", actor);
+      } else {
         // Edge failed — cum proceeds.
         await AFLP_Arousal._onArousalMax(actor, pending.tokenId, { forceResolve: true });
       }
@@ -4958,6 +5136,8 @@ AFLP.HScene = (() => {
           : phrase;
         AFLP.HScene.addProse(scene.id, logText, "action");
         atkData._prevPosition = positionId;
+        // Receiver vocalizes in response to a repositioning (new hole / new sensation).
+        if (isChange && targetActor) window.AFLP?.Voice?.reactPosition?.(targetActor);
       }
 
       // Refresh the card so portraits + pills update
@@ -5261,6 +5441,10 @@ AFLP.HScene = (() => {
             const phrase = posEntry.logPhrase?.(targetSlot.name, recvName, tgtPronouns);
             if (phrase) AFLP.HScene.addProse(recvId, phrase, "action");
           }
+          // Receiver reacts to the reposition (group context -> higher intensity).
+          if (prevPos && prevPos !== result.posId && tgtActor) {
+            window.AFLP?.Voice?.reactPosition?.(tgtActor, { intense: true });
+          }
         }
         return;
       }
@@ -5281,6 +5465,7 @@ AFLP.HScene = (() => {
         }
 
         // Apply slot assignments
+        let anyRepositioned = false;
         for (let i = 0; i < slotOrder.length; i++) {
           const atk  = slotOrder[i];
           // Train/Bukakke presets have only 1 slot - all attackers share it
@@ -5288,12 +5473,18 @@ AFLP.HScene = (() => {
             ? preset.slots[0]
             : (preset.slots[i] ?? preset.slots[preset.slots.length - 1]);
           if (!slot) continue;
+          if (atk.position && atk.position !== slot.position) anyRepositioned = true;
           atk.position      = slot.position;
           atk._prevPosition = slot.position;
         }
         _saveSceneState();
         const card = _cardFor(scene);
         if (card) { _refreshPortraits(card, scene); _refreshArousalBars(card, scene); }
+        // One coalesced higher-intensity moan for the shared receiver, regardless of
+        // how many performers repositioned - prevents overlapping/piled-up moans.
+        if (anyRepositioned && tgtActor) {
+          window.AFLP?.Voice?.reactPosition?.(tgtActor, { intense: true });
+        }
 
         // Chat card
         const slotDesc = slotOrder.map((atk, i) => {

@@ -520,10 +520,6 @@
     // Apply cumflation (gated by setting)
     if (AFLP.Settings.cumflationInHscene) {
       AFLP_Cumflation.applyCumflation(targetActor, cumFlags, cumOverflow, sexualStatsDialog, [hole], cumUnitsSpent, sourceActor.name);
-      // Track load in H scene stats
-      if (AFLP.HScene?.incrementSceneLoads) {
-        AFLP.HScene.incrementSceneLoads(targetActor.id, sourceActor.id, hole);
-      }
       // Alcumist Dedication: auto-grant a typed Vial of Cum to the cumflated actor
       if (window.AFLP_Alcumist) {
         AFLP_Alcumist.onCumflation(targetActor, sourceActor).catch(e => console.warn("AFLP | Alcumist vial grant failed:", e));

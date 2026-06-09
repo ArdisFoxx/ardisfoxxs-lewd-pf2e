@@ -446,6 +446,8 @@ window.AFLP_Arousal = {
         window._aflpPendingCum.delete(sceneKey);
         // Designate the first actor as macro runner so only one macro fires.
         window._aflpCumMacroActor = partner.id;
+        AFLP.Voice?.play?.("climax", actor);
+        try { const _vp = game.actors.get(partner.id); if (_vp) AFLP.Voice?.play?.("climax", _vp); } catch (_) {}
 
         const combinedLines = [
           `<p>Both <strong>${partner.name}</strong> and <strong>${actor.name}</strong> reach their peak at the same time  -  a shuddering, breathless climax that leaves them tangled and trembling.</p>`,
@@ -471,6 +473,7 @@ window.AFLP_Arousal = {
           window._aflpPendingCum.delete(sceneKey);
           // Mark this actor as the macro runner for this cum event
           window._aflpCumMacroActor = actor.id;
+          AFLP.Voice?.play?.("climax", actor);
 
           if (actorHasCock) {
             const soloLines = [

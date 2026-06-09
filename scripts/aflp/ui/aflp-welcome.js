@@ -5,7 +5,7 @@
 // "Don't show again" unchecks the setting for this client.
 // A new version automatically re-enables the setting for all users (via flag check).
 
-const AFLP_WELCOME_VERSION = "6.2.1";
+const AFLP_WELCOME_VERSION = "7.0.0";
 const AFLP_WELCOME_FLAG    = `aflp-welcome-seen-${AFLP_WELCOME_VERSION}`;
 
 Hooks.once("ready", async () => {
@@ -26,6 +26,7 @@ Hooks.once("ready", async () => {
 
 async function aflpShowWelcome() {
   const S = AFLP.Settings;
+  const spURL = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
 
   const s = {
     wrap:    'font-family: "Helvetica Neue", Arial, sans-serif; width: 100%; color: #ddd;',
@@ -46,71 +47,43 @@ async function aflpShowWelcome() {
          style="width:100%; max-height:130px; object-fit:cover; border-radius:6px; border:1px solid #c9a96e;" alt="AFLP"/>
   </div>
 
-  <h2 style="${s.h2}">What's New in AFLP 6.2.1</h2>
+  <h2 style="${s.h2}">What's New in AFLP 7.0.0</h2>
 
   <div style="${s.group}">
-    <div style="${s.label}">H Scene Card - Multi-Pairing</div>
+    <div style="${s.label}">Cumflation Visuals</div>
     <ul style="${s.ul}">
-      <li><strong>Every pairing tracked separately</strong> - The H scene card now follows who is actually paired with whom on the battlemap. Multiple couples, full gangbangs, and reversals all display correctly at the same time instead of being lumped under one target.</li>
-      <li><strong>Personal focus</strong> - Your card focuses the pairing that matters to you, with your own character highlighted. Every other pairing shows as a compact Nearby block - click its Focus control to bring it front and centre on your own card.</li>
-      <li><strong>Partner-aware everywhere</strong> - Position prompts, hole tracking, and flavour text all follow the correct partner, even with several pairs going at once.</li>
-      <li><strong>Entangled pairs</strong> - Mutual pairings show both sides as equals, each with their own position picker and controls.</li>
+      <li><strong>Tokens get coated</strong> - As a target fills up, a procedural, asset-free cum layer builds up on their token and escalates through the cumflation tiers. No image packs to install - it is rendered live, with glossy speckles, a light-facing sheen, and gravity-aware dripping.</li>
+      <li><strong>Ground puddles</strong> - Cum pools beneath heavily-filled tokens on the battlemap. Puddles are saved per scene, so they survive reloads and are visible to the whole table.</li>
+      <li><strong>Cum-shake feedback</strong> - Each load gives the token an escalating shake, from a small twitch to a hard jolt when a hole maxes out or the whole body reaches tier 8.</li>
+      <li><strong>Tune it to taste</strong> - Module Settings expose intensity, colour, render quality (low / medium / high for performance), whether NPCs are coated, and a per-client toggle to hide the effect on your own screen.</li>
     </ul>
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">Position Dialog - Full Rearchitecture</div>
+    <div style="${s.label}">Voice &amp; Sound</div>
     <ul style="${s.ul}">
-      <li><strong>Unified group position picker</strong> - When starting or joining an H scene, a single dialog now shows all valid sexual positions for the current group rather than each top choosing a hole or action.</li>
-      <li><strong>2p categorised picker</strong> - Solo scenes (one top, one bottom) keep the familiar Vaginal / Anal / Oral / Foreplay / Toy category layout, now with full descriptions on every position.</li>
-      <li><strong>3p+ group picker</strong> - When a second or third top joins, a Group Positions section appears at the top of the dialog with all presets valid for the current number of tops. Selecting a preset assigns everyone's position simultaneously.</li>
-      <li><strong>17 group presets</strong> - Spitroast (Anal/Pussy), Double Penetration, Double Vaginal (DVP), Double Anal - Cowgirl, Double Anal - Piledrive, Missionary + Oral, Missionary Anal + Oral, Airtight, Pile On, Train (Pussy/Anal/Oral), Bukakke, and more. Each is filtered by actor count and whether the target has a pussy.</li>
-      <li><strong>Slot assignment confirmation</strong> - When a group preset is selected, the GM sees a confirmation dialog assigning each top to their position, with selects to swap who goes where before applying, so when you Spitroast you can decide which top goes where. In the module settings you can enable position auto-assign if you want to skip this confirmation and just put tops in a default order.</li>
-      <li><strong>59 named positions with descriptions</strong> - Every position in the picker shows a one-line description to help players understand what they're choosing, such as <strong>Doggy Piledrive</strong>, a steep above-angle anal position valid for both bipeds and quadrupeds.</li>
-      <li><strong>Creature type awareness</strong> - The picker automatically filters positions to only show what's physically viable for the top's body type. Bipeds see their full range; quadrupeds see mounted positions; tentacled creatures see tentacle fills; incorporeal creatures see their unique phasing positions.</li>
+      <li><strong>Per-actor voices</strong> - Assign a voice profile to any actor from their AFLP sheet. They moan in escalating tiers as arousal climbs, and react on climax, oral, struggle, cumflation, edge, defeated, and mind break.</li>
+      <li><strong>Position-aware SFX</strong> - Activity sound effects follow each actor's current position - plaps for vaginal and anal, gluk for oral, wet slides - and a wet slosh fires when a hole is filled to the brim.</li>
+      <li><strong>Keyed to the receiver</strong> - Sounds are timed and sized to the bottom's own vocalisation, so plaps fill their moan instead of running off a performer's timing, and every actor's audio stays independent in a busy scene.</li>
+      <li><strong>Controls</strong> - Enable voices and ambient SFX independently, set volumes, and mute audio on just your own client. No audio plays until a profile is assigned, so leaving it on is harmless if unconfigured.</li>
     </ul>
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">Consensual vs Non-Consensual Scene Indicators</div>
+    <div style="${s.label}">AFLP Soundpack - Free Companion Module</div>
     <ul style="${s.ul}">
-      <li><strong>Role selection on scene start</strong> - When an H scene begins, the GM is prompted: Attacker is Dominating, Target is Dominating, or <em>No one is Dominating (Consensual Sex)</em>. The third option starts the scene with no Dominating or Submitting conditions applied.</li>
-      <li><strong>Visual mode banner</strong> - The H scene card header now shows either <strong>💗 Consensual H Scene in Progress</strong> or <strong>🔒 Noncon H Scene in Progress</strong> at all times, making the nature of the scene immediately visible to the whole table.</li>
-      <li><strong>Equal control in consensual scenes</strong> - In a consensual scene, any participant's owner can click their own hole chips and position label, not just the GM. In non-consensual scenes, only the Dominating attacker's owner and the GM have control.</li>
-      <li><strong>Concurrent pairings (voyeur-friendly)</strong> - Every pairing on the battlemap is tracked independently, so your card can focus one pairing while others (your partner with someone else, the rest of the room) play out live as Nearby blocks you can tap to follow.</li>
+      <li><strong>Ships separately, free</strong> - The voice and SFX audio lives in its own module, the <strong>AFLP Soundpack</strong>, so the main download stays small. It is a free download: install and enable it alongside AFLP to turn audio on. AFLP works fine without it.</li>
+      <li><strong>What is inside</strong> - 44 voice profiles plus a categorised ambient-SFX library, auto-detected by AFLP once enabled (no path setup). You can also point AFLP at your own extra folder to add custom profiles.</li>
+      <li><strong>Credits</strong> - All audio is from the <strong>OpenNSFW Sound Pack</strong>, licensed CC BY 4.0. Full contributor credits ship with the soundpack; please contact @OpenNSFWSP rather than individual contributors.</li>
     </ul>
+    ${spURL ? `<div style="text-align:center; margin:8px 0 2px;"><a href="${spURL}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; font-size:12px; border-radius:5px; text-decoration:none; letter-spacing:0.3px;">Download the AFLP Soundpack</a><div style="font-size:10px; opacity:0.7; margin-top:5px;">Unzip into your Foundry Data/modules folder, restart Foundry, and enable it.</div></div>` : ``}
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">Custom Positions</div>
+    <div style="${s.label}">Also in 7.0</div>
     <ul style="${s.ul}">
-      <li><strong>Manage Custom Positions</strong> - A new button in Module Settings opens a position manager where GMs can add their own positions to the picker. Individual (2p) positions specify hole and creature type; Group positions define actor count and per-slot hole assignments.</li>
-      <li>Custom positions are saved as world data and appear immediately alongside built-in options without a restart.</li>
-    </ul>
-  </div>
-
-  <div style="${s.group}">
-    <div style="${s.label}">H Scene UI Themes</div>
-    <ul style="${s.ul}">
-      <li><strong>Five themes</strong> - Lewd Lite, Status Strip, AFLP Classic, Dossier File, and Fuck a Mon'. All are built on the multi-pairing card above and are selectable from the dropdown on any H scene card.</li>
-      <li><strong>Lewd Lite</strong> - Replaces the old Combat UI theme. A clean PF2e-native tracker style for Lewd 1-3. Target row at top, attackers listed below, PF2e-style arousal bar with green/amber/red colouring. No cum tracking - appropriate for games where cumflation isn't active.</li>
-      <li><strong>Fuck a Mon' UI</strong> - A new Pokemon-inspired theme for scenes where a monster is the target. Features a battlefield sky-and-grass backdrop, the monster's portrait in a yellow circle, "Gotta Fuck 'Em All!" tagline, a <strong>CUM bar</strong> instead of arousal (showing the monster's current/max cum volume in mL), and a "TRAINERS IN BATTLE" party panel listing all the PCs and their current positions as moves. Drain the monster's cum and capture it! It's super effective!</li>
-      <li><strong>Automatic theme switching</strong> - In Module Settings, the GM can set a default theme for PC/NPC scenes and a separate default for monster scenes. When a PC or NPC is the target, it uses the PC/NPC default. When a monster becomes the target, the card automatically switches to the monster theme. The default settings are AFLP Classic / Fuck a Mon'.</li>
-      <li><strong>Player theme control</strong> - With "Allow Players to Choose Their Own UI" enabled (the default), each player can change the theme on their own card. When the GM disables this, all players switch to the GM's default and the dropdown on the card is grayed out.</li>
-    </ul>
-  </div>
-
-  <div style="${s.group}">
-    <div style="${s.label}">Struggle Escape</div>
-    <ul style="${s.ul}">
-      <li><strong>Escape and reversal action</strong> - When an actor with Submitting runs the Struggle Snuggle macro inside an active H scene, it enters Escape Mode. Skill check options and DCs are described in the compendium item. A Critical Success against a single Dominator offers a Reversal, which flips just that pairing and hands control to the escapee while the rest of the scene continues uninterrupted.</li>
-    </ul>
-  </div>
-
-  <div style="${s.group}">
-    <div style="${s.label}">Fixes</div>
-    <ul style="${s.ul}">
-      <li>Various fixes and polish across the H scene card, positions, and scene persistence.</li>
+      <li>Cumflation status labels now also appear in the Classic entangled and Dossier layouts, and begin one tier earlier.</li>
+      <li>Assorted fixes and polish across the H scene card, cumflation, and audio.</li>
     </ul>
   </div>
 
@@ -296,22 +269,22 @@ async function aflpShowSessionZero() {
     {
       level: 1, name: "Lewd Level 1: Typical Anime", color: "#8aca8e",
       desc: "You're strictly about the adventure. No H Scenes, no Arousal system. Sexual items and spells exist but only in self-affecting forms. Monsters will not engage sexually. H Scene UI not applicable.",
-      settings: { automation: false, hscene: false, positionTracking: false, proseFlavor: false, hsceneLogToChat: false, cumVolumeMode: "fantasy", cumflation: false, cumflationHscene: false, edgeAuto: false, edgeSkip: false, edgeNpc: false, titles: false, titlesShow: false },
+      settings: { automation: false, hscene: false, positionTracking: false, proseFlavor: false, hsceneLogToChat: false, cumVolumeMode: "fantasy", cumflation: false, cumflationHscene: false, edgeAuto: false, edgeSkip: false, edgeNpc: false, titles: false, titlesShow: false, splatterNpc: true },
     },
     {
       level: 2, name: "Lewd Level 2: The Witcher III", color: "#c9a96e",
       desc: "Humanoids may have consensual sex with you. Monsters will not. H Scenes are tracked with prose. The Arousal Points system is active but Edge and cumflation are off. Uses the <strong>Lewd Lite</strong> scene UI - a clean PF2e-native tracker style with just Arousal tracking.",
-      settings: { automation: false, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: false, cumflationHscene: false, edgeAuto: false, edgeSkip: false, edgeNpc: false, titles: true, titlesShow: true },
+      settings: { automation: false, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: false, cumflationHscene: false, edgeAuto: false, edgeSkip: false, edgeNpc: false, titles: true, titlesShow: true, splatterNpc: true },
     },
     {
       level: 3, name: "Lewd Level 3: Skyrim with Sexy Mods", color: "#e07090",
       desc: "The full Arousal system is introduced. Kinks, cumflation, and Edge automation all become active. Magic spells may sexually affect you in combat, but physical sex remains consensual and monsters still won't physically engage. Uses the <strong>Lewd Lite</strong> scene UI.",
-      settings: { automation: true, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: true, cumflationHscene: true, edgeAuto: true, edgeSkip: false, edgeNpc: true, titles: true, titlesShow: true },
+      settings: { automation: true, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: true, cumflationHscene: true, edgeAuto: true, edgeSkip: false, edgeNpc: true, titles: true, titlesShow: true, splatterNpc: true },
     },
     {
       level: 4, name: "Lewd Level 4: Skyrim with Defeat Mods", color: "#c060c0",
-      desc: "Monsters may physically have sex with you in combat. Sexual defeat becomes part of the game. NPC Edge automation on, Edge rolls without prompting. Full automation, no brakes. Uses <strong>AFLP Classic</strong> scene UI for PC/NPC scenes and <strong>Fuck a Mon'</strong> for monster targets.",
-      settings: { automation: true, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: true, cumflationHscene: true, edgeAuto: true, edgeSkip: false, edgeNpc: true, titles: true, titlesShow: true },
+      desc: "Monsters may physically have sex with you in combat. Sexual defeat becomes part of the game. NPC Edge automation on; Edge is offered on cum (Cum and Edge buttons) rather than auto-rolled. Full automation. Uses <strong>AFLP Classic</strong> scene UI for PC/NPC scenes and <strong>Fuck a Mon'</strong> for monster targets.",
+      settings: { automation: true, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: true, cumflationHscene: true, edgeAuto: true, edgeSkip: false, edgeNpc: true, titles: true, titlesShow: true, splatterNpc: true },
     },
   ];
 
@@ -372,6 +345,7 @@ async function aflpShowSessionZero() {
           await game.settings.set(ID, S.KEYS.EDGE_INCLUDE_NPC,    lvl.settings.edgeNpc);
           await game.settings.set(ID, S.KEYS.TITLES_AUTOMATION,   lvl.settings.titles);
           await game.settings.set(ID, S.KEYS.TITLES_SHOW,         lvl.settings.titlesShow);
+          await game.settings.set(ID, S.KEYS.SPLATTER_INCLUDE_NPC, lvl.settings.splatterNpc);
 
           // Set H scene UI defaults based on lewd level
           // Lewd 1-3: Lewd Lite for PC/NPC scenes (no cumflation UI needed)

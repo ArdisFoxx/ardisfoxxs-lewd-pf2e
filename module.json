@@ -1,6 +1,7 @@
 {
   "id": "ardisfoxxs-lewd-pf2e",
   "title": "ArdisFoxx's Lewd PF2e",
+  "description": "A complete adult-content (18+) expansion for Pathfinder 2e on Foundry VTT: an Arousal / Horny / Denied system with Edge automation and cumflation, a live multi-pairing H Scene tracker with five card themes, a levelled kink system with automated effects, 80+ adult magic items, custom conditions, 70+ actions and spells, lewd monsters, Session Zero lewd-level calibration, optional voice and ambient-SFX audio (via the AFLP Soundpack module), and Lovense toy integration. Audio (via the AFLP Soundpack): OpenNSFW Sound Pack, licensed under CC BY 4.0 - always credited as an SFX pack; please contact @OpenNSFWSP rather than individual contributors. Full contributor credits ship with the AFLP Soundpack.",
   "version": "#{VERSION}#",
   "compatibility": {
     "minimum": "13",
@@ -32,6 +33,13 @@
         "id": "socketlib",
         "type": "module",
         "manifest": "https://raw.githubusercontent.com/manuelVo/foundryvtt-socketlib/master/module.json"
+      }
+    ],
+    "recommends": [
+      {
+        "id": "aflp-soundpack",
+        "type": "module",
+        "reason": "Bundled voice profiles and ambient SFX for the H Scene voice engine. Without it, the Voice and Ambient SFX features have no audio to play."
       }
     ]
   },

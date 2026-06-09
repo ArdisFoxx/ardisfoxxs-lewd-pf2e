@@ -83,17 +83,26 @@ Hooks.once("setup", () => {
 Hooks.once("ready", async () => {
   if (!window.AFLP) return;
 
-  await import("./ui/sexual-stats-dialog.js");
-  await import("./ui/cumflation.js");
-  await import("./ui/sheet-tab.js");
-  await import("./ui/aflp-hscene.js");
-  await import("./ui/aflp-arousal.js");
-  await import("./ui/aflp-titles.js");
-  await import("./ui/aflp-messages.js");
-  await import("./ui/aflp-kinks.js");
-  await import("./ui/aflp-bitchsuit.js");
-  await import("./ui/aflp-sentient-items.js");
-  await import("./ui/aflp-alcumist.js");
+  // Cache-bust dynamic imports by module version. Browsers cache import() URLs
+  // and will not re-fetch an unchanged URL across reloads, so without this an
+  // updated UI script keeps running the stale cached copy until the version
+  // bumps. (During active development, also keep DevTools > Network > "Disable
+  // cache" checked, since same-version edits won't change this query.)
+  const _v = "?v=" + (game.modules.get("ardisfoxxs-lewd-pf2e")?.version ?? Date.now());
+
+  await import("./ui/sexual-stats-dialog.js" + _v);
+  await import("./ui/cumflation.js" + _v);
+  await import("./ui/sheet-tab.js" + _v);
+  await import("./ui/aflp-hscene.js" + _v);
+  await import("./ui/aflp-arousal.js" + _v);
+  await import("./ui/aflp-titles.js" + _v);
+  await import("./ui/aflp-messages.js" + _v);
+  await import("./ui/aflp-kinks.js" + _v);
+  await import("./ui/aflp-bitchsuit.js" + _v);
+  await import("./ui/aflp-sentient-items.js" + _v);
+  await import("./ui/aflp-alcumist.js" + _v);
+  await import("./ui/aflp-splatter.js" + _v);
+  await import("./ui/aflp-voice.js" + _v);
 
   // Register actor sheet tab
   AFLP.UI.SheetTab.register();
@@ -102,7 +111,7 @@ Hooks.once("ready", async () => {
   AFLP._loadPositionDescriptions?.().catch(() => {});
 
   // Merge any custom positions from world settings into the schema registries
-  const { mergeCustomPositions } = await import("./ui/aflp-position-manager.js");
+  const { mergeCustomPositions } = await import("./ui/aflp-position-manager.js" + _v);
   mergeCustomPositions();
 
   // Register kink automation hooks
@@ -113,6 +122,9 @@ Hooks.once("ready", async () => {
 
   // Register sentient item (Armor of Hands) hooks
   if (window.AFLP_SentientItems) AFLP_SentientItems.register();
+
+  // Register cum splatter visuals
+  if (window.AFLP_Splatter) AFLP_Splatter.register();
 
   // Register H Scene system (socket + combat hooks)
   if (AFLP.Settings.hsceneEnabled) {

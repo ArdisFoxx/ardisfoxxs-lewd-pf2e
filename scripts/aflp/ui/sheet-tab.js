@@ -497,7 +497,7 @@ AFLP.UI.SheetTab = {
         <div class="aflp-cumflation-grid">
           ${await AFLP.UI.SheetTab._renderCumflationRows(cumflation, totalTier)}
         </div>
-        ${totalTier > 0 ? `<p class="aflp-cf-status-word" style="font-size:11px;color:#c9a96e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin:2px 0 0 2px;">${AFLP.cumflationWord(actor)?.word ?? ""}</p>` : ""}
+        ${AFLP.cumflationWord(actor)?.word ? `<p class="aflp-cf-status-word" style="font-size:11px;color:#c9a96e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin:2px 0 0 2px;">${AFLP.cumflationWord(actor).word}</p>` : ""}
       </div>` : ""}
 
       </section>

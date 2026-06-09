@@ -487,6 +487,7 @@ window.AFLP_Titles = {
     if (newTitles.length) {
       sexual.titles = [...earned];
       await actor.setFlag(AFLP.FLAG_SCOPE, "sexual", sexual);
+      try { window.AFLP?.Voice?.playSfx?.("title"); } catch (_) {}
     }
 
     return newTitles;

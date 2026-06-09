@@ -26,6 +26,14 @@ window.AFLP_Cumflation = {
 
     const perHole  = Math.floor(cumUnitsSpent / receivingHoles.length);
     const remainder = cumUnitsSpent % receivingHoles.length;
+    let _voiceFired = false;   // fire the cumflation voice at most once per resolution
+    let _sceneRefreshed = false;   // schedule the H scene card refresh at most once per resolution
+
+    // Token-shake feedback: capture the pre-resolution state so we can fire an
+    // escalating cosmetic shake (base < tier < hole-max < overall-tier-8).
+    const _before = { anal: cumFlags.anal ?? 0, oral: cumFlags.oral ?? 0, vaginal: cumFlags.vaginal ?? 0 };
+    const _beforeTotal = Math.min(8, Math.floor((_before.anal + _before.oral + _before.vaginal) / 3));
+    let _raised = false, _tierCrossed = false, _holeMaxed = false, _sloshHole = false;
 
     for (const [i, hole] of receivingHoles.entries()) {
       const prevUnits  = cumFlags[hole] ?? 0;
@@ -40,7 +48,19 @@ window.AFLP_Cumflation = {
 
       // Fire tier message when the tier increases
       const newTier = cumFlags[hole];
+      if (unitsToAdd > 0) _raised = true;                     // any deposit (incl. overflow on a maxed hole)
+      if (newTier > prevUnits) _tierCrossed = true;           // a hole's tier went up
+      if (newTier === 8 && prevUnits < 8) _holeMaxed = true;  // a hole hit its per-hole max
+      // Cum going into a hole at its per-hole max (reached now, or already full and
+      // overflowing) -> internal sloshing. Internal holes only (not facial).
+      if (unitsToAdd > 0 && newTier === 8 && ["anal","oral","vaginal"].includes(hole)) _sloshHole = true;
       if (newTier > prevUnits && game.user.isGM) {
+        if (!_voiceFired) {
+          // Big loads sound bigger: the big-load set fires on the load size
+          // deposited this resolution (cumUnitsSpent), regardless of creature.
+          window.AFLP?.Voice?.play?.("cumflation", actor, { units: cumUnitsSpent });
+          _voiceFired = true;
+        }
         // Cumflation word message
         if (newTier >= 1 && AFLP.Messages) {
           const msgKey = `cumflated-${hole}-${newTier}`;
@@ -63,7 +83,8 @@ window.AFLP_Cumflation = {
           const sceneEntry = scenes
             ? [...scenes.entries()].find(([, sc]) => sc.targetActorId === actor.id)
             : null;
-          if (sceneEntry) {
+          if (sceneEntry && !_sceneRefreshed) {
+            _sceneRefreshed = true;
             // Short defer so cumflation flags are flushed before the refresh reads them
             setTimeout(() => AFLP.HScene.refreshScene?.(sceneEntry[0]), 200);
           }
@@ -100,6 +121,19 @@ window.AFLP_Cumflation = {
         (sexualStatsDialog.sexual.lifetime.mlReceived[hole] ?? 0) + (unitsToAdd * AFLP.CUM_UNIT_ML);
     }
 
+    // Escalating token-shake feedback (GM fires locally + broadcasts to all clients).
+    if (game.user.isGM) {
+      const afterTotal = Math.min(8, Math.floor(((cumFlags.anal ?? 0) + (cumFlags.oral ?? 0) + (cumFlags.vaginal ?? 0)) / 3));
+      const shakeLevel = (_beforeTotal < 8 && afterTotal === 8) ? "max8"
+                       : _holeMaxed   ? "holemax"
+                       : _tierCrossed ? "tier"
+                       : _raised      ? "base" : null;
+      if (shakeLevel) AFLP.HScene?.shakeToken?.(actor.id, shakeLevel);
+      // A maxed hole taking more cum sloshes internally - fire the slosh SFX
+      // (broadcast to all clients) once per resolution.
+      if (_sloshHole) window.AFLP?.Voice?.playSfx?.("slosh");
+    }
+
     // Lifetime total cumReceived (all holes combined)
     if (sexualStatsDialog?.sexual?.lifetime !== undefined) {
       sexualStatsDialog.sexual.lifetime.cumReceived =
@@ -108,8 +142,12 @@ window.AFLP_Cumflation = {
   },
 
   saveCumflation: async (actor, cumFlags, cumOverflow) => {
-    await actor.setFlag(AFLP.FLAG_SCOPE, "cumflation",  cumFlags);
-    await actor.setFlag(AFLP.FLAG_SCOPE, "cumOverflow", cumOverflow);
+    // Single document update instead of two setFlag writes: one updateActor cycle
+    // (and one pass of downstream hooks: splatter coat, H scene bars) instead of two.
+    await actor.update({
+      [`flags.${AFLP.FLAG_SCOPE}.cumflation`]:  cumFlags,
+      [`flags.${AFLP.FLAG_SCOPE}.cumOverflow`]: cumOverflow,
+    });
   },
 
   // Applies only the TOTAL cumflation effect item.
@@ -129,8 +167,20 @@ window.AFLP_Cumflation = {
     // Total tier = floor average of the three capped holes, capped at 8
     const totalTier = Math.min(8, Math.floor((anal + oral + vaginal) / 3));
 
-    // Remove any existing total cumflation effect
+    // Existing total cumflation effect (if any)
     const oldTotal = actor.items.filter(i => i.getFlag("world", "aflpCumflationTotal") === true);
+
+    // Fast path: the applied effect already matches this tier and cum-slut variant,
+    // so a swap would delete and recreate an identical item (the "-N / +N" flash and
+    // a cascade of item hooks). Skip it; only the facial-vision pass may still change.
+    if (totalTier > 0 && oldTotal.length === 1 &&
+        oldTotal[0].getFlag("world", "aflpCumflationTier") === totalTier &&
+        oldTotal[0].getFlag("world", "aflpCumflationSlut") === isCumSlut) {
+      await _applyFacialVision(actor, cumFlags.facial ?? 0);
+      return;
+    }
+
+    // Otherwise the tier (or variant) changed - remove the old effect and apply the new.
     if (oldTotal.length) {
       await actor.deleteEmbeddedDocuments("Item", oldTotal.map(i => i.id), { noHook: true });
     }
@@ -158,8 +208,10 @@ window.AFLP_Cumflation = {
     const effect = effectDoc.toObject();
     effect.name  = `Cumflated ${totalTier}`;
 
-    // Tag with a flag so we can find it reliably later
+    // Tag the applied tier + variant so the next resolution can skip an identical swap.
     foundry.utils.setProperty(effect, "flags.world.aflpCumflationTotal", true);
+    foundry.utils.setProperty(effect, "flags.world.aflpCumflationTier",  totalTier);
+    foundry.utils.setProperty(effect, "flags.world.aflpCumflationSlut",  isCumSlut);
 
     await actor.createEmbeddedDocuments("Item", [effect], { noHook: true });
     await _applyFacialVision(actor, cumFlags.facial ?? 0);
@@ -175,16 +227,26 @@ async function _applyFacialVision(actor, facialTier) {
 
     // Remove any existing facial-vision conditions applied by AFLP
     const oldVision = actor.items.filter(i => i.getFlag("world", "aflpFacialVision") === true);
+
+    // Desired vision condition for this facial tier.
+    const desired = facialTier >= 8 ? "blinded" : facialTier >= 4 ? "dazzled" : "none";
+    // Current applied kind (legacy items without the kind flag force one swap to tag them).
+    const current = oldVision.length
+      ? (oldVision[0].getFlag("world", "aflpFacialVisionKind") ?? "__legacy__")
+      : "none";
+    if (current === desired && oldVision.length <= 1) return;   // unchanged -> nothing to do
+
     if (oldVision.length) {
       await actor.deleteEmbeddedDocuments("Item", oldVision.map(i => i.id), { noHook: true });
     }
 
-    if (facialTier >= 4) {
-      const condUuid = facialTier >= 8 ? BLINDED_UUID : DAZZLED_UUID;
+    if (desired !== "none") {
+      const condUuid = desired === "blinded" ? BLINDED_UUID : DAZZLED_UUID;
       const condDoc  = await fromUuid(condUuid);
       if (condDoc) {
         const condObj = condDoc.toObject();
         foundry.utils.setProperty(condObj, "flags.world.aflpFacialVision", true);
+        foundry.utils.setProperty(condObj, "flags.world.aflpFacialVisionKind", desired);
         await actor.createEmbeddedDocuments("Item", [condObj], { noHook: true });
       }
     }
