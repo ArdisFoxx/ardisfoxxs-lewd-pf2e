@@ -2,7 +2,7 @@
 
 # ArdisFoxx's Lewd PF2e (AFLP)
 
-**Version 5.0** | A complete NSFW expansion for Pathfinder 2e in Foundry VTT.
+**Version 7.0.0** | A complete NSFW expansion for Pathfinder 2e in Foundry VTT.
 
 AFLP adds new rules, actions, conditions, kinks, items, spells, and monsters to support a lewd PF2e campaign — from light ecchi all the way to full degenerate chaos, with a Session Zero lewd level system to make sure everyone at the table is on the same page.
 
