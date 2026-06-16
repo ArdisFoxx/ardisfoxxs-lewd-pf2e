@@ -68,7 +68,7 @@ AFLP adds new rules, actions, conditions, kinks, items, spells, and monsters to 
 
 **AFLP is a paid module** — I rely on subscriber income to keep developing it. A $15 subscription on SubscribeStar gives you:
 
-- ✦ Access to the **AFLP 5.0 PDF** — a full GM guide for running AFLP campaigns
+- ✦ Access to the **AFLP PDF** — a full GM guide for running AFLP campaigns
 - ✦ All future module updates
 - ✦ The **AFLP Member Discord** — guide development, meet other fans, and find players in the LFG forum
 
