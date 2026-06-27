@@ -36,7 +36,18 @@
   // Shipped soundpack lives in its own module at modules/aflp-soundpack/{aflp-voices,aflp-sfx}.
   // Bundled VA profiles always load from VA_BUNDLED; voiceFolder is an OPTIONAL
   // extra folder for the user's own additional profiles.
-  const SOUNDPACK_BASE = "modules/aflp-soundpack";
+  // Shipped audio lives in a companion module. Two ship: the full "AFLR Soundpack"
+  // (aflp-soundpack, kept that id so existing installs and paths stay valid) and
+  // the curated default "AFLR Soundpack Lite" (aflr-soundpack-lite). Resolve to
+  // whichever is active - full wins if both are installed, since it is a superset.
+  // Evaluated at import (ready), so game.modules.active is reliable here.
+  const SOUNDPACK_BASE = (() => {
+    try {
+      if (game.modules.get("aflp-soundpack")?.active)      return "modules/aflp-soundpack";
+      if (game.modules.get("aflr-soundpack-lite")?.active) return "modules/aflr-soundpack-lite";
+    } catch (e) { /* fall through to default */ }
+    return "modules/aflp-soundpack";
+  })();
   const VA_BUNDLED     = `${SOUNDPACK_BASE}/aflp-voices`;
   const SFX_BUNDLED    = `${SOUNDPACK_BASE}/aflp-sfx`;
   const folder     = () => (_get("voiceFolder", "") || "").trim();   // optional extra custom VA folder
@@ -45,11 +56,12 @@
   const sfxEnabled = () => _get("sfxEnabled", true) !== false;
   const sfxVolume  = () => _clamp01(_get("sfxVolume", 0.7), 0.7);
 
-  // ── Ambient SFX (from the AFLP Soundpack module) ─────────────────────────────
-  // Generic activity sounds shipped in modules/aflp-soundpack/aflp-sfx/<category>/*.
+  // ── Ambient SFX (module assets) ─────────────────────────────────────────────
+  // Generic activity sounds shipped in modules/<id>/assets/sfx/<category>/*.
   // They layer on top of profile voices, fire even with no profile assigned, and
-  // are selected by the actor's current H-scene position; missing folders are
-  // simply silent. SFX base is fixed to the shipped soundpack (no custom-path override).
+  // are selected by the actor's current H-Scene position. Add folders to enable
+  // more categories; missing folders are simply silent.
+  // SFX base is fixed to the shipped soundpack (no custom-path override).
   const SFX_BASE_DEFAULT = SFX_BUNDLED;
   const sfxBase = () => SFX_BUNDLED;
   // Ambient category by the position's HOLE (read from the schema position
@@ -348,7 +360,7 @@
     if (broadcast) game.socket?.emit(SOCKET, { aflpVoice: true, src, kind: "sfx", shape: {} });
   }
   // Fire the activity-appropriate ambient sequence for an actor, based on the HOLE
-  // of their current H-scene position. Profile-independent; layered over voice.
+  // of their current H-Scene position. Profile-independent; layered over voice.
   function _maybeSfx(actor, broadcast, { targetMs = 0, tier = 0, keyed = false } = {}) {
     if (!sfxEnabled()) return;
     const posId = window.AFLP?.HScene?.positionForActor?.(actor.id);

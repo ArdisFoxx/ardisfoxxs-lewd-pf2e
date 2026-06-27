@@ -3,7 +3,7 @@
 // ===============================
 (async () => {
   if (!window.AFLP || !window.AFLP_PROSE) {
-    ui.notifications.error("AFLP schema or prose not loaded!");
+    ui.notifications.error("AFLR schema or prose not loaded!");
     return;
   }
 
@@ -29,9 +29,49 @@
   let resolvedTargetToken;
   if (_intendedTargetId) {
     resolvedTargetToken = canvas.tokens.get(_intendedTargetId) ?? manualTargets[0];
-  } else {
-    if (manualTargets.length !== 1) return ui.notifications.warn("Target exactly one token.");
+  } else if (manualTargets.length === 1) {
     resolvedTargetToken = manualTargets[0];
+  } else if (manualTargets.length === 0) {
+    // ── Solo cum (masturbation) ───────────────────────────────────────────
+    // No target selected: the source(s) cum on their own to relieve Cum Volume.
+    // No partner means no cumflation and no Afterglow (Afterglow comes only from
+    // partnered sex - gated in _onArousalMax). Mirrors the ground special-hole
+    // consume path: spend cum, log the lifetime stat, post a flavor line.
+    window._aflpCumTargetTokenId = null; // consume
+    let _soloDid = false;
+    for (const stok of sourceTokens) {
+      const sActor = stok.actor?.getWorldActor?.() ?? stok.actor;
+      if (!sActor) continue;
+      const sHasCock = sActor.getFlag(FLAG, "cock") === true;
+      const cum   = sActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
+      const isNPC = AFLP.system?.isNPC?.(sActor) ?? (sActor.type === "npc");
+      if (sHasCock && cum.current > 0) {
+        const spent = AFLP.cumPerShot(sActor); // one shot (was ceil(pool/2))
+        if (spent > 0 && !(isNPC && AFLP.Settings.infiniteCum) && !AFLP.hasInfiniteLoads(sActor)) {
+          await sActor.setFlag(FLAG, "cum", { current: Math.max(0, cum.current - spent), max: cum.max });
+        }
+        try {
+          const sexual = structuredClone(sActor.getFlag(FLAG, "sexual") ?? {});
+          if (!sexual.lifetime) sexual.lifetime = {};
+          sexual.lifetime.cumGiven = (sexual.lifetime.cumGiven ?? 0) + spent;
+          await sActor.setFlag(FLAG, "sexual", sexual);
+        } catch (e) { /* read-only on some systems */ }
+        await ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p><strong>${sActor.name}</strong> gets themselves off, spilling their load and easing the pressure. <em>(Cum Volume relieved, no afterglow.)</em></p></div>`,
+          speaker: { alias: "AFLR" },
+        });
+      } else {
+        await ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p><strong>${sActor.name}</strong> brings themselves to a quiet, shuddering finish.</p></div>`,
+          speaker: { alias: "AFLR" },
+        });
+      }
+      _soloDid = true;
+    }
+    if (!_soloDid) ui.notifications.warn("Select a source token to cum solo.");
+    return;
+  } else {
+    return ui.notifications.warn("Target exactly one token, or untarget to cum solo.");
   }
   if (!resolvedTargetToken) return ui.notifications.warn("Target exactly one token.");
   window._aflpCumTargetTokenId = null; // consume
@@ -41,7 +81,7 @@
   const hasPussy = targetActor.getFlag(FLAG, "pussy") === true;
   const targetHasCock = targetActor.getFlag(FLAG, "cock") === true;
 
-  // ── Read stored positions from H scene (position tracking) ──────────────
+  // ── Read stored positions from H-Scene (position tracking) ──────────────
   // Build a map of sourceToken.id → holeId for cock-having sources that have
   // a penile position assigned in the active scene.
   // If ALL cock-having sources have a penile position, skip the dialog entirely.
@@ -149,7 +189,7 @@
     const holeOptions = targetHoleOptions;
 
     // ── Styled cum dialog ──────────────────────────────────────────────────
-    // Actor portraits header + H-scene-card styling throughout.
+    // Actor portraits header + H-Scene-card styling throughout.
     const sourceActor0Name = sourceActor0?.name ?? "Source";
     const sourceActor0Img  = sourceActor0?.img  ?? "";
     const targetActorImg   = targetActor?.img   ?? "";
@@ -358,7 +398,10 @@
 
   // ── Ground / Vial special cases ─────────────────────────────────────────
   // These consume cum from the source but don't affect the target at all.
-  const VIAL_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.rloXTr10gPd7Xh0J";
+  // Resolve the Vial of Cum per system: the Daggerheart pack item (tagged
+  // aflrKey "vial-of-cum") on DH, the canonical PF2e compendium item elsewhere.
+  const VIAL_UUID = AFLP.system?.contentUuid?.("vial-of-cum")
+    ?? "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.rloXTr10gPd7Xh0J";
   const specialHoles  = allSelectedHoles.filter(h => h === "ground" || h === "vial");
   const selectedHoles = allSelectedHoles.filter(h => h !== "ground" && h !== "vial");
 
@@ -367,9 +410,10 @@
     const srcActor = src?.actor?.getWorldActor?.() ?? src?.actor;
     if (srcActor) {
       const cum = srcActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
-      const cumUnitsSpent = Math.ceil(cum.current / 2);
-      if (cumUnitsSpent > 0) {
-        await srcActor.setFlag(FLAG, "cum", { current: cum.current - cumUnitsSpent, max: cum.max });
+      const cumUnitsSpent = AFLP.cumPerShot?.(srcActor) ?? Math.ceil(cum.current / 2);
+      const isNPC = AFLP.system?.isNPC?.(srcActor) ?? (srcActor.type === "npc");
+      if (cumUnitsSpent > 0 && !(isNPC && AFLP.Settings.infiniteCum) && !AFLP.hasInfiniteLoads(srcActor)) {
+        await srcActor.setFlag(FLAG, "cum", { current: Math.max(0, cum.current - cumUnitsSpent), max: cum.max });
       }
       if (specialHoles.includes("vial")) {
         // Grant 1 Vial of Cum to the source actor
@@ -389,16 +433,16 @@
           }
           await ChatMessage.create({
             content: `<div class="aflp-chat-card"><p><strong>${srcActor.name}</strong> fills a vial with their cum.</p></div>`,
-            speaker: { alias: "AFLP" },
+            speaker: { alias: "AFLR" },
           });
         } else {
-          ui.notifications.warn("AFLP | Vial of Cum item not found in compendium.");
+          ui.notifications.warn("AFLR | Vial of Cum item not found in compendium.");
         }
       }
       if (specialHoles.includes("ground")) {
         await ChatMessage.create({
           content: `<div class="aflp-chat-card"><p><strong>${srcActor.name}</strong> cums onto the ground.</p></div>`,
-          speaker: { alias: "AFLP" },
+          speaker: { alias: "AFLR" },
         });
       }
     }
@@ -438,8 +482,13 @@
   const POTION_OF_BREEDING_UUID = AFLP.items?.["potion-of-breeding-effect"]?.uuid ?? null;
   const BIRTH_CONTROL_UUID      = AFLP.items?.["birth-control"]?.uuid ?? null;
 
-  const hasPotionOfBreeding = POTION_OF_BREEDING_UUID ? targetActor.items.some(i => i.sourceId === POTION_OF_BREEDING_UUID) : false;
-  const hasBirthControl     = BIRTH_CONTROL_UUID ? targetActor.items.some(i => i.sourceId === BIRTH_CONTROL_UUID) : false;
+  // Honor both the PF2e effect items AND the AFLR conditions (the cross-system
+  // path used on Daggerheart, where consumables can't run code). attemptImpregnation
+  // checks the conditions too, so this keeps the cum-macro pre-checks aligned.
+  const hasPotionOfBreeding = (POTION_OF_BREEDING_UUID ? targetActor.items.some(i => i.sourceId === POTION_OF_BREEDING_UUID) : false)
+    || !!AFLP.cond?.has?.(targetActor, "breeding");
+  const hasBirthControl     = (BIRTH_CONTROL_UUID ? targetActor.items.some(i => i.sourceId === BIRTH_CONTROL_UUID) : false)
+    || !!AFLP.cond?.has?.(targetActor, "birth-control");
   const pregnancies         = structuredClone(await targetActor.getFlag(FLAG, "pregnancy") ?? {});
   // Only count pregnancies that are actively gestating (positive days remaining).
   // Completed entries (gestationRemaining === "Complete" or <= 0) are kept for display
@@ -447,7 +496,11 @@
   const hasExistingPregnancy = Object.values(pregnancies).some(p =>
     typeof p.gestationRemaining === "number" && p.gestationRemaining > 0
   );
-  const pregnancyBlocked    = hasExistingPregnancy && !hasPotionOfBreeding;
+  // Block a new pregnancy while one is active, unless a Potion of Breeding
+  // overrides it or the Pregnancy Stacking setting allows concurrent pregnancies.
+  // Mirrors the occupancy gate in AFLP_Pregnancy.attemptImpregnation so PF2e and
+  // Daggerheart resolve identically.
+  const pregnancyBlocked    = hasExistingPregnancy && !hasPotionOfBreeding && !AFLP.Settings.pregnancyStacking;
 
   const impregnationEvents = [];
 
@@ -478,12 +531,13 @@
     let cumUnitsSpent = sourceCumSpent.get(sourceToken.id);
     if (cumUnitsSpent === undefined) {
       const cum = sourceActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
-      cumUnitsSpent = Math.ceil(cum.current / 2);
+      cumUnitsSpent = AFLP.cumPerShot?.(sourceActor) ?? Math.ceil(cum.current / 2);
       if (cumUnitsSpent <= 0) continue;
-      // Infinite cum: NPCs don't deplete when the setting is on
-      const isNPC = sourceActor.type === "npc";
-      if (!isNPC || !AFLP.Settings.infiniteCum) {
-        sourceCumDeferred.set(sourceToken.id, { current: cum.current - cumUnitsSpent, max: cum.max });
+      // Infinite cum: NPCs/adversaries don't deplete when the setting is on.
+      // Use the system-aware helper so Daggerheart "adversary" actors count too.
+      const isNPC = AFLP.system?.isNPC?.(sourceActor) ?? (sourceActor.type === "npc");
+      if ((!isNPC || !AFLP.Settings.infiniteCum) && !AFLP.hasInfiniteLoads(sourceActor)) {
+        sourceCumDeferred.set(sourceToken.id, { current: Math.max(0, cum.current - cumUnitsSpent), max: cum.max });
       }
       sourceCumSpent.set(sourceToken.id, cumUnitsSpent);
       sourcePregnancyResult.set(sourceToken.id, null);
@@ -519,10 +573,12 @@
 
     // Apply cumflation (gated by setting)
     if (AFLP.Settings.cumflationInHscene) {
+      const _spillPrevTier = cumFlags[hole] ?? 0;
       AFLP_Cumflation.applyCumflation(targetActor, cumFlags, cumOverflow, sexualStatsDialog, [hole], cumUnitsSpent, sourceActor.name);
+      await AFLP.recordCumSpill?.(targetActor, sourceActor, _spillPrevTier, cumUnitsSpent);
       // Alcumist Dedication: auto-grant a typed Vial of Cum to the cumflated actor
       if (window.AFLP_Alcumist) {
-        AFLP_Alcumist.onCumflation(targetActor, sourceActor).catch(e => console.warn("AFLP | Alcumist vial grant failed:", e));
+        AFLP_Alcumist.onCumflation(targetActor, sourceActor).catch(e => console.warn("AFLR | Alcumist vial grant failed:", e));
       }
     }
 
@@ -540,6 +596,8 @@
     } else if (pregnancyBlocked && hole === "vaginal") {
       impregnationEvents.push({ source: sourceActor.name, sourceName: sourceActor.name, blocked: true });
     }
+    // Slick/Milking pussy trains the cummer to cum harder (one-time Coomer).
+    if (hole === "vaginal") await AFLP.pussyTrainCoomer?.(sourceActor, targetActor);
   }
 
   // -----------------------------------------------
@@ -549,11 +607,11 @@
   const targetCumGivenMl = {}; // hole → ml, for source's history entry
   if (targetCumsIntoSource && Object.keys(targetCumsIntoSource).length && bothHaveCocks) {
     const tgtCum = targetActor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
-    const tgtCumUnitsSpent = Math.ceil(tgtCum.current / 2);
+    const tgtCumUnitsSpent = AFLP.cumPerShot?.(targetActor) ?? Math.ceil(tgtCum.current / 2);
 
     if (tgtCumUnitsSpent > 0) {
       // Defer cum write — batched into final target actor.update() below
-      const _tgtCumDeferred = { current: tgtCum.current - tgtCumUnitsSpent, max: tgtCum.max };
+      const _tgtCumDeferred = { current: Math.max(0, tgtCum.current - tgtCumUnitsSpent), max: tgtCum.max };
 
       // Merge tgtSexual changes directly into sexualStatsDialog.sexual to avoid a
       // double-write (a separate tgtSexual write would be overwritten at the end).
@@ -589,10 +647,12 @@
           // SexualStatsDialog needed for cumflation helper
           const srcStatsDialog = new AFLP.UI.SexualStatsDialog(sourceActor0);
           await srcStatsDialog.load();
+          const _spillPrevTier2 = srcCumFlags[hole] ?? 0;
           AFLP_Cumflation.applyCumflation(sourceActor0, srcCumFlags, srcCumOverflow, srcStatsDialog, [hole], tgtCumUnitsSpent, targetActor.name);
+          await AFLP.recordCumSpill?.(sourceActor0, targetActor, _spillPrevTier2, tgtCumUnitsSpent);
           // Alcumist Dedication: sourceActor0 is being cumflated by the target
           if (window.AFLP_Alcumist) {
-            AFLP_Alcumist.onCumflation(sourceActor0, targetActor).catch(e => console.warn("AFLP | Alcumist vial grant failed:", e));
+            AFLP_Alcumist.onCumflation(sourceActor0, targetActor).catch(e => console.warn("AFLR | Alcumist vial grant failed:", e));
           }
           await AFLP_Cumflation.saveCumflation(sourceActor0, srcCumFlags, srcCumOverflow);
           await AFLP_Cumflation.applyCumflationEffects(sourceActor0);
@@ -605,8 +665,10 @@
           const srcHasExistingPreg = Object.values(srcPregnancies).some(p =>
             typeof p.gestationRemaining === "number" && p.gestationRemaining > 0
           );
-          const srcHasBirthControl = sourceActor0.items.some(i => i.sourceId === BIRTH_CONTROL_UUID);
-          const srcHasPotionBreed  = sourceActor0.items.some(i => i.sourceId === POTION_OF_BREEDING_UUID);
+          const srcHasBirthControl = sourceActor0.items.some(i => i.sourceId === BIRTH_CONTROL_UUID)
+            || !!AFLP.cond?.has?.(sourceActor0, "birth-control");
+          const srcHasPotionBreed  = sourceActor0.items.some(i => i.sourceId === POTION_OF_BREEDING_UUID)
+            || !!AFLP.cond?.has?.(sourceActor0, "breeding");
           if (!srcHasExistingPreg || srcHasPotionBreed) {
             if (!srcHasBirthControl) {
               const tgtCockTypes = targetActor.getFlag(FLAG, "genitalTypes") ?? {};
@@ -641,8 +703,12 @@
   // -----------------------------------------------
   // Increment target lifetime act counters
   // -----------------------------------------------
+  // Initialise-or-increment: do NOT gate on the key already existing. A reset or
+  // partially-seeded actor would otherwise never start counting, which silently
+  // breaks lifetime tracking and the per-hole title automation.
+  const COUNT_HOLES = new Set(["oral", "vaginal", "anal", "facial", "gangbang"]);
   for (const [hole, count] of Object.entries(holeAssignments)) {
-    if (hole in sexualStatsDialog.sexual.lifetime) {
+    if (COUNT_HOLES.has(hole)) {
       sexualStatsDialog.sexual.lifetime[hole] = (sexualStatsDialog.sexual.lifetime[hole] ?? 0) + count;
     }
   }
@@ -754,10 +820,10 @@
 
     // Compute cumflation delta and backfill into the history entries we just wrote.
     // cumFlags has been mutated in-place by applyCumflation, so it now holds post-cum values.
-    const cumflationAfter = { anal: cumFlags.anal ?? 0, oral: cumFlags.oral ?? 0, vaginal: cumFlags.vaginal ?? 0, facial: cumFlags.facial ?? 0 };
+    const cumflationAfter = { anal: cumFlags.anal ?? 0, oral: cumFlags.oral ?? 0, vaginal: cumFlags.vaginal ?? 0, facial: cumFlags.facial ?? 0, paizuri: cumFlags.paizuri ?? 0 };
     const cumflationDelta = {};
-    for (const hole of ["anal", "oral", "vaginal", "facial"]) {
-      const d = cumflationAfter[hole] - cumflationBefore[hole];
+    for (const hole of ["anal", "oral", "vaginal", "facial", "paizuri"]) {
+      const d = cumflationAfter[hole] - (cumflationBefore[hole] ?? 0);
       if (d !== 0) cumflationDelta[hole] = d;
     }
     if (Object.keys(cumflationDelta).length) {
@@ -783,18 +849,18 @@
     const csLevel    = AFLP.getKinkLevel(targetActor, "cum-slut");
     const liveTarget = game.actors?.get(targetActor.id) ?? targetActor;
     const horny      = structuredClone(liveTarget.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
-    const newTemp    = Math.min(6 - (horny.permanent ?? 0), (horny.temp ?? 0) + 2);
+    const newTemp    = Math.min(3 - (horny.permanent ?? 0), (horny.temp ?? 0) + 2);
     if (newTemp > (horny.temp ?? 0)) {
       horny.temp = newTemp;
       _tgtUpdate[`flags.${FLAG}.horny`] = horny;
       await ChatMessage.create({
         content: `<div class="aflp-chat-card"><p><strong>${targetActor.name}</strong>'s Cum Slut kink triggers: Horny +2.</p></div>`,
-        speaker: { alias: "AFLP" },
+        speaker: { alias: "AFLR" },
       });
     }
     if (csLevel >= 7) {
-      const EXPOSED_UUID   = AFLP.conditions?.["exposed"]?.uuid ?? "";
-      const EXPOSED_N_UUID = AFLP.conditions?.["exposed-nude"]?.uuid ?? "";
+      const EXPOSED_UUID   = AFLP.system.contentUuid("exposed") ?? "";
+      const EXPOSED_N_UUID = AFLP.system.contentUuid("exposed-nude") ?? "";
       const facialCF    = (liveTarget.getFlag(FLAG, "cumflation") ?? {}).facial ?? 0;
       const exposedItem = liveTarget.items?.find(i =>
         i.slug === "exposed" || (i.flags?.core?.sourceId ?? i.sourceId) === EXPOSED_UUID
@@ -806,7 +872,7 @@
       if (exposedLevel >= 2 && facialCF >= 6) {
         await ChatMessage.create({
           content: `<div class="aflp-chat-card"><p><strong>${targetActor.name}</strong>'s Cum Slut kink (L7): Exposed 2 and Facial Cumflation ${facialCF} — their body is so slick that <strong>Escape attempts automatically succeed</strong> until they clean up.</p></div>`,
-          speaker: { alias: "AFLP" },
+          speaker: { alias: "AFLR" },
         });
       }
     }

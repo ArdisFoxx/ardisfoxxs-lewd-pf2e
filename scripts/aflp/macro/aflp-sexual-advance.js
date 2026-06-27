@@ -1,9 +1,10 @@
 // ===============================
-// AFLP Macro — Sexual Advance
+// AFLR Macro — Carnal Press
 // ===============================
+// (Formerly "Sexual Advance" - renamed for Daggerheart.)
 // Usage: Select the acting token, target the victim (or self for masturbation), run.
 // Handles arousal increments, Submitting bonus, Dominating passive,
-// H scene prose/shake, and auto-triggers cum macro when arousal hits max.
+// H-Scene prose/shake, and auto-triggers cum macro when arousal hits max.
 //
 // Save to: scripts/aflp/macro/aflp-sexual-advance.js
 
@@ -11,17 +12,22 @@
   const FLAG      = AFLP.FLAG_SCOPE;
   const AUTOMATE  = AFLP.Settings.automation;
 
+  if (!AFLP.Settings.allows("sexualAdvance")) {
+    ui.notifications.warn("AFLR | Carnal Press is a Lewd 4 feature. Raise the Lewd Level (Session Zero) to use it.");
+    return;
+  }
+
   const sourceTokens = canvas.tokens.controlled;
   const targets      = [...game.user.targets];
 
   if (!sourceTokens.length) {
-    ui.notifications.warn("AFLP | Select the acting token.");
+    ui.notifications.warn("AFLR | Select the acting token.");
     return;
   }
 
   const sourceToken = sourceTokens[0];
   const sourceActor = sourceToken.actor?.getWorldActor?.() ?? sourceToken.actor;
-  if (!sourceActor) { ui.notifications.warn("AFLP | Source actor not found."); return; }
+  if (!sourceActor) { ui.notifications.warn("AFLR | Source actor not found."); return; }
 
   await AFLP.ensureCoreFlags(sourceActor);
 
@@ -38,7 +44,7 @@
       window._aflpMasturbationActor = null;
     }
 
-    // Start or join a solo H scene for this actor
+    // Start or join a solo H-Scene for this actor
     if (AFLP.Settings.hsceneEnabled) {
       const selfData = {
         id: sourceToken.id, actorId: sourceActor.id,
@@ -89,7 +95,7 @@
     return;
   }
 
-  // ── Auto-target from H scene if no target selected ────────────────────
+  // ── Auto-target from H-Scene if no target selected ────────────────────
   // If the user forgot to target someone but the source actor is in an active
   // scene, derive the target from the scene data automatically.
   if (targets.length === 0 && AFLP.Settings.hsceneEnabled) {
@@ -98,25 +104,25 @@
       const sceneTargetToken = canvas.tokens.get(activeScene.targetId);
       if (sceneTargetToken) {
         targets.push(sceneTargetToken);
-        ui.notifications.info(`AFLP | Auto-targeting ${sceneTargetToken.name} from active H scene.`);
+        ui.notifications.info(`AFLR | Auto-targeting ${sceneTargetToken.name} from active H-Scene.`);
       }
     }
   }
 
   if (targets.length !== 1) {
-    ui.notifications.warn("AFLP | Target exactly one token (or none for masturbation).");
+    ui.notifications.warn("AFLR | Target exactly one token (or none for masturbation).");
     return;
   }
 
   const targetToken = targets[0];
   const targetActor = targetToken.actor?.getWorldActor?.() ?? targetToken.actor;
-  if (!targetActor) { ui.notifications.warn("AFLP | Target actor not found."); return; }
+  if (!targetActor) { ui.notifications.warn("AFLR | Target actor not found."); return; }
 
   await AFLP.ensureCoreFlags(targetActor);
 
   const targetId = targetToken.id;  // scene key is token ID, not world actor ID
 
-  // ── Auto-start / join / re-point H scene (unified model) ────────────────
+  // ── Auto-start / join / re-point H-Scene (unified model) ────────────────
   // startScene resolves the ONE battlemap scene and create-or-joins-or-repoints:
   // it ensures both participants and sets the SOURCE's partnerId to the TARGET
   // (the re-point). This single call replaces the old start/join/skip branching
@@ -136,7 +142,7 @@
     //    default the newcomer to Dominating, no prompt (legacy addAttacker behavior).
     //  - Roles already established, or a consensual scene (exists, no roles) -> do nothing.
     // Only the SS struggle-escape changes control after it is established.
-    const hasRole = (a) => { const l = a?.token?.actor ?? a; return !!l?.items?.some(c => c.slug === "dominating" || c.slug === "submitting"); };
+    const hasRole = (a) => AFLP.cond.has(a, "dominating") || AFLP.cond.has(a, "submitting");
     const srcRoled = hasRole(sourceActor);
     const tgtRoled = hasRole(targetActor);
     const preexisting = AFLP.HScene.getSceneForToken?.(targetToken.id, targetActor.id)
@@ -188,7 +194,7 @@
     if (hscene) AFLP.HScene.revealCard?.(hscene.id);
   }
 
-  // ── H Scene card prose ──
+  // ── H-Scene card prose ──
   if (AFLP.Settings.hsceneEnabled) {
     AFLP.HScene.triggerShake(targetId);
     if (AFLP.Settings.proseFlavor) {
@@ -203,15 +209,15 @@
   let targetGain = null;
   if (AUTOMATE) {
     // Ouroboros self-scene: source and target are the same actor.
-    // Arousal is doubled (they feel it from both ends) — apply 4 total as one increment
+    // Arousal is doubled (they feel it from both ends) - apply 2 total as one increment
     // so Submitting bonus applies once, then duplicate gain appears in both card slots.
     const isSelfScene = sourceActor.id === targetActor.id;
     if (isSelfScene) {
-      sourceGain = await AFLP_Arousal.increment(sourceActor, 4, "Sexual Advance (self)", sourceToken.id);
+      sourceGain = await AFLP_Arousal.increment(sourceActor, 2, "Sexual Advance (self)", sourceToken.id);
       targetGain = sourceGain; // same result shown on both sides of the card
     } else {
-      sourceGain = await AFLP_Arousal.increment(sourceActor, 2, "Sexual Advance", sourceToken.id);
-      targetGain = await AFLP_Arousal.increment(targetActor, 2, "Sexual Advance", targetToken.id);
+      sourceGain = await AFLP_Arousal.increment(sourceActor, 1, "Sexual Advance", sourceToken.id);
+      targetGain = await AFLP_Arousal.increment(targetActor, 1, "Sexual Advance", targetToken.id);
     }
   }
 

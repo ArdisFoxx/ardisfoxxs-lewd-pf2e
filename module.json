@@ -1,7 +1,7 @@
 {
   "id": "ardisfoxxs-lewd-pf2e",
-  "title": "ArdisFoxx's Lewd PF2e",
-  "description": "A complete adult-content (18+) expansion for Pathfinder 2e on Foundry VTT: an Arousal / Horny / Denied system with Edge automation and cumflation, a live multi-pairing H Scene tracker with five card themes, a levelled kink system with automated effects, 80+ adult magic items, custom conditions, 70+ actions and spells, lewd monsters, Session Zero lewd-level calibration, optional voice and ambient-SFX audio (via the AFLP Soundpack module), and Lovense toy integration. Audio (via the AFLP Soundpack): OpenNSFW Sound Pack, licensed under CC BY 4.0 - always credited as an SFX pack; please contact @OpenNSFWSP rather than individual contributors. Full contributor credits ship with the AFLP Soundpack.",
+  "title": "ArdisFoxx's Lewd Roleplaying (AFLR)",
+  "description": "A complete adult-content (18+) expansion for Pathfinder 2e on Foundry VTT: an Arousal / Horny / Denied system with Edge automation and cumflation, a live multi-pairing H Scene tracker with five card themes, a levelled kink system with automated effects, 80+ adult magic items, custom conditions, 70+ actions and spells, lewd monsters, Session Zero lewd-level calibration, optional voice and ambient-SFX audio (via the AFLR Soundpack module), and Lovense toy integration. Audio (via the AFLR Soundpack): OpenNSFW Sound Pack, licensed under CC BY 4.0 - always credited as an SFX pack; please contact @OpenNSFWSP rather than individual contributors. Full contributor credits ship with the AFLR Soundpack.",
   "version": "#{VERSION}#",
   "compatibility": {
     "minimum": "13",
@@ -26,6 +26,14 @@
           "minimum": "7.10.1",
           "verified": "7.12.2"
         }
+      },
+      {
+        "id": "dnd5e",
+        "type": "system"
+      },
+      {
+        "id": "daggerheart",
+        "type": "system"
       }
     ],
     "requires": [
@@ -37,9 +45,10 @@
     ],
     "recommends": [
       {
-        "id": "aflp-soundpack",
+        "id": "aflr-soundpack-lite",
         "type": "module",
-        "reason": "Bundled voice profiles and ambient SFX for the H Scene voice engine. Without it, the Voice and Ambient SFX features have no audio to play."
+        "manifest": "https://github.com/ArdisFoxx/aflr-soundpack-lite/releases/latest/download/module.json",
+        "reason": "Recommended free audio pack: a curated, lightweight set of voice profiles and ambient SFX that powers AFLP's Voice and Ambient SFX features. One-click install. Prefer the complete library? Install the full AFLR Soundpack instead and AFLP uses it automatically when present."
       }
     ]
   },
@@ -63,13 +72,13 @@
       "path": "languages/en.json"
     }
   ],
-  "url": "#{URL}#",
-  "manifest": "#{MANIFEST}#",
-  "download": "#{DOWNLOAD}#",
+  "url": "https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e",
+  "manifest": "https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/latest/download/module.json",
+  "download": "https://github.com/ArdisFoxx/ardisfoxxs-lewd-pf2e/releases/download/#{VERSION}#/module.zip",
   "packs": [
     {
       "name": "aflp-lewd-items",
-      "label": "AFLP Lewd Items",
+      "label": "AFLR PF2e Items",
       "path": "packs/aflp-lewd-items",
       "type": "Item",
       "system": "pf2e",
@@ -79,10 +88,10 @@
       }
     },
     {
-      "name": "aflp-lewd-macros",
-      "label": "AFLP Lewd Macros",
-      "path": "packs/aflp-lewd-macros",
-      "type": "Macro",
+      "name": "aflp-lewd-actors",
+      "label": "AFLR PF2e Actors",
+      "path": "packs/aflp-lewd-actors",
+      "type": "Actor",
       "system": "pf2e",
       "ownership": {
         "PLAYER": "OBSERVER",
@@ -90,22 +99,99 @@
       }
     },
     {
-      "name": "aflp-lewd-actors",
-      "label": "AFLP Lewd Actors",
-      "path": "packs/aflp-lewd-actors",
-      "type": "Actor",
+      "name": "aflp-lewd-journals",
+      "label": "AFLR Journals",
+      "path": "packs/aflp-lewd-journals",
+      "type": "JournalEntry",
       "ownership": {
         "PLAYER": "OBSERVER",
         "ASSISTANT": "OWNER"
-      },
-      "system": "pf2e"
+      }
     },
     {
-      "name": "aflp-lewd-journals",
-      "label": "AFLP Lewd Journals",
-      "path": "packs/aflp-lewd-journals",
-      "type": "JournalEntry",
-      "system": "pf2e"
+      "name": "aflp-lewd-macros",
+      "label": "AFLR Macros",
+      "path": "packs/aflp-lewd-macros",
+      "type": "Macro",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    },
+    {
+      "name": "aflr-dh-items",
+      "label": "AFLR Daggerheart Items",
+      "path": "packs/aflr-dh-items",
+      "type": "Item",
+      "system": "daggerheart",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    },
+    {
+      "name": "aflr-dh-actors",
+      "label": "AFLR Daggerheart Actors",
+      "path": "packs/aflr-dh-actors",
+      "type": "Actor",
+      "system": "daggerheart",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    },
+    {
+      "name": "aflr-5e-items",
+      "label": "AFLR 5e Items",
+      "path": "packs/aflr-5e-items",
+      "type": "Item",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    },
+    {
+      "name": "aflr-5e-actors",
+      "label": "AFLR 5e Actors",
+      "path": "packs/aflr-5e-actors",
+      "type": "Actor",
+      "system": "dnd5e",
+      "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+      }
+    }
+  ],
+  "packFolders": [
+    {
+      "name": "Lewd - Pathfinder 2e",
+      "sorting": "m",
+      "color": "#8a1538",
+      "packs": [
+        "aflp-lewd-items",
+        "aflp-lewd-actors",
+        "aflp-lewd-journals",
+        "aflp-lewd-macros"
+      ]
+    },
+    {
+      "name": "Lewd - Daggerheart",
+      "sorting": "m",
+      "color": "#3a1d6e",
+      "packs": [
+        "aflr-dh-items",
+        "aflr-dh-actors"
+      ]
+    },
+    {
+      "name": "Lewd - D&D 5e",
+      "sorting": "m",
+      "color": "#1d4e6e",
+      "packs": [
+        "aflr-5e-items",
+        "aflr-5e-actors"
+      ]
     }
   ]
 }

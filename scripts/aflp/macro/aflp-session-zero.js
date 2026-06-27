@@ -11,7 +11,7 @@ if (!game.user.isGM) {
 }
 
 if (typeof aflpShowSessionZero !== "function") {
-  ui.notifications.warn("AFLP: Session Zero dialog not available. Is the module loaded?");
+  ui.notifications.warn("AFLR: Session Zero dialog not available. Is the module loaded?");
   return;
 }
 

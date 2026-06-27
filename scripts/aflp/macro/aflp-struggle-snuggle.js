@@ -15,7 +15,7 @@
 // All successful variants apply: Dominating (source), Submitting + Exposed 1 (target).
 //
 // ESCAPE MODE — activates automatically when the source has Submitting and is
-// the target of an active H scene. Uses the Struggle Escape action:
+// the target of an active H-Scene. Uses the Struggle Escape action:
 //   Struggle Escape   — Athletics vs Fortitude DC (no Strike required)
 //   Sly Escape        — Diplomacy vs Will DC          (requires Sly Snuggle feat)
 //   Sneaky Escape     — Deception vs Perception DC    (requires Sneaky Snuggle feat)
@@ -24,6 +24,26 @@
 // Pin mode (target already Submitting): skip first action, attempt check to pin.
 
 (async () => {
+  // Daggerheart replaces this PF2e grapple minigame with the Carnal interaction
+  // layer: make a Carnal action and have the target resist with a Presence or
+  // Instinct Reaction Roll (their choice) vs your Difficulty - out-dom via
+  // Presence, out-will via Instinct. So this macro is PF2e-only on DH.
+  if (AFLP.system?.id === "daggerheart") {
+    ui.notifications.info("AFLR | In Daggerheart, Struggle Snuggle is a Carnal action: make your move and have the target resist with a Presence or Instinct Reaction Roll vs your Difficulty. A failure feeds the spiral (a token).");
+    return;
+  }
+  // Everything below is the PF2e grapple minigame (game.pf2e actions, Fortitude
+  // DCs, flat-footed). Guard any non-PF2e system so the macro informs rather than
+  // throwing on, e.g., 5e. DH is already handled above with a tailored message.
+  if (game.system.id !== "pf2e") {
+    ui.notifications.info("AFLR | Struggle Snuggle's grapple minigame is PF2e-specific. On this system, use your system's Carnal action / resist flow instead.");
+    return;
+  }
+  if (!AFLP.Settings.allows("struggleSnuggle")) {
+    ui.notifications.warn("AFLR | Struggle Snuggle is a Lewd 4 feature. Raise the Lewd Level (Session Zero) to use it.");
+    return;
+  }
+
   const SOCKET = "module.ardisfoxxs-lewd-pf2e";
 
   // Non-GM players can't create items on other actors directly.
@@ -123,6 +143,14 @@
 
   async function applyCondition(actor, slug, sourceId, value = null) {
     const liveActor = actor.token?.actor ?? actor;
+    // Binary AFLR role/state conditions go through the unified flag-aware API
+    // (PF2e item / DH flag). Valued conditions (exposed/horny/mind-break) keep
+    // the local caps-aware item path below until the 2c adapter flip handles
+    // their value semantics.
+    if (slug === "dominating" || slug === "submitting" || slug === "defeated") {
+      if (AFLP.cond.has(liveActor, slug)) return;
+      return AFLP.cond.apply(liveActor, slug, value, actor.token?.id ?? null);
+    }
     const existing = slug === "exposed"
       ? findExposedAny(liveActor)
       : liveActor.items?.find(c => {
@@ -154,7 +182,7 @@
       if (typeof actor.increaseCondition === "function") {
         await actor.increaseCondition(slug);
       } else {
-        console.warn(`AFLP | Could not apply condition ${slug} to ${actor.name}:`, e);
+        console.warn(`AFLR | Could not apply condition ${slug} to ${actor.name}:`, e);
       }
     }
   }
@@ -205,7 +233,7 @@
     if (AFLP.Settings.proseFlavor && proseFn) {
       AFLP.HScene.generateAndShowProse(tgtToken.id, "struggle-snuggle", srcActor, tgtActor);
     } else {
-      AFLP.HScene.addProse(tgtToken.id, proseFn ? proseFn() : `${srcActor?.name} initiates an H scene with ${tgtActor?.name}.`, "action");
+      AFLP.HScene.addProse(tgtToken.id, proseFn ? proseFn() : `${srcActor?.name} initiates an H-Scene with ${tgtActor?.name}.`, "action");
     }
   }
 
@@ -213,8 +241,8 @@
   const sourceTokens = canvas.tokens.controlled;
   const targets      = [...game.user.targets];
 
-  if (!sourceTokens.length) { ui.notifications.warn("AFLP | Select the attacker token."); return; }
-  if (targets.length !== 1) { ui.notifications.warn("AFLP | Target exactly one token."); return; }
+  if (!sourceTokens.length) { ui.notifications.warn("AFLR | Select the attacker token."); return; }
+  if (targets.length !== 1) { ui.notifications.warn("AFLR | Target exactly one token."); return; }
 
   const sourceToken      = sourceTokens[0];
   const sourceTokenActor = sourceToken.actor;
@@ -223,7 +251,7 @@
   const targetTokenActor = targetToken.actor;
   const targetActor      = targetTokenActor?.getWorldActor?.() ?? targetTokenActor;
 
-  if (!sourceActor || !targetActor) { ui.notifications.warn("AFLP | Could not resolve actors."); return; }
+  if (!sourceActor || !targetActor) { ui.notifications.warn("AFLR | Could not resolve actors."); return; }
 
   await AFLP.ensureCoreFlags(sourceActor);
   await AFLP.ensureCoreFlags(targetActor);
@@ -243,11 +271,9 @@
     || sourceActor?.items?.some(i => i.slug === "sex-toy-snuggle-technique" || i.slug === "sex-toy-expertise");
 
   // ── Guard: source is Submitting ────────────────────────────────────────
-  // If they're in an active H-scene as the target, this becomes an escape attempt.
+  // If they're in an active H-Scene as the target, this becomes an escape attempt.
   // Otherwise hard-stop (Submitting from another source with no scene context).
-  const sourceIsSubmitting = sourceTokenActor.items?.some(c =>
-    c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
-  );
+  const sourceIsSubmitting = AFLP.cond.has(sourceTokenActor, "submitting");
   if (sourceIsSubmitting) {
     // Check if they're the TARGET in an active scene
     const escapeScene = AFLP.Settings.hsceneEnabled
@@ -271,9 +297,7 @@
       .map(p => canvas?.tokens?.get(p.tokenId)?.actor
              ?? game.actors?.get(p.actorId ?? p.tokenId)
              ?? null)
-      .filter(a => a?.items?.some(c =>
-        c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
-      ));
+      .filter(a => AFLP.cond.has(a, "dominating"));
 
     // Beat the highest Fortitude DC among all Dominating attackers
     const escapeTargetActor = domAttackers.reduce((best, a) => {
@@ -283,7 +307,7 @@
     }, domAttackers[0]);
 
     if (!escapeTargetActor) {
-      ui.notifications.warn("AFLP | Could not find a Dominating creature to escape from.");
+      ui.notifications.warn("AFLR | Could not find a Dominating creature to escape from.");
       return;
     }
 
@@ -368,7 +392,7 @@
       escapeOutcome = await checkP;
     }
 
-    if (!escapeOutcome) { ui.notifications.warn("AFLP | Escape roll timed out."); return; }
+    if (!escapeOutcome) { ui.notifications.warn("AFLR | Escape roll timed out."); return; }
 
     const escapeHit = escapeOutcome === "success" || escapeOutcome === "criticalSuccess";
     if (!escapeHit) {
@@ -409,10 +433,7 @@
     if (escapeChoice === "escape") {
       if (game.user.isGM) {
         // Remove Submitting from source
-        const subItem = sourceTokenActor.items?.find(c =>
-          c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
-        );
-        if (subItem) await subItem.delete().catch(() => {});
+        await AFLP.cond.remove(sourceTokenActor, "submitting");
         // Remove Grabbed/Restrained from source
         for (const slug of ["grabbed","restrained"]) {
           const item = sourceTokenActor.items?.find(c => c.slug === slug);
@@ -420,10 +441,7 @@
         }
         // Remove Dominating from all scene attackers
         for (const domAtk of domAttackers) {
-          const domItem = domAtk.items?.find(c =>
-            c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
-          );
-          if (domItem) await domItem.delete().catch(() => {});
+          await AFLP.cond.remove(domAtk, "dominating");
         }
         // End the scene for the source (they leave)
         AFLP.HScene.removeParticipant?.(escapeScene.targetId, sourceToken.id);
@@ -449,17 +467,11 @@
 
       if (game.user.isGM) {
         // Remove Submitting from source; apply Dominating
-        const subItem = sourceTokenActor.items?.find(c =>
-          c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_SUBMITTING
-        );
-        if (subItem) await subItem.delete().catch(() => {});
+        await AFLP.cond.remove(sourceTokenActor, "submitting");
         await applyCondition(sourceTokenActor, "dominating", UUID_DOMINATING);
 
         // Remove Dominating from former attacker; apply Submitting + Grabbed
-        const domItem = flipTarget.items?.find(c =>
-          c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
-        );
-        if (domItem) await domItem.delete().catch(() => {});
+        await AFLP.cond.remove(flipTarget, "dominating");
         // Grabbled/Restrained swap
         for (const slug of ["grabbed","restrained"]) {
           const fromSrc = sourceTokenActor.items?.find(c => c.slug === slug);
@@ -496,9 +508,7 @@
   // ── End escape block ──────────────────────────────────────────────────
 
   // ── Info: source already Dominating → warn but continue ──────────────
-  const sourceIsDominating = sourceTokenActor.items?.some(c =>
-    c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === UUID_DOMINATING
-  );
+  const sourceIsDominating = AFLP.cond.has(sourceTokenActor, "dominating");
   if (sourceIsDominating) {
     ui.notifications.info(
       "Check with your GM if you can Dominate more than one creature at once.",
@@ -512,9 +522,7 @@
   const currentExposed     = currentExposedItem?.system?.badge?.value ?? 0;
   const hasExposedNude     = !!currentExposedItem && isExposedNudeItem(currentExposedItem);
 
-  const isAlreadySubmitting = targetTokenActor.items?.some(c =>
-    c.slug === "submitting" || c.sourceId === UUID_SUBMITTING
-  );
+  const isAlreadySubmitting = AFLP.cond.has(targetTokenActor, "submitting");
   const isAlreadyGrabbed = targetTokenActor.items?.some(c => c.slug === "grabbed");
   const syntheticEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
 
@@ -553,7 +561,7 @@
       });
     });
 
-    if (!chosenVariant) { ui.notifications.info("AFLP | Cancelled."); return; }
+    if (!chosenVariant) { ui.notifications.info("AFLR | Cancelled."); return; }
   }
 
   // ============================================================
@@ -567,7 +575,7 @@
         (i.flags?.core?.sourceId ?? i.sourceId) === "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QvwGGnxQotq1giao"
       );
     if (!hasOuroboros) {
-      ui.notifications.warn("AFLP | Targeting yourself requires the Ouroboros feat.");
+      ui.notifications.warn("AFLR | Targeting yourself requires the Ouroboros feat.");
       return;
     }
     if (!game.user.isGM) {
@@ -588,7 +596,7 @@
   // ============================================================
   async function runPinMode(checkLabel, checkFn) {
     const outcome = await checkFn();
-    if (!outcome) { ui.notifications.warn("AFLP | Roll timed out or cancelled."); return; }
+    if (!outcome) { ui.notifications.warn("AFLR | Roll timed out or cancelled."); return; }
     const hit = outcome === "success" || outcome === "criticalSuccess";
     if (!hit) {
       await ChatMessage.create({
@@ -677,13 +685,13 @@
     const strike = sourceActor.system?.actions?.find(a => a.type === "strike" && (a.item?.isMelee ?? true))
                 ?? sourceActor.system?.actions?.[0];
     if (!strike?.variants?.[0]) {
-      ui.notifications.warn(`AFLP | ${sourceActor.name} has no usable strike actions.`);
+      ui.notifications.warn(`AFLR | ${sourceActor.name} has no usable strike actions.`);
       return;
     }
     const strikeP = waitForCheckOutcome();
     strike.variants[0].roll({ event: syntheticEvent });
     const strikeOutcome = await strikeP;
-    if (!strikeOutcome) { ui.notifications.warn("AFLP | Strike roll timed out."); return; }
+    if (!strikeOutcome) { ui.notifications.warn("AFLR | Strike roll timed out."); return; }
     if (strikeOutcome === "failure" || strikeOutcome === "criticalFailure") {
       await ChatMessage.create({
         content: `<div class="aflp-chat-card"><p><strong>${sourceActor.name}</strong> attempts Struggle Snuggle on <strong>${targetActor.name}</strong> — Strike misses (${formatOutcome(strikeOutcome)}).</p></div>`,
@@ -691,10 +699,24 @@
       });
       return;
     }
+    // Struggle Snuggle has the Sexual trait: the Strike deals sexual damage, so a
+    // hit raises the TARGET's Arousal by 1 (2 on a crit). This is sexual damage,
+    // not a Sexual Advance, so only the target gains Arousal - never the attacker.
+    // Applies on the Strike hit, independent of the following Grapple's result.
+    {
+      const sexAmt = strikeOutcome === "criticalSuccess" ? 2 : 1;
+      if (game.user.isGM) {
+        await AFLP_Arousal.increment(targetTokenActor, sexAmt, "Struggle Snuggle (sexual)", targetToken.id);
+      } else {
+        game.socket.emit(SOCKET, { type: "aflp-apply-arousal", tgtTokenId: targetToken.id, amount: sexAmt, source: "Struggle Snuggle (sexual)" });
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+
     const grappleP = waitForCheckOutcome();
     game.pf2e.actions.get("grapple").use({ actors: [sourceActor], event: syntheticEvent });
     const grappleOutcome = await grappleP;
-    if (!grappleOutcome) { ui.notifications.warn("AFLP | Grapple roll timed out."); return; }
+    if (!grappleOutcome) { ui.notifications.warn("AFLR | Grapple roll timed out."); return; }
     if (grappleOutcome === "failure" || grappleOutcome === "criticalFailure") {
       await ChatMessage.create({
         content: `<div class="aflp-chat-card"><p><strong>${sourceActor.name}</strong> hit (${formatOutcome(strikeOutcome)}) but failed the Grapple (${formatOutcome(grappleOutcome)}) on <strong>${targetActor.name}</strong>.</p></div>`,
@@ -728,7 +750,7 @@
     const dipP = waitForCheckOutcome();
     game.pf2e.actions.get("demoralize").use({ actors: [sourceActor], event: syntheticEvent });
     const dipOutcome = await dipP;
-    if (!dipOutcome) { ui.notifications.warn("AFLP | Diplomacy roll timed out."); return; }
+    if (!dipOutcome) { ui.notifications.warn("AFLR | Diplomacy roll timed out."); return; }
     if (dipOutcome === "failure" || dipOutcome === "criticalFailure") {
       await ChatMessage.create({
         content: `<div class="aflp-chat-card"><p><strong>${sourceActor.name}</strong> attempts Sly Snuggle on <strong>${targetActor.name}</strong> — Diplomacy fails (${formatOutcome(dipOutcome)}).</p></div>`,
@@ -760,7 +782,7 @@
     const decP = waitForCheckOutcome();
     game.pf2e.actions.get("create-a-diversion").use({ actors: [sourceActor], event: syntheticEvent });
     const decOutcome = await decP;
-    if (!decOutcome) { ui.notifications.warn("AFLP | Deception roll timed out."); return; }
+    if (!decOutcome) { ui.notifications.warn("AFLR | Deception roll timed out."); return; }
     if (decOutcome === "failure" || decOutcome === "criticalFailure") {
       await ChatMessage.create({
         content: `<div class="aflp-chat-card"><p><strong>${sourceActor.name}</strong> attempts Sneaky Snuggle on <strong>${targetActor.name}</strong> — Deception fails (${formatOutcome(decOutcome)}).</p></div>`,
@@ -781,7 +803,7 @@
   // ============================================================
   if (chosenVariant === "sextoy") {
     if (!SEX_TOYS.length) {
-      ui.notifications.warn("AFLP | No sex toy items found in the compendium. Add Nipple Clamps, Monster Dildo, or Magical Vibrator to the pack first.");
+      ui.notifications.warn("AFLR | No sex toy items found in the compendium. Add Nipple Clamps, Monster Dildo, or Magical Vibrator to the pack first.");
       return;
     }
 
@@ -838,7 +860,7 @@
       });
     });
 
-    if (!toyResult) { ui.notifications.info("AFLP | Cancelled."); return; }
+    if (!toyResult) { ui.notifications.info("AFLR | Cancelled."); return; }
 
     const chosenToy = SEX_TOYS.find(t => t.id === toyResult.toyId);
     if (!chosenToy) return;
@@ -882,7 +904,7 @@
     const rkP = waitForCheckOutcome();
     game.pf2e.actions.get("recall-knowledge").use({ actors: [sourceActor], event: syntheticEvent });
     const rkOutcome = await rkP;
-    if (!rkOutcome) { ui.notifications.warn("AFLP | Roll timed out."); return; }
+    if (!rkOutcome) { ui.notifications.warn("AFLR | Roll timed out."); return; }
 
     if (rkOutcome === "failure" || rkOutcome === "criticalFailure") {
       await ChatMessage.create({
@@ -922,7 +944,7 @@
           toyData.system.equipped = { carryType: "worn", inSlot: true };
           await targetActor.createEmbeddedDocuments("Item", [toyData]);
         }
-      } catch(e) { console.warn("AFLP | Could not grant toy item:", e); }
+      } catch(e) { console.warn("AFLR | Could not grant toy item:", e); }
 
       // Toy-specific bonus effects
       if (chosenToy.effect === "vibrator") {

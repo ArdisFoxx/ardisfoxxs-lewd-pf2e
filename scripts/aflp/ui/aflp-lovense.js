@@ -59,8 +59,8 @@ window.AFLP_Lovense = {
     exposed:        { label: "Exposed",          emoji: "\u{1F441}\uFE0F", group: "Conditions", logKey: "Exposed",       pattern: "pulse_soft",   defMinStr: 10, defMaxStr: 25,  defMinDur: 1,  defMaxDur: 2  },
     grabbed:        { label: "Grabbed",          emoji: "\u270A",    group: "Conditions", logKey: "Grabbed",             pattern: "pulse_soft",   defMinStr: 15, defMaxStr: 30,  defMinDur: 1,  defMaxDur: 2  },
     bimbofied:      { label: "Bimbofied",        emoji: "\u{1F380}", group: "Conditions", logKey: "Bimbofied",           pattern: "build_low",    defMinStr: 20, defMaxStr: 40,  defMinDur: 3,  defMaxDur: 6  },
-    hscene_start:   { label: "H Scene Start",    emoji: "\u{1F5A4}", group: "Scene",      logKey: "Amorous Activity",    special: "sex_start"  },
-    hscene_end:     { label: "H Scene End",      emoji: "\u2728",    group: "Scene",      logKey: "Afterglow",           special: "sex_end"    },
+    hscene_start:   { label: "H-Scene Start",    emoji: "\u{1F5A4}", group: "Scene",      logKey: "Amorous Activity",    special: "sex_start"  },
+    hscene_end:     { label: "H-Scene End",      emoji: "\u2728",    group: "Scene",      logKey: "Afterglow",           special: "sex_end"    },
   },
 
   CONDITION_MAP: {
@@ -98,7 +98,7 @@ window.AFLP_Lovense = {
   isEventEnabled(k)  { return this.isEnabled() && this.getSettings().events?.[k]?.enabled !== false; },
   getCharacterName() {
     const s = this.getSettings();
-    return s.characterName || game.actors?.find(a => a.isOwner && a.type === "character")?.name || game.user.name;
+    return s.characterName || game.actors?.find(a => a.isOwner && AFLP.system.isPC(a))?.name || game.user.name;
   },
   getChasterSettings() { return { ...this.CHASTER_DEFAULTS, ...(this.getSettings().chaster ?? {}) }; },
 
@@ -295,7 +295,7 @@ window.AFLP_Lovense = {
     const cur      = this.getSettings();
     const charName = this.getCharacterName();
     const chaster  = this.getChasterSettings();
-    const owned    = game.actors?.filter(a => a.isOwner && a.type === "character") ?? [];
+    const owned    = game.actors?.filter(a => a.isOwner && AFLP.system.isPC(a)) ?? [];
     const self     = this;
     const mode     = cur.mode ?? "gift";
     const dHost    = cur.directHost ?? "127-0-0-1.lovense.club";
@@ -762,7 +762,7 @@ window.AFLP_Lovense = {
   async openWizard() {
     const isHttps = window.location.protocol === "https:";
     const self    = this;
-    const owned   = game.actors?.filter(a => a.isOwner && a.type === "character") ?? [];
+    const owned   = game.actors?.filter(a => a.isOwner && AFLP.system.isPC(a)) ?? [];
     const charName = this.getCharacterName();
     const actorOpts = owned.map(a =>
       `<option value="${a.name}" ${a.name === charName ? "selected" : ""}>${a.name}</option>`

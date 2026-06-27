@@ -342,6 +342,19 @@
     return (overall >= 8 && facial >= 8) ? 9 : overall;
   }
 
+  // Continuous fill level (sum / 3, capped 8) so the token coat builds a little
+  // with each pip instead of stepping only when the integer tier rolls over.
+  // Drives the coat; ground puddles still use the integer _effectiveTier.
+  function _effectiveLevel(cf) {
+    if (!cf) return 0;
+    const anal = cf.anal ?? 0, oral = cf.oral ?? 0, vaginal = cf.vaginal ?? 0, facial = cf.facial ?? 0;
+    // Coat coverage scales across the combined 0-32 fill of all four sites
+    // (anal + oral + vaginal + facial, each 0-8). The coat appears from the
+    // first pip and only reaches full coverage when every site is loaded, so
+    // filling more holes spreads more cum across the token.
+    return anal + oral + vaginal + facial;
+  }
+
   function _circleCluster(g, cx, cy, R, count, color, alpha, rng) {
     for (let i = 0; i < count; i++)
       _fillCircle(g, cx + (rng() - 0.5) * R, cy + (rng() - 0.5) * R, R * (0.25 + rng() * 0.45), color, alpha);
@@ -454,13 +467,51 @@
   // the arrangement; these set the global look: counts, sizes, bean shape, gloss,
   // tone and opacity.
   const DRAPE = {
-    ropeCount: 19, ropeLen: 1.1, ropeThick: 1.2, ropeWavy: 1.2, forkChance: 0.30,
-    bulgeCount: 2, bulgeLen: 0.8, bulgeSize: 1.45, beadLo: 0.58,
+    ropeCount: 19, ropeLen: 0.9, ropeThick: 0.65, ropeWavy: 1.2, forkChance: 0.30,
+    ropeBaseLo: 0.011, ropeBaseHi: 0.058,
+    bulgeCount: 4, bulgeLen: 0.8, bulgeSize: 1.45, beadLo: 0.58,
     crownDensity: 2.0, bandR: 0.06, spreadX: 1.08, originY: -0.035, originBand: 0.95, arcWidth: 0.95,
-    sprayCount: 20, bubbleCount: 16, beanness: 1.70,
-    glossW: 0.95, glossTip: 1.40, glossBlur: 0.008, glossOff: 3.4, glossWarm: 0.80, glossA: 0.272,
-    tone: 0.74, coatMaxA: 0.70
+    sprayCount: 27, bubbleCount: 22, beanness: 1.70,
+    glossW: 1.25, glossTip: 1.40, glossBlur: 0.008, glossOff: 3.4, glossWarm: 0.80, glossA: 0.17,
+    tone: 0.74, coatMaxA: 0.83, lowA: 0.57
   };
+  // Isometric-token coat overrides: applied when an actor's "coatIso" flag is
+  // set. Uses the same full drape shape as the bust coat (so it reads as a real
+  // drape, not a horizontal band), at full scale, and clips the whole coat to a
+  // cleanly-baked copy of the token's own alpha so it hugs the standing doll
+  // instead of spreading across the square frame. Per-token coatIsoScale /
+  // coatIsoY flags nudge it for figures with overhead gear or an oversized base.
+  // Isometric coat shelved (procedural look didn't land; to be revisited as an
+  // asset-based overlay later). Flip to false to revive the iso render path.
+  const ISO_SHELVED = true;
+  const DRAPE_ISO = { spreadX: 0.92, arcWidth: 0.30, originY: 0.14, coatScale: 1.0, coatY: 0.02, opacityMul: 1.5, revealBlur: 0.006,
+    // mask loosening: let the coat spill past the body alpha and drip off the edge
+    maskGrow: 6, maskBlur: 3,
+    // direction C "liquid" dials (see _buildLiquidTexture)
+    liquidDilate: 2, liquidDrips: 5, liquidD: 5, liquidAmbient: 0.78, liquidAo: 0.72, liquidBump: 2.8,
+    liquidShine: 120, liquidSpec: 2.2, liquidRim: 0.3, liquidLit: 0xffffff, liquidShadow: 0xeef0f4, liquidLight: [-0.46, -0.56, 0.66] };
+
+  // True when the isometric-perspective module is actively warping the canvas.
+  // That module skews/rotates the whole stage and counter-transforms each token
+  // MESH to keep the art upright; our coat is a child of the token (not the mesh),
+  // so when this is on we (a) treat every coat as the figure-hugging iso variant
+  // and (b) mirror the mesh's counter-transform onto the coat (in the iso block).
+  function _isoCanvasActive() {
+    try {
+      if (!game.modules?.get?.("isometric-perspective")?.active) return false;
+      const st = canvas?.app?.stage;
+      if (st && (Math.abs(st.skew?.x || 0) > 1e-4 || Math.abs(st.skew?.y || 0) > 1e-4 || Math.abs(st.rotation || 0) > 1e-4)) return true;
+      const f = canvas?.scene?.getFlag?.("isometric-perspective", "isometricEnabled");
+      if (f != null) return !!f;
+      return !!game.settings?.get?.("isometric-perspective", "worldIsometricFlag");
+    } catch (e) { return false; }
+  }
+
+  // Bust-portrait coat: for tokens that use a cropped bust image inside a dynamic
+  // token ring. The drape origin drops below the head (originY) so there is no
+  // crown arc, it lands a little lower (coatY), and the whole coat is clipped to
+  // the portrait disc INSIDE the ring (clipR) so cum never paints the ring band.
+  const DRAPE_BUST = { spreadX: 0.92, arcWidth: 0.30, originY: 0.14, coatScale: 1.0, coatY: 0.02, clipR: 0.49 };
   function _mixHex(a, b, t) {
     const ar=(a>>16)&255,ag=(a>>8)&255,ab=a&255,br=(b>>16)&255,bg=(b>>8)&255,bb=b&255;
     return ((Math.round(ar+(br-ar)*t))<<16)|((Math.round(ag+(bg-ag)*t))<<8)|(Math.round(ab+(bb-ab)*t));
@@ -520,12 +571,126 @@
                               baseR * (0.55 + rng() * 0.25), lean * 0.6 + (rng() - 0.5) * 0.18, rng, depth + 1);
   }
 
-  function _buildDrapeTextures(rng, TEX) {
+  // Cel helper: from a soft drape texture, bake (a) a hard-edged silhouette
+  // (alpha thresholded) and (b) a constant-width dilated outline RING (white,
+  // tinted at draw). Gives the isometric coat a readable lineart border + crisp
+  // opaque fill instead of a soft translucent wash. Pixel work via 2D canvas.
+  function _buildCelTextures(srcTex, TEX, opts = {}) {
+    try {
+      const r = opts.outlineR ?? 4;
+      const T = (opts.outlineT ?? 0.5) * 255;
+      const ren = canvas.app.renderer;
+      const sp = new PIXI.Sprite(srcTex);
+      const px = ren.extract.pixels(sp);
+      sp.destroy();
+      const W = TEX, H = TEX;
+      const mk = document.createElement("canvas"); mk.width = W; mk.height = H;
+      const mc = mk.getContext("2d"); const im = mc.createImageData(W, H);
+      for (let i = 0; i < W * H; i++) { const on = px[i * 4 + 3] > T; im.data[i * 4] = 255; im.data[i * 4 + 1] = 255; im.data[i * 4 + 2] = 255; im.data[i * 4 + 3] = on ? 255 : 0; }
+      mc.putImageData(im, 0, 0);
+      // dilate by ring-stamping the mask, then punch out the interior -> ring
+      const ol = document.createElement("canvas"); ol.width = W; ol.height = H; const oc = ol.getContext("2d");
+      const N = 24; for (let k = 0; k < N; k++) { const a = k / N * Math.PI * 2; oc.drawImage(mk, Math.cos(a) * r, Math.sin(a) * r); }
+      oc.globalCompositeOperation = "destination-out"; oc.drawImage(mk, 0, 0);
+      return { outline: PIXI.Texture.from(ol), bodyHard: PIXI.Texture.from(mk) };
+    } catch (e) { console.warn("AFLP | cel texture build failed", e); return { outline: null, bodyHard: null }; }
+  }
+
+  // Direction C "liquid": from a soft drape texture, bake a single pre-shaded WET
+  // texture. Pipeline: (1) blur+threshold the alpha and flood-fill interior holes
+  // so thin ropes FUSE into solid pooled blobs (kills the "drawn lines" look);
+  // (2) a distance-transform dome gives each blob a rounded cross-section;
+  // (3) light the heightfield with diffuse + dual specular (broad sheen + tight
+  // hotspot) + a fresnel rim for the wet meniscus. Tunables come from DRAPE_ISO.
+  function _buildLiquidTexture(srcTex, TEX, opts = {}, rng = null) {
+    try {
+      const W = TEX, H = TEX;
+      const ren = canvas.app.renderer;
+      const sp = new PIXI.Sprite(srcTex);
+      const px = ren.extract.pixels(sp);
+      sp.destroy();
+      const A0 = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) A0[i] = px[i * 4 + 3] / 255;
+      const ss = (e0, e1, v) => { let t = (v - e0) / (e1 - e0); return t < 0 ? 0 : t > 1 ? 1 : t; };
+      const box = (A, r) => {
+        const t = new Float32Array(W * H), o = new Float32Array(W * H), n = 2 * r + 1;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let s = 0; for (let k = -r; k <= r; k++) { let xx = x + k; xx = xx < 0 ? 0 : xx >= W ? W - 1 : xx; s += A[y * W + xx]; } t[y * W + x] = s / n; }
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let s = 0; for (let k = -r; k <= r; k++) { let yy = y + k; yy = yy < 0 ? 0 : yy >= H ? H - 1 : yy; s += t[yy * W + x]; } o[y * W + x] = s / n; }
+        return o;
+      };
+      const distT = (A, T) => {
+        const INF = 1e9, d = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) d[i] = A[i] > T ? INF : 0;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (d[i] === 0) continue; let m = d[i]; if (x > 0) m = Math.min(m, d[i - 1] + 1); if (y > 0) m = Math.min(m, d[i - W] + 1); if (x > 0 && y > 0) m = Math.min(m, d[i - W - 1] + 1.414); if (x < W - 1 && y > 0) m = Math.min(m, d[i - W + 1] + 1.414); d[i] = m; }
+        for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const i = y * W + x; if (d[i] === 0) continue; let m = d[i]; if (x < W - 1) m = Math.min(m, d[i + 1] + 1); if (y < H - 1) m = Math.min(m, d[i + W] + 1); if (x < W - 1 && y < H - 1) m = Math.min(m, d[i + W + 1] + 1.414); if (x > 0 && y < H - 1) m = Math.min(m, d[i + W - 1] + 1.414); d[i] = m; }
+        return d;
+      };
+      const rgb = (c) => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+      const dil = opts.liquidDilate ?? 6, D = opts.liquidD ?? 9, ndrip = opts.liquidDrips ?? 8;
+      const rand = (typeof rng === "function") ? rng : Math.random;
+      const maxF = (A, r) => {
+        const t = new Float32Array(W * H), o = new Float32Array(W * H);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let m = 0; for (let k = -r; k <= r; k++) { let xx = x + k; xx = xx < 0 ? 0 : xx >= W ? W - 1 : xx; const v = A[y * W + xx]; if (v > m) m = v; } t[y * W + x] = m; }
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let m = 0; for (let k = -r; k <= r; k++) { let yy = y + k; yy = yy < 0 ? 0 : yy >= H ? H - 1 : yy; const v = t[yy * W + x]; if (v > m) m = v; } o[y * W + x] = m; }
+        return o;
+      };
+      // GROW the raw silhouette: dilation keeps thin ropes and enlarges the mass so
+      // it reaches - and, under a loosened mask, spills past - the body edge,
+      // instead of blur+threshold which eroded thin parts and shrank the coat.
+      let bin = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) bin[i] = A0[i] > 0.32 ? 1 : 0;
+      bin = maxF(bin, dil);
+      const vis = new Uint8Array(W * H), stk = [];
+      for (let x = 0; x < W; x++) { stk.push(x); stk.push((H - 1) * W + x); }
+      for (let y = 0; y < H; y++) { stk.push(y * W); stk.push(y * W + W - 1); }
+      while (stk.length) { const i = stk.pop(); if (vis[i] || bin[i] > 0.5) continue; vis[i] = 1; const x = i % W, y = (i / W) | 0; if (x > 0) stk.push(i - 1); if (x < W - 1) stk.push(i + 1); if (y > 0) stk.push(i - W); if (y < H - 1) stk.push(i + W); }
+      const sil0 = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) sil0[i] = (bin[i] > 0.5 || !vis[i]) ? 1 : 0;
+      // downward drip tails: cum hangs/drips off the lower edge of the mass
+      const cols = [];
+      for (let x = 4; x < W - 4; x++) { let by = -1; for (let y = H - 1; y >= 0; y--) { if (sil0[y * W + x] > 0.5) { by = y; break; } } if (by > H * 0.4) cols.push([x, by]); }
+      for (let t = 0; t < ndrip && cols.length; t++) {
+        const c = cols[(rand() * cols.length) | 0], x = c[0], by = c[1];
+        const len = (5 + rand() * 11) | 0, w0 = 1.5 + rand() * 1.5;
+        for (let dy = 0; dy < len; dy++) { const yy = by + dy; if (yy >= H) break; const ww = Math.max(0.6, w0 * (1 - dy / len)); for (let dx = -Math.ceil(ww); dx <= Math.ceil(ww); dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue; sil0[yy * W + xx] = 1; } }
+        const ty = Math.min(H - 1, by + len); for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { if (dx * dx + dy * dy <= 4) { const xx = x + dx, yy = ty + dy; if (xx >= 0 && xx < W && yy >= 0 && yy < H) sil0[yy * W + xx] = 1; } }
+      }
+      const sil = box(sil0, 1);
+      const d = distT(sil, 0.4), Hr = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) { const t = Math.min(d[i] / D, 1); Hr[i] = Math.sqrt(Math.max(0, 1 - (1 - t) * (1 - t))); }
+      const Hf = box(Hr, 1);
+      let L = (opts.liquidLight || [-0.46, -0.56, 0.66]).slice(); const ll = 1 / Math.hypot(L[0], L[1], L[2]); L = [L[0] * ll, L[1] * ll, L[2] * ll];
+      const hv = [L[0], L[1], L[2] + 1.0]; const hl = 1 / Math.hypot(hv[0], hv[1], hv[2]); hv[0] *= hl; hv[1] *= hl; hv[2] *= hl;
+      const lit = rgb(opts.liquidLit ?? 0xffffff), sh = rgb(opts.liquidShadow ?? 0xeef0f4);
+      const amb = opts.liquidAmbient ?? 0.78, aoLo = opts.liquidAo ?? 0.72, bump = opts.liquidBump ?? 2.8;
+      const sh1 = 12, s1 = 0.45, sh2 = opts.liquidShine ?? 120, s2 = opts.liquidSpec ?? 2.2, rimP = opts.liquidRim ?? 0.3;
+      const cnv = document.createElement("canvas"); cnv.width = W; cnv.height = H;
+      const ctx = cnv.getContext("2d"); const im = ctx.createImageData(W, H);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x; const a = ss(0.34, 0.46, sil[i]); if (a <= 0) { im.data[i * 4 + 3] = 0; continue; }
+        const xl = x > 0 ? x - 1 : 0, xr = x < W - 1 ? x + 1 : W - 1, yu = y > 0 ? y - 1 : 0, yd = y < H - 1 ? y + 1 : H - 1;
+        let nx = (Hf[y * W + xl] - Hf[y * W + xr]) * bump, ny = (Hf[yu * W + x] - Hf[yd * W + x]) * bump, nz = 1;
+        const inv = 1 / Math.hypot(nx, ny, nz); nx *= inv; ny *= inv; nz *= inv;
+        const diff = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+        const ao = aoLo + (1 - aoLo) * Hf[i]; let shade = (amb + (1 - amb) * diff) * ao; if (shade > 1) shade = 1;
+        const nh = Math.max(0, nx * hv[0] + ny * hv[1] + nz * hv[2]);
+        const sheen = Math.pow(nh, sh1) * s1, hot = Math.pow(nh, sh2) * s2, rim = Math.pow(1 - nz, 5) * rimP, add = (sheen + hot + rim) * 255;
+        im.data[i * 4]     = Math.min(255, sh[0] + (lit[0] - sh[0]) * shade + add);
+        im.data[i * 4 + 1] = Math.min(255, sh[1] + (lit[1] - sh[1]) * shade + add);
+        im.data[i * 4 + 2] = Math.min(255, sh[2] + (lit[2] - sh[2]) * shade + add);
+        im.data[i * 4 + 3] = a * 255;
+      }
+      ctx.putImageData(im, 0, 0);
+      return PIXI.Texture.from(cnv);
+    } catch (e) { console.warn("AFLP | liquid texture build failed", e); return null; }
+  }
+
+  function _buildDrapeTextures(rng, TEX, opts = {}) {
     const body = new PIXI.Graphics();
     const gloss = new PIXI.Graphics();
     const core = new PIXI.Graphics(); _coreG = core;
-    const cx = TEX * 0.5, hcY = TEX * 0.42 + DRAPE.originY * TEX, hr = TEX * 0.34;   // head centre + radius
-    const aMax = DRAPE.arcWidth, SX = DRAPE.spreadX, BND = DRAPE.originBand, bn = DRAPE.beanness;
+    const cx = TEX * 0.5, hcY = TEX * 0.42 + (opts.originY ?? DRAPE.originY) * TEX, hr = TEX * 0.34;   // head centre + radius
+    const aMax = opts.arcWidth ?? DRAPE.arcWidth, SX = opts.spreadX ?? DRAPE.spreadX, BND = DRAPE.originBand, bn = DRAPE.beanness;
     const cd = Q().coatDetail;   // quality: scale build-time blob/rope/spray counts
     const arcPt = (a) => ({ x: cx + Math.sin(a) * hr, y: hcY - Math.cos(a) * hr * 0.95 });
     const reg = () => ({ x: cx + (rng() - 0.5) * hr * 1.8 * SX, y: hcY - hr * 0.8 * BND + rng() * hr * 1.6 * BND });
@@ -572,7 +737,7 @@
     for (let i = 0; i < nR; i++) {
       const a = -aMax + (2 * aMax) * ((i + 0.5) / nR) + (rng() - 0.5) * (2 * aMax / nR) * 1.25;
       const p = arcPt(a);
-      const baseR = TEX * (0.011 + rng() * 0.058) * DRAPE.ropeThick;          // even spread of thin..fat
+      const baseR = TEX * (DRAPE.ropeBaseLo + rng() * (DRAPE.ropeBaseHi - DRAPE.ropeBaseLo)) * DRAPE.ropeThick;          // even spread of thin..fat
       const len = TEX * (0.085 + rng() * 0.18) * DRAPE.ropeLen;
       const lean = Math.sin(a) * 0.42 + (rng() - 0.5) * 0.34;
       _drawDrapeRope(body, gloss, cx + (rng() - 0.5) * hr * 1.9 * SX, hcY - hr * 0.82 * BND + rng() * hr * 1.7 * BND, len, baseR, lean, rng, 0);
@@ -607,7 +772,11 @@
     const cWrap = _blurWrap(core, TEX * 0.006);
     const cTex = _genTex(cWrap, TEX); cWrap.destroy({ children: true });
     _coreG = null;
-    return { body: bTex, gloss: gTex, core: cTex };
+    let cel = { outline: null, bodyHard: null };
+    if (opts.cel) cel = _buildCelTextures(bTex, TEX, opts);
+    let liquid = null;
+    if (opts.liquid) liquid = _buildLiquidTexture(bTex, TEX, opts, rng);
+    return { body: bTex, gloss: gTex, core: cTex, outline: cel.outline, bodyHard: cel.bodyHard, liquid };
   }
 
   // Round-contained vertical reveal mask: opaque from the top down to yCut, soft
@@ -648,17 +817,34 @@
 
     // Token-seeded drape, cached. Geometry is identity-stable; tier only changes
     // how far it is revealed, so the same sheet just runs further as it grows.
-    let d = _drapeCache[token.id];
-    if (!d || !d.body?.valid) { d = _buildDrapeTextures(_rng(`${token.id}|drape`), TEX); _drapeCache[token.id] = d; }
+    const iso = !ISO_SHELVED && (!!token.actor?.getFlag(SCOPE, "coatIso") || _isoCanvasActive());
+    const bust = !iso && !!token.actor?.getFlag(SCOPE, "coatBust");
+    const variant = iso ? "iso" : (bust ? "bust" : "");
+    const dkey = token.id + (variant ? "|" + variant : "");
+    let d = _drapeCache[dkey];
+    if (!d || !d.body?.valid) {
+      const dopts = iso ? { spreadX: DRAPE_ISO.spreadX, arcWidth: DRAPE_ISO.arcWidth, originY: DRAPE_ISO.originY, liquid: true,
+          liquidDilate: DRAPE_ISO.liquidDilate, liquidDrips: DRAPE_ISO.liquidDrips, liquidD: DRAPE_ISO.liquidD, liquidAmbient: DRAPE_ISO.liquidAmbient,
+          liquidAo: DRAPE_ISO.liquidAo, liquidBump: DRAPE_ISO.liquidBump, liquidShine: DRAPE_ISO.liquidShine, liquidSpec: DRAPE_ISO.liquidSpec,
+          liquidRim: DRAPE_ISO.liquidRim, liquidLit: DRAPE_ISO.liquidLit, liquidShadow: DRAPE_ISO.liquidShadow, liquidLight: DRAPE_ISO.liquidLight }
+                  : bust ? { spreadX: DRAPE_BUST.spreadX, arcWidth: DRAPE_BUST.arcWidth, originY: DRAPE_BUST.originY }
+                  : {};
+      d = _buildDrapeTextures(_rng(`${token.id}|drape${variant ? "|" + variant : ""}`), TEX, dopts);
+      _drapeCache[dkey] = d;
+    }
 
-    const tcov = Math.max(0, Math.min(1, (tier - 1) / 8));
-    const baseA = (DRAPE.coatMaxA - 0.13) + tcov * 0.13;   // tuned: ramps to coatMaxA at top tier
+    // `tier` is the combined 0-32 fill across all four sites (see _effectiveLevel):
+    // the coat appears from the first pip and reaches full coverage only when
+    // every site is loaded.
+    const tcov = Math.max(0, Math.min(1, tier / 32));
+    let baseA = DRAPE.lowA + tcov * (DRAPE.coatMaxA - DRAPE.lowA);   // ramps lowA -> coatMaxA
+    if (iso) baseA = Math.min(0.98, baseA * (token.actor?.getFlag(SCOPE, "coatIsoOpacity") ?? DRAPE_ISO.opacityMul ?? 1));   // iso reads small on-screen - push it more opaque
     const sc = w / TEX;
 
     // Layered stamp of the full-token drape: drop-shadow, rim, opaque body, gloss.
     // Wet film: faint dark-warm translucent sheen with patches/holes, appears mid-tier
     // and spreads to a near-full coat by tier 9. Drawn underneath everything, own portrait clip.
-    if (tcov > 0.22 && Q().film) {
+    if (tcov > 0.22 && Q().film && !iso) {
       const frng = _rng(token.id + '|film');
       const fcov = Math.min(1, (tcov - 0.22) / 0.78);
       const fg = new PIXI.Graphics();
@@ -685,19 +871,37 @@
     };
     const tone = DRAPE.tone;
     const rich = Q().richLayers;   // quality: drop the two subtlest per-frame layers at low
-    place(d.body, _mixHex(0x0e0e12, 0x6c5842, tone), baseA * 0.34, 1, 2, false);                  // shadow (warmed toward the puddle ramp)
-    if (rich) place(d.body, _mixHex(0x655d52, 0x6c5842, tone), baseA * 0.45, -LIGHT.x * 3.0, -LIGHT.y * 3.0, false); // form shadow (shadow-side crescent for roundness)
-    if (rich) place(d.body, _mixHex(0xffffff, 0xfffcf4, tone), 0.24, LIGHT.x * 2.4, LIGHT.y * 2.4, false);   // rim
-    const _cr=(color>>16)&255,_cg=(color>>8)&255,_cb=color&255;
-    const _mr=0.92+0.04*tone,_mg=0.86+0.07*tone,_mb=0.76+0.11*tone;
-    const wd=((Math.round(_cr*_mr))<<16)|((Math.round(_cg*_mg))<<8)|(Math.round(_cb*_mb)); place(d.body, wd, baseA * 0.78, 0, 0, false);
-    if (d.core) place(d.core, color, baseA * 0.7, 0, 0, false);                                    // body
-    place(d.gloss, _mixHex(0xffffff, 0xffecc8, DRAPE.glossWarm), DRAPE.glossA, LIGHT.x * DRAPE.glossOff, 0, true); // gloss
+    if (iso) {
+      // ISO liquid coat: one pre-shaded WET texture (d.liquid) - metaball-fused
+      // blobs lit as rounded volume with specular gloss. Drawn near-opaque,
+      // scaled by coverage, so it reads as thick fluid. Everything (shadow, body,
+      // gloss, edge) is baked into the one texture, so no extra layers here.
+      if (d.liquid) {
+        place(d.liquid, 0xffffff, Math.min(1, baseA * 1.35), 0, 0, false);
+      } else {
+        // fallback: warm cream body if the pixel bake failed
+        const _cr = (color >> 16) & 255, _cg = (color >> 8) & 255, _cb = color & 255;
+        const wdf = ((Math.round(_cr * 0.95)) << 16) | ((Math.round(_cg * 0.9)) << 8) | (Math.round(_cb * 0.82));
+        place(d.body, wdf, Math.min(1, baseA * 1.1), 0, 0, false);
+        place(d.gloss, _mixHex(0xffffff, 0xffecc8, DRAPE.glossWarm), DRAPE.glossA * 1.3, LIGHT.x * DRAPE.glossOff, 0, true);
+      }
+    } else {
+      place(d.body, _mixHex(0x0e0e12, 0x6c5842, tone), baseA * 0.34, 1, 2, false);                  // shadow (warmed toward the puddle ramp)
+      if (rich) place(d.body, _mixHex(0x655d52, 0x6c5842, tone), baseA * 0.45, -LIGHT.x * 3.0, -LIGHT.y * 3.0, false); // form shadow (shadow-side crescent for roundness)
+      if (rich) place(d.body, _mixHex(0xffffff, 0xfffcf4, tone), 0.24, LIGHT.x * 2.4, LIGHT.y * 2.4, false);   // rim
+      const _cr = (color >> 16) & 255, _cg = (color >> 8) & 255, _cb = color & 255;
+      const _mr = 0.92 + 0.04 * tone, _mg = 0.86 + 0.07 * tone, _mb = 0.76 + 0.11 * tone;
+      const wd = ((Math.round(_cr * _mr)) << 16) | ((Math.round(_cg * _mg)) << 8) | (Math.round(_cb * _mb));
+      place(d.body, wd, baseA * 0.78, 0, 0, false);
+      if (d.core) place(d.core, color, baseA * 0.7, 0, 0, false);  // body
+      place(d.gloss, _mixHex(0xffffff, 0xffecc8, DRAPE.glossWarm), DRAPE.glossA, LIGHT.x * DRAPE.glossOff, 0, true); // gloss
+    }
 
-    // Pooled cum: thick bright bubbly blobs spread across the face at high tiers.
-    if (tier >= 8 && Q().pool) {
+    // Pooled cum: thick bright bubbly blobs spread across the token once it is
+    // heavily loaded (top quarter of the 0-32 fill), count capped low.
+    if (tcov >= 0.75 && Q().pool) {
       const rng = _rng(`${token.id}|pool`);
-      const npool = 2 + (tier - 8) * 3;
+      const npool = 2 + Math.round((tcov - 0.75) * 12);
       for (let p = 0; p < npool; p++) {
         const px = w * (0.20 + rng() * 0.60);
         const py = h * (0.16 + rng() * 0.62);
@@ -718,11 +922,110 @@
     for (let i = 0; i < nblob; i++) {
       _fillCircle(mg, TEX * (0.12 + mrng() * 0.76), TEX * (0.08 + mrng() * 0.78), TEX * (0.10 + mrng() * 0.10), 0xffffff, 1);
     }
-    const maskTex = _genTex(_blurWrap(mg, TEX * 0.022), TEX);
+    const maskTex = _genTex(_blurWrap(mg, TEX * (iso ? (DRAPE_ISO.revealBlur ?? 0.011) : 0.022)), TEX);
     const mask = new PIXI.Sprite(maskTex);
     mask.anchor.set(0, 0); mask.x = 0; mask.y = 0; mask.scale.set(sc, sc); mask.eventMode = "none";
     cumC.addChild(mask);
     cumC.mask = mask;
+
+    // Isometric: shrink + lift the cum container to sit over a standing doll, and
+    // clip the whole coat to the token sprite's alpha so it hugs the figure
+    // instead of spreading across the square portrait frame.
+    if (iso) {
+      // Per-token fine-tuning: coatIsoScale / coatIsoY let a token with overhead
+      // gear (spears, banners) or an oversized base nudge the drape without code.
+      const s  = token.actor?.getFlag(SCOPE, "coatIsoScale") ?? DRAPE_ISO.coatScale;
+      const cy = token.actor?.getFlag(SCOPE, "coatIsoY") ?? DRAPE_ISO.coatY;
+      cumC.scale.set(s);
+      cumC.position.set(w * 0.5 * (1 - s), h * 0.5 * (1 - s) + h * cy);
+      let m = null;
+      try {
+        const tex = token.mesh?.texture || token.texture;
+        const renderer = canvas?.app?.renderer;
+        if (tex && tex.valid !== false && renderer) {
+          // Bake the token's own alpha into a RenderTexture and mask to THAT. The
+          // art is fit into the (often square) token frame per its fit mode, so a
+          // tall portrait renders as a narrow centred strip. Replicate that fit
+          // when baking so the mask matches the figure exactly - a raw stretch to
+          // w*h made the mask wider than the real figure and let the coat (and the
+          // wet film) smear out to the sides.
+          const tw = tex.width || w, th = tex.height || h;
+          const fit = token.document?.texture?.fit ?? "contain";
+          let aw, ah;
+          if (fit === "fill") { aw = w; ah = h; }
+          else if (fit === "cover") { const s = Math.max(w / tw, h / th); aw = tw * s; ah = th * s; }
+          else if (fit === "width") { aw = w; ah = th * (w / tw); }
+          else if (fit === "height") { aw = tw * (h / th); ah = h; }
+          else { const s = Math.min(w / tw, h / th); aw = tw * s; ah = th * s; } // contain (token default)
+          // Loosen the clip: pad the mask frame, dilate the figure alpha by
+          // maskGrow (ring stamps) and soft-blur its edge, so the coat spills a
+          // little past the silhouette and drips off the body instead of being
+          // razor-clipped to the alpha.
+          const grow = DRAPE_ISO.maskGrow ?? 14, mblur = DRAPE_ISO.maskBlur ?? 7;
+          const pad = Math.ceil(grow + mblur + 6);
+          const rw = Math.max(1, Math.round(w) + pad * 2), rh = Math.max(1, Math.round(h) + pad * 2);
+          const rt = PIXI.RenderTexture.create({ width: rw, height: rh });
+          const tmp = new PIXI.Container();
+          const ox = (w - aw) / 2 + pad, oy = (h - ah) / 2 + pad;
+          for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2; const s2 = new PIXI.Sprite(tex); s2.width = aw; s2.height = ah; s2.position.set(ox + Math.cos(a) * grow, oy + Math.sin(a) * grow); s2.eventMode = "none"; tmp.addChild(s2); }
+          const ts = new PIXI.Sprite(tex); ts.width = aw; ts.height = ah; ts.position.set(ox, oy);
+          tmp.addChild(ts);
+          if (mblur > 0) tmp.filters = [new PIXI.BlurFilter(mblur)];
+          renderer.render(tmp, { renderTexture: rt });
+          tmp.destroy({ children: true });
+          m = new PIXI.Sprite(rt); m._aflpPad = pad;
+        }
+      } catch (e) {}
+      if (m) { const p = m._aflpPad || 0; m.anchor.set(0, 0); m.x = -p; m.y = -p; m.eventMode = "none"; container.addChild(m); container.mask = m; }
+
+      // isometric-perspective module: it skews/rotates the stage and counter-
+      // transforms the token mesh to keep the art upright. The coat is a child of
+      // the token (not the mesh), so it would otherwise inherit the raw stage
+      // skew. Mirror the mesh's counter-transform here, pivoting at the figure
+      // centre, so the coat stays glued to the upright art. (No-op when the
+      // module is off - mesh skew/rotation are zero.)
+      const me2 = token.mesh;
+      if (me2 && (Math.abs(me2.skew?.x || 0) > 1e-4 || Math.abs(me2.skew?.y || 0) > 1e-4 || Math.abs(me2.rotation || 0) > 1e-4)) {
+        container.pivot.set(w / 2, h / 2);
+        container.position.set(w / 2, h / 2);
+        container.rotation = me2.rotation || 0;
+        container.skew.set(me2.skew?.x || 0, me2.skew?.y || 0);
+      }
+    }
+
+    // Bust: scale + drop the coat to sit on the chest, then bind the whole coat
+    // to the token image's alpha (the same way the Isometric coat does) so it
+    // hugs the bust figure, intersected with the ring disc so it never paints
+    // the ring band.
+    if (bust) {
+      const s = DRAPE_BUST.coatScale;
+      cumC.scale.set(s);
+      cumC.position.set(w * 0.5 * (1 - s), h * 0.5 * (1 - s) + h * DRAPE_BUST.coatY);
+      let m = null;
+      try {
+        const tex = token.mesh?.texture || token.texture;
+        const renderer = canvas?.app?.renderer;
+        if (tex && tex.valid !== false && renderer) {
+          // Bake (token alpha ∩ ring disc) into a RenderTexture to use as the mask.
+          const rt = PIXI.RenderTexture.create({ width: Math.max(1, w), height: Math.max(1, h) });
+          const tmp = new PIXI.Container();
+          const ts = new PIXI.Sprite(tex); ts.width = w; ts.height = h;
+          const disc = new PIXI.Graphics();
+          disc.beginFill(0xffffff, 1).drawCircle(w * 0.5, h * 0.5, w * DRAPE_BUST.clipR).endFill();
+          tmp.addChild(ts); tmp.addChild(disc); ts.mask = disc;
+          renderer.render(tmp, { renderTexture: rt });
+          tmp.destroy({ children: true });
+          m = new PIXI.Sprite(rt);
+        }
+      } catch (e) {}
+      if (!m) {
+        // Fallback to the plain ring disc if the token texture is unavailable.
+        const cmg = new PIXI.Graphics(); _fillCircle(cmg, TEX * 0.5, TEX * 0.5, TEX * DRAPE_BUST.clipR, 0xffffff, 1);
+        m = new PIXI.Sprite(_genTex(_blurWrap(cmg, TEX * 0.012), TEX)); m.scale.set(sc);
+      }
+      m.anchor.set(0, 0); m.x = 0; m.y = 0; m.eventMode = "none";
+      container.addChild(m); container.mask = m;
+    }
   }
 
   function _ensureCoat(token, tier) {
@@ -738,7 +1041,8 @@
       AFLP_Splatter._coats.set(token.id, coat);
     }
     if (coat.parent !== token) token.addChild(coat);
-    if (coat._aflpTier !== tier) { _drawCoat(coat, token, tier); coat._aflpTier = tier; }
+    const variant = (!ISO_SHELVED && token.actor?.getFlag(SCOPE, "coatIso")) ? "iso" : (token.actor?.getFlag(SCOPE, "coatBust") ? "bust" : "std");
+    if (coat._aflpTier !== tier || coat._aflpVariant !== variant) { _drawCoat(coat, token, tier); coat._aflpTier = tier; coat._aflpVariant = variant; coat._aflpCoatURL = null; }
   }
 
   // ── Ground layer + puddles ─────────────────────────────────────────────────
@@ -849,7 +1153,10 @@
     const color = _color();
     const st = _stage(rec.tier);
     const grid = canvas.grid?.size ?? 100;
-    const R = grid * st.puddleR * PUDDLE_SIZE;
+    let R = grid * st.puddleR * PUDDLE_SIZE;
+    // Overflow spill: a big load floods out to a DH range band (distance in grid
+    // units). Dampen the literal distance into a dramatic-but-bounded radius.
+    if (rec.spillDist > 0) R = Math.max(R, grid * (1 + Math.sqrt(rec.spillDist)));
     const sub = new PIXI.Container();
     sub.position.set(rec.x, rec.y);
     sub.scale.set(1, PUDDLE_SQUASH);
@@ -892,6 +1199,9 @@
     let list = map[token.id];
     if (!Array.isArray(list)) list = list ? [list] : [];      // back-compat with old single record
     const cx = token.center.x, cy = token.center.y;
+    const _spill = token.actor?.getFlag?.(SCOPE, "cumSpill");
+    const spillDist  = _spill?.distance ?? 0;
+    const spillUnits = _spill?.units ?? 0;
     // Grow the nearest puddle if the token is still roughly where it was;
     // otherwise drop a NEW puddle at the current position (token has moved).
     let near = null, nd = Infinity;
@@ -900,10 +1210,13 @@
       if (d < nd) { nd = d; near = rec; }
     }
     if (near && nd <= grid * 0.9) {
-      if (near.tier >= tier) return;
-      near.tier = tier;
+      let changed = false;
+      if (tier > near.tier) { near.tier = tier; changed = true; }
+      if (spillDist  > (near.spillDist  ?? 0)) { near.spillDist  = spillDist;  changed = true; }
+      if (spillUnits > (near.spillUnits ?? 0)) { near.spillUnits = spillUnits; changed = true; }
+      if (!changed) return;
     } else {
-      list.push({ x: cx, y: cy, tier, seed: (_hash(`${token.id}|${Date.now()}|${list.length}`) >>> 0) });
+      list.push({ x: cx, y: cy, tier, spillDist, spillUnits, seed: (_hash(`${token.id}|${Date.now()}|${list.length}`) >>> 0) });
     }
     map[token.id] = list;
     await canvas.scene.setFlag(MODULE_ID, PUDDLE_KEY, map);
@@ -920,11 +1233,38 @@
       return canvas.tokens.placeables.filter(t => t.actor === actor || t.document?.actorId === actor.id);
     },
 
+    // Render this actor's cumflation coat to a PNG data URL so non-canvas surfaces
+    // (e.g. the H-Scene portraits) can show the exact same coat the canvas token
+    // wears. Cached on the coat per tier; returns null when there is no coat.
+    coatDataURL(actor) {
+      try {
+        if (!actor || !canvas?.app?.renderer) return null;
+        const token = this._tokensFor(actor)[0];
+        if (!token) return null;
+        let coat = this._coats.get(token.id);
+        if (!coat) {
+          const lvl = _effectiveLevel(actor.getFlag(SCOPE, "cumflation"));
+          if (lvl <= 0) return null;
+          _ensureCoat(token, lvl);
+          coat = this._coats.get(token.id);
+        }
+        if (!coat || !coat.children?.length) return null;
+        if (coat._aflpCoatURL && coat._aflpCoatURLKey === coat._aflpTier) return coat._aflpCoatURL;
+        const cnv = canvas.app.renderer.extract.canvas(coat);
+        const url = cnv.toDataURL("image/png");
+        coat._aflpCoatURL    = url;
+        coat._aflpCoatURLKey = coat._aflpTier;
+        return url;
+      } catch (e) { return null; }
+    },
+
     refreshActor(actor) {
       if (!sEnabled() || !actor) return;
       if (!actor.hasPlayerOwner && !sIncludeNpc()) return;
-      const tier = _effectiveTier(actor.getFlag(SCOPE, "cumflation"));
-      for (const token of this._tokensFor(actor)) { _ensureCoat(token, tier); _maybeUpsertPuddle(token, tier); }
+      const cf   = actor.getFlag(SCOPE, "cumflation");
+      const lvl  = _effectiveLevel(cf);   // coat: combined 0-32 fill across sites
+      const tier = _effectiveTier(cf);    // ground puddle: integer 0-9 stage
+      for (const token of this._tokensFor(actor)) { _ensureCoat(token, lvl); _maybeUpsertPuddle(token, tier); }
     },
 
     refreshAll() {
@@ -935,13 +1275,13 @@
       // the new resolution/detail (puddles rebuild below regardless).
       for (const k in _drapeCache) {
         const d = _drapeCache[k];
-        try { d?.body?.destroy(true); d?.gloss?.destroy(true); d?.core?.destroy(true); } catch (e) {}
+        try { d?.body?.destroy(true); d?.gloss?.destroy(true); d?.core?.destroy(true); d?.liquid?.destroy(true); d?.outline?.destroy(true); d?.bodyHard?.destroy(true); } catch (e) {}
         delete _drapeCache[k];
       }
       if (sEnabled() && !sHideLocal()) {
         for (const token of canvas.tokens.placeables) {
-          const tier = _effectiveTier(token.actor?.getFlag(SCOPE, "cumflation"));
-          if (tier >= START_TIER && (token.actor?.hasPlayerOwner || sIncludeNpc())) _ensureCoat(token, tier);
+          const lvl = _effectiveLevel(token.actor?.getFlag(SCOPE, "cumflation"));
+          if (lvl >= START_TIER && (token.actor?.hasPlayerOwner || sIncludeNpc())) _ensureCoat(token, lvl);
         }
       }
       _redrawPuddles();
@@ -965,7 +1305,16 @@
       });
 
       Hooks.on("updateActor", (actor, changes) => {
-        if (foundry.utils.getProperty(changes, `flags.${SCOPE}.cumflation`) === undefined) return;
+        const cumChanged = foundry.utils.getProperty(changes, `flags.${SCOPE}.cumflation`) !== undefined;
+        const isoChanged = foundry.utils.getProperty(changes, `flags.${SCOPE}.coatIso`) !== undefined;
+        if (!cumChanged && !isoChanged) return;
+        if (isoChanged) {
+          // Coat style switched: drop existing coats so they rebuild in the new mode.
+          for (const token of this._tokensFor(actor)) {
+            const coat = this._coats.get(token.id);
+            if (coat) { coat.mask = null; coat.destroy({ children: true }); this._coats.delete(token.id); }
+          }
+        }
         this.refreshActor(actor);
       });
 
@@ -974,12 +1323,12 @@
         if (coat && !coat.destroyed && coat.parent === token) return;   // still good, no work
         // Coat missing/detached/destroyed (a redraw on click-drag wipes it) -> rebuild.
         if (!sEnabled()) return;
-        const tier = _effectiveTier(token.actor?.getFlag(SCOPE, "cumflation"));
-        if (tier >= START_TIER && (token.actor?.hasPlayerOwner || sIncludeNpc())) _ensureCoat(token, tier);
+        const lvl = _effectiveLevel(token.actor?.getFlag(SCOPE, "cumflation"));
+        if (lvl >= START_TIER && (token.actor?.hasPlayerOwner || sIncludeNpc())) _ensureCoat(token, lvl);
       });
       Hooks.on("drawToken", (token) => {
-        const tier = _effectiveTier(token.actor?.getFlag(SCOPE, "cumflation"));
-        if (tier >= START_TIER && sEnabled() && (token.actor?.hasPlayerOwner || sIncludeNpc())) _ensureCoat(token, tier);
+        const lvl = _effectiveLevel(token.actor?.getFlag(SCOPE, "cumflation"));
+        if (lvl >= START_TIER && sEnabled() && (token.actor?.hasPlayerOwner || sIncludeNpc())) _ensureCoat(token, lvl);
       });
       Hooks.on("destroyToken", (token) => {
         const coat = this._coats.get(token.id);

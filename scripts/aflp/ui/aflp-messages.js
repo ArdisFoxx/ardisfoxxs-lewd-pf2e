@@ -1,5 +1,5 @@
 // ====================================================
-// AFLP H Scene Messages
+// AFLP H-Scene Messages
 // ====================================================
 window.AFLP = window.AFLP ?? {};
 
@@ -110,13 +110,13 @@ AFLP.Messages = {
 };
 
 // -----------------------------------------------
-// H Scene Messages Editor - ApplicationV2
+// H-Scene Messages Editor - ApplicationV2
 // -----------------------------------------------
 class HSceneMessagesApp extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id:       "aflp-messages-editor",
     tag:      "div",
-    window:   { title: "H Scene Messages", resizable: true, minimizable: true },
+    window:   { title: "H-Scene Messages", resizable: true, minimizable: true },
     position: { width: 620, height: 560 },
   };
 
@@ -181,7 +181,7 @@ class HSceneMessagesApp extends foundry.applications.api.ApplicationV2 {
         newCustom[ta.dataset.key] = lines.length === 1 ? lines[0] : lines;
       });
       await AFLP.Messages._saveCustom(newCustom);
-      ui.notifications.info("AFLP | H Scene messages saved.");
+      ui.notifications.info("AFLP | H-Scene messages saved.");
     });
     el.querySelector(".aflp-msg-reset")?.addEventListener("click", async () => {
       await AFLP.Messages._saveCustom({});
@@ -195,9 +195,9 @@ AFLP.HSceneMessagesApp = HSceneMessagesApp;
 
 // Direct registration - file is dynamically imported after ready fires.
 game.settings.registerMenu("ardisfoxxs-lewd-pf2e", "hsceneMessagesMenu", {
-  name:    "H Scene Messages",
+  name:    "H-Scene Messages",
   label:   "Edit Messages",
-  hint:    "Customise the flavor text that appears in H scene log entries. Saved to world, survives module updates.",
+  hint:    "Customise the flavor text that appears in H-Scene log entries. Saved to world, survives module updates.",
   icon:    "fas fa-comment-dots",
   type:    HSceneMessagesApp,
   restricted: true,
@@ -212,36 +212,47 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
     id:       "aflp-cf-labels-editor",
     tag:      "div",
     window:   { title: "Cumflation Status Labels", resizable: false, minimizable: true },
-    position: { width: 460 },
+    position: { width: 720 },
   };
 
   _esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
-  _load() {
+  _loadOverall() {
     try {
       const r = game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS) ?? "";
       return r ? JSON.parse(r) : [];
     } catch { return []; }
   }
 
+  _loadHoles() {
+    try {
+      const r = game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_HOLE_LABELS) ?? "";
+      return r ? JSON.parse(r) : {};
+    } catch { return {}; }
+  }
+
   async _renderHTML() {
-    const custom = this._load();
-    // Single source of truth: the H Scene card's CF_LABEL_DEFAULTS, exposed on AFLP.
-    // Word and tier come straight from the card so this menu can never drift from it.
-    const D = (AFLP.CF_LABEL_DEFAULTS ?? []).map(e => ({
-      w: e.word,
-      t: e.minTier >= 9 ? "Tier 8 + Facial 8" : "Tier " + e.minTier,
-    }));
-    const rows = D.map((d, i) => {
-      const c = custom[i]?.w ?? "";
-      return `<tr>
-        <td style="color:#aaa;font-size:11px;padding:4px 8px 4px 0;white-space:nowrap;">${this._esc(d.t)}</td>
-        <td style="color:#666;font-size:10px;padding:4px 8px;font-style:italic;">${this._esc(d.w)}</td>
-        <td><input type="text" data-i="${i}" value="${this._esc(c)}" placeholder="${this._esc(d.w)}"
-          style="width:150px;background:#111;color:#e0c8a0;border:1px solid rgba(200,160,80,0.3);
-          border-radius:3px;padding:3px 6px;font-size:11px;font-weight:700;"/></td>
+    const HOLES = ["vaginal", "anal", "oral", "facial"];
+    const overallDef = AFLP.CF_LABEL_DEFAULTS ?? [];
+    const holeDef    = AFLP.CF_HOLE_WORDS ?? {};
+    const customO = this._loadOverall();
+    const customH = this._loadHoles();
+    const inp = (col, i, def, cur) => `<input type="text" data-col="${col}" data-i="${i}" value="${this._esc(cur)}" placeholder="${this._esc(def)}"
+        style="width:118px;background:#111;color:#e0c8a0;border:1px solid rgba(200,160,80,0.3);border-radius:3px;padding:3px 5px;font-size:11px;font-weight:700;"/>`;
+    let rows = "";
+    for (let t = 1; t <= 8; t++) {
+      const i = t - 1;
+      rows += `<tr>
+        <td style="color:#aaa;font-size:11px;padding:4px 8px 4px 0;white-space:nowrap;">Tier ${t}</td>
+        <td>${inp("overall", i, overallDef[i]?.word ?? "", customO[i]?.w ?? "")}</td>
+        ${HOLES.map(h => `<td>${inp(h, i, (holeDef[h] || [])[i] ?? "", (customH[h] || [])[i] ?? "")}</td>`).join("")}
       </tr>`;
-    }).join("");
+    }
+    rows += `<tr>
+      <td style="color:#aaa;font-size:11px;padding:4px 8px 4px 0;white-space:nowrap;">T8 + Facial 8</td>
+      <td>${inp("overall", 8, overallDef[8]?.word ?? "", customO[8]?.w ?? "")}</td>
+      <td colspan="4" style="color:#555;font-size:10px;font-style:italic;padding-left:8px;">(overall only)</td>
+    </tr>`;
     const el = document.createElement("div");
     el.innerHTML = `<style>
       #aflp-cf-labels-editor .window-content { padding: 0; }
@@ -249,14 +260,13 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
       .aflp-cf-t { padding: 8px 12px; }
       .aflp-cf-f { padding: 6px 12px; border-top: 1px solid rgba(200,160,80,.15); display: flex; justify-content: flex-end; gap: 6px; }
       .aflp-cf-f button { padding: 4px 14px; font-size: 11px; cursor: pointer; }
+      .aflp-cf-t th { font-size:9px; color:#888; text-align:left; padding:0 4px 4px; }
     </style>
-    <div class="aflp-cf-i">Rename each cumflation status label. Leave blank to keep the default.</div>
+    <div class="aflp-cf-i">Rename each cumflation label. Blank keeps the default. Overall shows on H-Scene cards; the four hole columns show per-hole on the sheet.</div>
     <div class="aflp-cf-t">
       <table style="border-collapse:collapse;width:100%">
         <thead><tr>
-          <th style="font-size:9px;color:#888;text-align:left;padding-bottom:4px;">Total Cumflation</th>
-          <th style="font-size:9px;color:#888;text-align:left;padding-bottom:4px;">Default</th>
-          <th style="font-size:9px;color:#888;text-align:left;padding-bottom:4px;">Custom</th>
+          <th>Tier</th><th>Overall</th><th>Pussy</th><th>Anal</th><th>Oral</th><th>Facial</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -273,13 +283,21 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
   _onRender(context, options) {
     const el = this.element;
     el.querySelector(".aflp-cf-s")?.addEventListener("click", async () => {
-      const c = [...el.querySelectorAll("input[data-i]")].map(x => ({ w: x.value.trim() }));
-      await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS, JSON.stringify(c));
-      ui.notifications.info("AFLP | Cumflation labels saved.");
+      const overall = [];
+      const holes = { vaginal: [], anal: [], oral: [], facial: [] };
+      el.querySelectorAll("input[data-col]").forEach(x => {
+        const col = x.dataset.col, i = Number(x.dataset.i), v = x.value.trim();
+        if (col === "overall") overall[i] = { w: v };
+        else if (holes[col]) holes[col][i] = v;
+      });
+      await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS, JSON.stringify(overall));
+      await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_HOLE_LABELS, JSON.stringify(holes));
+      ui.notifications.info("AFLR | Cumflation labels saved.");
     });
     el.querySelector(".aflp-cf-r")?.addEventListener("click", async () => {
       await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_LABELS, "");
-      ui.notifications.info("AFLP | Labels reset to defaults.");
+      await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_HOLE_LABELS, "");
+      ui.notifications.info("AFLR | Labels reset to defaults.");
       this.render();
     });
   }
@@ -290,7 +308,7 @@ AFLP.CumflationLabelsApp = CumflationLabelsApp;
 game.settings.registerMenu("ardisfoxxs-lewd-pf2e", "cfLabelsMenu", {
   name:       "Cumflation Status Labels",
   label:      "Edit Labels",
-  hint:       "Rename the status words shown on H scene cards (Leaking, Stretched, Cumbucket, etc.).",
+  hint:       "Rename the status words shown on H-Scene cards (Leaking, Stretched, Cumbucket, etc.).",
   icon:       "fas fa-droplet",
   type:       CumflationLabelsApp,
   restricted: true,

@@ -129,7 +129,7 @@ for (const { actor } of tokens) {
   );
   if (arousalEffects.length) {
     await worldActor.deleteEmbeddedDocuments("Item", arousalEffects.map(i => i.id));
-    console.log(`AFLP | Stripped ${arousalEffects.length} Arousal effect(s) from ${worldActor.name}`);
+    console.log(`AFLR | Stripped ${arousalEffects.length} Arousal effect(s) from ${worldActor.name}`);
   }
   // Ensure arousal flag exists at default (0 current, 6 max base)
   await worldActor.setFlag(FLAG, "arousal", structuredClone(AFLP.arousalDefaults));
@@ -143,8 +143,8 @@ for (const { actor } of tokens) {
 }
 
 if (initialized.length === 1) {
-  ui.notifications.info(`AFLP: ${initialized[0]} initialized.`);
+  ui.notifications.info(`AFLR: ${initialized[0]} initialized.`);
 } else {
-  ui.notifications.info(`AFLP: ${initialized.length} tokens initialized: ${initialized.join(", ")}.`);
+  ui.notifications.info(`AFLR: ${initialized.length} tokens initialized: ${initialized.join(", ")}.`);
 }
 window.AFLP_FLAGS_INITIALIZED = true;

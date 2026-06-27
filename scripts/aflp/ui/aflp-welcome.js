@@ -5,7 +5,7 @@
 // "Don't show again" unchecks the setting for this client.
 // A new version automatically re-enables the setting for all users (via flag check).
 
-const AFLP_WELCOME_VERSION = "7.0.0";
+const AFLP_WELCOME_VERSION = "8.0.0";
 const AFLP_WELCOME_FLAG    = `aflp-welcome-seen-${AFLP_WELCOME_VERSION}`;
 
 Hooks.once("ready", async () => {
@@ -26,7 +26,8 @@ Hooks.once("ready", async () => {
 
 async function aflpShowWelcome() {
   const S = AFLP.Settings;
-  const spURL = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
+  const spURL     = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
+  const spLiteURL = (window.AFLP && AFLP.SOUNDPACK_LITE_URL) || "";
 
   const s = {
     wrap:    'font-family: "Helvetica Neue", Arial, sans-serif; width: 100%; color: #ddd;',
@@ -47,43 +48,67 @@ async function aflpShowWelcome() {
          style="width:100%; max-height:130px; object-fit:cover; border-radius:6px; border:1px solid #c9a96e;" alt="AFLP"/>
   </div>
 
-  <h2 style="${s.h2}">What's New in AFLP 7.0.0</h2>
+  <h2 style="${s.h2}">What's New in AFLR 8.0.0</h2>
 
   <div style="${s.group}">
-    <div style="${s.label}">Cumflation Visuals</div>
+    <div style="${s.label}">AFLR Now Runs on Daggerheart</div>
     <ul style="${s.ul}">
-      <li><strong>Tokens get coated</strong> - As a target fills up, a procedural, asset-free cum layer builds up on their token and escalates through the cumflation tiers. No image packs to install - it is rendered live, with glossy speckles, a light-facing sheen, and gravity-aware dripping.</li>
-      <li><strong>Ground puddles</strong> - Cum pools beneath heavily-filled tokens on the battlemap. Puddles are saved per scene, so they survive reloads and are visible to the whole table.</li>
-      <li><strong>Cum-shake feedback</strong> - Each load gives the token an escalating shake, from a small twitch to a hard jolt when a hole maxes out or the whole body reaches tier 8.</li>
-      <li><strong>Tune it to taste</strong> - Module Settings expose intensity, colour, render quality (low / medium / high for performance), whether NPCs are coated, and a per-client toggle to hide the effect on your own screen.</li>
+      <li><strong>One module, two systems</strong> - The full Carnal H-Scene toolkit - arousal, positions, cumflation, kinks, pregnancy, voices, and live visuals - now runs natively on <strong>Daggerheart</strong> alongside Pathfinder 2e.</li>
+      <li><strong>Built for duality</strong> - Daggerheart-native Carnal actions resolve on Hope and Fear with the duality dice, and AFLR's conditions map to their Daggerheart equivalents so it feels like part of the system, not bolted on.</li>
+      <li><strong>Lewd Levels</strong> - A Session Zero dial sets how far your table takes it, from background flavour to a full Defeat-mod frame.</li>
     </ul>
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">Voice &amp; Sound</div>
+    <div style="${s.label}">The Carnal Action Set</div>
     <ul style="${s.ul}">
-      <li><strong>Per-actor voices</strong> - Assign a voice profile to any actor from their AFLP sheet. They moan in escalating tiers as arousal climbs, and react on climax, oral, struggle, cumflation, edge, defeated, and mind break.</li>
-      <li><strong>Position-aware SFX</strong> - Activity sound effects follow each actor's current position - plaps for vaginal and anal, gluk for oral, wet slides - and a wet slosh fires when a hole is filled to the brim.</li>
-      <li><strong>Keyed to the receiver</strong> - Sounds are timed and sized to the bottom's own vocalisation, so plaps fill their moan instead of running off a performer's timing, and every actor's audio stays independent in a busy scene.</li>
-      <li><strong>Controls</strong> - Enable voices and ambient SFX independently, set volumes, and mute audio on just your own client. No audio plays until a profile is assigned, so leaving it on is harmless if unconfigured.</li>
+      <li><strong>Four clean actions</strong> - <strong>Carnal Press</strong>, <strong>Resist</strong>, <strong>Rescue</strong>, and <strong>Escape</strong> give both sides a clear turn structure with duality outcome tables and plain-language conditions, no system jargon to memorise.</li>
     </ul>
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">AFLP Soundpack - Free Companion Module</div>
+    <div style="${s.label}">Cum, Loads &amp; the Flood</div>
     <ul style="${s.ul}">
-      <li><strong>Ships separately, free</strong> - The voice and SFX audio lives in its own module, the <strong>AFLP Soundpack</strong>, so the main download stays small. It is a free download: install and enable it alongside AFLP to turn audio on. AFLP works fine without it.</li>
-      <li><strong>What is inside</strong> - 44 voice profiles plus a categorised ambient-SFX library, auto-detected by AFLP once enabled (no path setup). You can also point AFLP at your own extra folder to add custom profiles.</li>
+      <li><strong>Two small numbers</strong> - Cum is how much you shoot per climax (set by size); Loads is how many times you can cum before a rest. No more unwieldy four-digit volumes.</li>
+      <li><strong>Big creatures shoot big</strong> - A hole holds 8; anything past that floods the floor. How far it spreads is set simply by the shooter's size, from a puddle at its feet to a gargantuan tide reaching Far range.</li>
+      <li><strong>Bottle the mess</strong> - Floor-cum mops up into Vials of Cum with the Cum Rag macro, and a big enough flood fills a whole stack.</li>
+    </ul>
+  </div>
+
+  <div style="${s.group}">
+    <div style="${s.label}">Transformation</div>
+    <ul style="${s.ul}">
+      <li><strong>Reshape a body</strong> - New spells, consumables, and cursed gear swap or add genitalia, force a heat, or brand a bull - some voluntary, some very much not.</li>
+      <li><strong>Adversaries that remake you</strong> - New foes can transform those they defeat, with Bad Ends to match.</li>
+    </ul>
+  </div>
+
+  <div style="${s.group}">
+    <div style="${s.label}">New Content</div>
+    <ul style="${s.ul}">
+      <li><strong>Adversaries across every tier</strong>, topped by the gargantuan <strong>Brimstone Brood-Wyrm</strong>, a 24-per-shot apex that floods the battlefield.</li>
+      <li><strong>New bondage gear, loot, and consumables</strong> - living restraints, Cum boosters, and tonics that play directly off the new Cum and Loads rules.</li>
+      <li><strong>New domain cards</strong>, including the <strong>Skyclad</strong> and <strong>Bimbomancy</strong> archetypes.</li>
+    </ul>
+  </div>
+
+  <div style="${s.group}">
+    <div style="${s.label}">AFLR Soundpack Lite - Free Companion Module</div>
+    <ul style="${s.ul}">
+      <li><strong>Ships separately, free</strong> - Voice and SFX audio lives in its own module so the main download stays small. The recommended <strong>AFLR Soundpack Lite</strong> is a curated, lightweight pick that covers the full feature set. Install and enable it alongside AFLP to turn audio on. AFLP works fine without it.</li>
+      <li><strong>What is inside</strong> - A hand-picked set of voice profiles (female, male, and monster) plus the categorised ambient-SFX the engine uses, auto-detected by AFLP once enabled (no path setup). You can also point AFLP at your own extra folder to add custom profiles.</li>
+      <li><strong>Want more sounds?</strong> - The full <strong>AFLR Soundpack</strong> bundles every voice actor and the complete SFX library (a much larger download). Install it instead of Lite and AFLP uses it automatically.</li>
       <li><strong>Credits</strong> - All audio is from the <strong>OpenNSFW Sound Pack</strong>, licensed CC BY 4.0. Full contributor credits ship with the soundpack; please contact @OpenNSFWSP rather than individual contributors.</li>
     </ul>
-    ${spURL ? `<div style="text-align:center; margin:8px 0 2px;"><a href="${spURL}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; font-size:12px; border-radius:5px; text-decoration:none; letter-spacing:0.3px;">Download the AFLP Soundpack</a><div style="font-size:10px; opacity:0.7; margin-top:5px;">Unzip into your Foundry Data/modules folder, restart Foundry, and enable it.</div></div>` : ``}
+    ${spLiteURL ? `<div style="text-align:center; margin:8px 0 2px;"><a href="${spLiteURL}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; font-size:12px; border-radius:5px; text-decoration:none; letter-spacing:0.3px;">Get the AFLR Soundpack Lite</a>${spURL ? `<div style="font-size:10px; opacity:0.7; margin-top:6px;">Want everything? <a href="${spURL}" target="_blank" rel="noopener" style="color:#c9a96e;">Get the full AFLR Soundpack</a></div>` : ``}<div style="font-size:10px; opacity:0.7; margin-top:5px;">Unzip into your Foundry Data/modules folder, restart Foundry, and enable it.</div></div>` : ``}
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">Also in 7.0</div>
+    <div style="${s.label}">Also in 8.0</div>
     <ul style="${s.ul}">
-      <li>Cumflation status labels now also appear in the Classic entangled and Dossier layouts, and begin one tier earlier.</li>
-      <li>Assorted fixes and polish across the H scene card, cumflation, and audio.</li>
+      <li>Adversaries audited and stat-aligned to their tier and role across the bestiary.</li>
+      <li>Domain card library cleaned up and de-duplicated, with Pathfinder-isms scrubbed from the Daggerheart cards.</li>
+      <li>Assorted fixes and polish across the H-Scene card, cumflation, rest, and daily-prep flows.</li>
     </ul>
   </div>
 
@@ -102,7 +127,7 @@ async function aflpShowWelcome() {
 </div>`;
 
   await foundry.applications.api.DialogV2.wait({
-    window: { title: "Welcome to AFLP!", resizable: true },
+    window: { title: "Welcome to AFLR!", resizable: true },
     position: { top: 65, left: 493, width: 836 },
     content,
     render(ev, dlg) {
@@ -170,9 +195,9 @@ function aflpShowHowTo() {
   ])}
 
   ${hr()}
-  ${h("H Scene Position Picker (new in 6.0)")}
+  ${h("H-Scene Position Picker (new in 6.0)")}
   ${ul([
-    `When an H scene starts, the GM is prompted to choose roles: who is Dominating, who is Submitting, or <strong>Consensual Sex</strong> (no conditions applied, equal control for all participants).`,
+    `When an H-Scene starts, the GM is prompted to choose roles: who is Dominating, who is Submitting, or <strong>Consensual Sex</strong> (no conditions applied, equal control for all participants).`,
     `The position picker shows all valid positions for the current group size and the top's creature type. In a solo scene (1 top), it shows categorised individual positions. In a group scene (2+ tops), it shows group presets at the top followed by individual categories.`,
     `Selecting a group preset (Spitroast, DP, Airtight, etc.) assigns all tops to their correct slot simultaneously. The GM can confirm or swap slot assignments before applying when auto-assign is off.`,
     `Position descriptions appear under each option in the picker so players can understand what they're choosing without prior knowledge.`,
@@ -194,8 +219,8 @@ function aflpShowHowTo() {
     ${row("AFLP Token Initialize", "First-time setup for any NPC token. Always run this before using other macros on a new actor.")}
     ${row("AFLP Token Genital", "Set what genitalia a token has after initializing.")}
     ${row("AFLP Daily Preparations", "Run at the start of each in-game day. Ticks pregnancies and resets daily stats.")}
-    ${row("AFLP Cum", "Manually trigger a cum for the selected token.")}
-    ${row("AFLP Sexual Advance", "The main H Scene action. Use this in encounters.")}
+    ${row("AFLR Cum", "Manually trigger a cum for the selected token.")}
+    ${row("AFLR Carnal Press", "The main H-Scene action (advance arousal). Use this in encounters.")}
     ${row("AFLP Struggle Snuggle", "Sexual grapple action for combat.")}
     ${row("AFLP Purge Cumflation", "Reset cumflation levels on a token.")}
   </table>
@@ -263,17 +288,18 @@ async function aflpShowSessionZero() {
     edgeNpc:          game.settings.get(ID, S.KEYS.EDGE_INCLUDE_NPC),
     titles:           game.settings.get(ID, S.KEYS.TITLES_AUTOMATION),
     titlesShow:       game.settings.get(ID, S.KEYS.TITLES_SHOW),
+    lewdLevel:        game.settings.get(ID, S.KEYS.LEWD_LEVEL),
   };
 
   const LEVELS = [
     {
       level: 1, name: "Lewd Level 1: Typical Anime", color: "#8aca8e",
-      desc: "You're strictly about the adventure. No H Scenes, no Arousal system. Sexual items and spells exist but only in self-affecting forms. Monsters will not engage sexually. H Scene UI not applicable.",
+      desc: "You're strictly about the adventure. No H-Scenes, no Arousal system. Sexual items and spells exist but only in self-affecting forms. Monsters will not engage sexually. H-Scene UI not applicable.",
       settings: { automation: false, hscene: false, positionTracking: false, proseFlavor: false, hsceneLogToChat: false, cumVolumeMode: "fantasy", cumflation: false, cumflationHscene: false, edgeAuto: false, edgeSkip: false, edgeNpc: false, titles: false, titlesShow: false, splatterNpc: true },
     },
     {
       level: 2, name: "Lewd Level 2: The Witcher III", color: "#c9a96e",
-      desc: "Humanoids may have consensual sex with you. Monsters will not. H Scenes are tracked with prose. The Arousal Points system is active but Edge and cumflation are off. Uses the <strong>Lewd Lite</strong> scene UI - a clean PF2e-native tracker style with just Arousal tracking.",
+      desc: "Humanoids may have consensual sex with you. Monsters will not. H-Scenes are tracked with prose. The Arousal Points system is active but Edge and cumflation are off. Uses the <strong>Lewd Lite</strong> scene UI - a clean PF2e-native tracker style with just Arousal tracking.",
       settings: { automation: false, hscene: true, positionTracking: true, proseFlavor: true, hsceneLogToChat: true, cumVolumeMode: "fantasy", cumflation: false, cumflationHscene: false, edgeAuto: false, edgeSkip: false, edgeNpc: false, titles: true, titlesShow: true, splatterNpc: true },
     },
     {
@@ -289,7 +315,9 @@ async function aflpShowSessionZero() {
   ];
 
   const card = (lvl) => {
-    const isCurrent = Object.entries(lvl.settings).every(([k, v]) => current[k] === v);
+    const isCurrent = (current.lewdLevel != null)
+      ? (lvl.level === Number(current.lewdLevel))
+      : Object.entries(lvl.settings).every(([k, v]) => current[k] === v);
     return `
       <div class="aflp-sz-card${isCurrent ? " aflp-sz-current" : ""}" data-level="${lvl.level}"
            style="border:1px solid ${lvl.color}44;border-radius:6px;padding:10px 14px;margin-bottom:8px;
@@ -347,7 +375,15 @@ async function aflpShowSessionZero() {
           await game.settings.set(ID, S.KEYS.TITLES_SHOW,         lvl.settings.titlesShow);
           await game.settings.set(ID, S.KEYS.SPLATTER_INCLUDE_NPC, lvl.settings.splatterNpc);
 
-          // Set H scene UI defaults based on lewd level
+          // Persist the canonical Lewd Level - the single source of truth that
+          // content + behaviour gating reads (and what distinguishes L3 from L4,
+          // whose setting bundles are otherwise identical).
+          await game.settings.set(ID, S.KEYS.LEWD_LEVEL, level);
+          // Mark the level as deliberately configured so upgrade-detection never
+          // second-guesses a GM's explicit Session Zero choice.
+          await game.settings.set(ID, S.KEYS.LEWD_LEVEL_CONFIGURED, true);
+
+          // Set H-Scene UI defaults based on lewd level
           // Lewd 1-3: Lewd Lite for PC/NPC scenes (no cumflation UI needed)
           // Lewd 4:   AFLP Classic for PC/NPC scenes (full feature set)
           const themePc = level <= 3 ? "lewd-lite" : "aflp-classic";
@@ -356,6 +392,20 @@ async function aflpShowSessionZero() {
 
           applied = level;
           ui.notifications.info(`AFLP: Lewd Level ${level} settings applied.`);
+
+          // A programmatic settings.set does not live-update an already-open
+          // Module Settings form, so its checkboxes would still show the old
+          // values until reopened. Re-render any open settings window so the
+          // applied Lewd Level (edge toggles included) is visible immediately.
+          try {
+            const open = [
+              ...(foundry.applications?.instances?.values?.() ?? []),
+              ...Object.values(ui.windows ?? {}),
+            ];
+            for (const a of open) {
+              if (/SettingsConfig/i.test(a?.constructor?.name ?? "")) a.render(false);
+            }
+          } catch (e) { /* non-fatal cosmetic refresh */ }
 
           el.querySelectorAll(".aflp-sz-card").forEach(c => {
             const isThis = parseInt(c.dataset.level) === level;

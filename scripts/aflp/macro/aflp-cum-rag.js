@@ -10,7 +10,10 @@
 (async () => {
   const MODULE_ID  = "ardisfoxxs-lewd-pf2e";
   const PUDDLE_KEY = "splatterPuddles";
-  const VIAL_UUID  = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.rloXTr10gPd7Xh0J";
+  // Resolve the Vial of Cum per system: the Daggerheart pack item (tagged
+  // aflrKey "vial-of-cum") on DH, the canonical PF2e compendium item elsewhere.
+  const VIAL_UUID = AFLP.system?.contentUuid?.("vial-of-cum")
+    ?? "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.rloXTr10gPd7Xh0J";
 
   const scene = canvas?.scene;
   if (!scene) return ui.notifications.warn("No active scene.");
@@ -23,12 +26,22 @@
     const list = Array.isArray(v) ? v : (v ? [v] : []);
     for (const rec of list) {
       puddles++;
-      vials += Math.max(1, Math.ceil((rec?.tier ?? 1) / 2));   // bigger splatters = more vials
+      // One vial per ordinary splatter; a big overflow flood bottles into many
+      // (its spilled volume in cum units, each ~250ml).
+      vials += Math.max(1, rec.spillUnits ?? 1);
     }
   }
   if (!puddles) return ui.notifications.info("There's no cum on the floor here.");
 
   const clearFloor = async () => {
+    // Clear the per-token spill markers so pools don't immediately re-flood big.
+    try {
+      for (const tokId of Object.keys(map)) {
+        const tok = scene.tokens?.get?.(tokId);
+        const act = tok?.actor;
+        if (act?.getFlag?.(MODULE_ID, "cumSpill") !== undefined) await act.unsetFlag(MODULE_ID, "cumSpill");
+      }
+    } catch (e) { /* best effort */ }
     if (window.AFLP_Splatter?.clearScenePuddles) await window.AFLP_Splatter.clearScenePuddles(scene);
     else await scene.unsetFlag(MODULE_ID, PUDDLE_KEY);
   };

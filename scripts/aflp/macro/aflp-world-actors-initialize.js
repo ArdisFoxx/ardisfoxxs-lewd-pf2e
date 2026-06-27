@@ -160,4 +160,4 @@ for (const actor of game.actors.contents) {
   processedCount++;
 }
 
-ui.notifications.info(`AFLP: All ${processedCount} world actors fully processed!`);
+ui.notifications.info(`AFLR: All ${processedCount} world actors fully processed!`);

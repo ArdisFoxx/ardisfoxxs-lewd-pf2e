@@ -21,7 +21,7 @@
     if (window.AFLP?.ensureCoreFlags) {
       await window.AFLP.ensureCoreFlags(actor);
     } else {
-      console.error("AFLP schema not loaded or ensureCoreFlags missing");
+      console.error("AFLR schema not loaded or ensureCoreFlags missing");
       continue;
     }
 

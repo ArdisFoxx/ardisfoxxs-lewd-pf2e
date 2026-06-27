@@ -17,7 +17,12 @@ if (!window.AFLP) {
 }
 
 const FLAG = AFLP.FLAG_SCOPE;
-const tokens = canvas.tokens.controlled;
+// A programmatic run - e.g. auto-fired by a Daggerheart Long Rest - hands the
+// actor in via a global so we don't depend on the GM's on-screen token selection.
+const _autoActor   = window._aflpDailyPrepActor   ?? null;
+window._aflpDailyPrepActor   = null;
+window._aflpDailyPrepContext = null;
+const tokens = _autoActor ? [{ actor: _autoActor }] : canvas.tokens.controlled;
 if (!tokens.length) return ui.notifications.warn("Select at least one token.");
 
 for (const { actor } of tokens) {
@@ -85,6 +90,7 @@ for (const { actor } of tokens) {
   // Pineapple Diet feat: coomer floor = 1 + actor level.
   // If the actor's coomer level has dropped below this floor, restore it first
   // so recalculateCum uses the correct value.
+  // Pineapple Diet feat: coomer (loads) floor scales with level, capped at COOMER_MAX.
   const PD_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QN1LxhSPqdWxgVk4";
   const hasPineappleDiet = actor.items?.some(i =>
     i.slug === "pineapple-diet" ||
@@ -92,7 +98,7 @@ for (const { actor } of tokens) {
   );
   if (hasPineappleDiet) {
     const actorLevel   = actor.system?.details?.level?.value ?? actor.level ?? 1;
-    const pdFloor      = 1 + actorLevel;
+    const pdFloor      = Math.min(AFLP.COOMER_MAX, 1 + actorLevel);
     const coomer       = structuredClone(actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults);
     if ((coomer.level ?? 0) < pdFloor) {
       coomer.level = pdFloor;
@@ -139,23 +145,28 @@ for (const { actor } of tokens) {
     await actor.setFlag(FLAG, "_hypnoConditionerUnderAttack", false);
   }
 
-  // Alcumist Dedication: calculate and display vial count for today
-  // Vials = floor(cum.current / 2), minimum 1
+  // Alcumist Dedication: calculate and display vial count for today.
+  // 1 load = 1 vial, so daily vials = the actor's Coomer (loads).
   const ALCUMIST_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.xdklOfDJHXLwZf31";
   const hasAlcumist = actor.items?.some(i =>
     i.slug === "alcumist-dedication" ||
     (i.flags?.core?.sourceId ?? i.sourceId) === ALCUMIST_UUID
   );
   if (hasAlcumist) {
-    const cumForVials = actor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
-    const vialCount = Math.max(1, Math.floor((cumForVials.current ?? 0) / 2));
+    const coomerV = actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults;
+    const vialCount = Math.max(1, coomerV.level ?? AFLP.COOMER_DEFAULT);
     await actor.setFlag(FLAG, "_alcumistVials", vialCount);
   }
 
   // -------------------------------
   // Chat summary
   // -------------------------------
-  let message = `<strong>${actor.name}</strong> completes daily preparations.`;
+  // Daggerheart has no daily preparations - the same upkeep renews on a Long Rest,
+  // so the summary speaks to the rest rather than to a daily prep.
+  const _dhRest = AFLP.system?.id === "daggerheart";
+  let message = _dhRest
+    ? `<strong>${actor.name}</strong>'s AFLR effects renew after their Long Rest.`
+    : `<strong>${actor.name}</strong> completes daily preparations.`;
   for (const b of anyBirths) {
     const sourceName = b.sourceName || "Unknown";
     const type = b.deliveryType === "egg" ? "eggs" : "offspring";
@@ -167,7 +178,7 @@ for (const { actor } of tokens) {
     const actorLevel = actor.system?.details?.level?.value ?? actor.level ?? 1;
     const pdFloor    = 1 + actorLevel;
     const coomerNow  = actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults;
-    message += `<br>Pineapple Diet: Coomer level set to <strong>${coomerNow.level}</strong> (floor: ${pdFloor}).`;
+    message += `<br>Pineapple Diet: Loads set to <strong>${coomerNow.level}</strong> (floor: ${pdFloor}).`;
   }
 
   if (hasAlcumist) {

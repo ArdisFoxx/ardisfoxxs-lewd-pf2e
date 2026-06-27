@@ -1,7 +1,7 @@
 // ===============================
-// AFLP H Scene Card System
+// AFLP H-Scene Card System
 // ===============================
-// Manages on-screen visual novel style H Scene cards.
+// Manages on-screen visual novel style H-Scene cards.
 // Multiple concurrent scenes supported — active combat turn
 // is foregrounded, others minimised to a pip in the corner.
 //
@@ -30,17 +30,43 @@ AFLP.HScene = (() => {
     { minTier: 1, word: "Freshly Filled",       color: "rgba(190,180,110,0.9)", glow: "rgba(190,180,110,0.35)" },
     { minTier: 2, word: "Oozing Out",           color: "rgba(200,160,80,0.9)",  glow: "rgba(200,160,80,0.4)" },
     { minTier: 3, word: "Sloshing Full",        color: "rgba(210,145,70,0.9)",  glow: "rgba(210,145,70,0.4)" },
-    { minTier: 4, word: "Stretched Belly",      color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
-    { minTier: 5, word: "Cum Bloated",          color: "rgba(220,110,90,0.92)", glow: "rgba(220,110,90,0.45)" },
-    { minTier: 6, word: "Full Cum Bucket",      color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
-    { minTier: 7, word: "Bred to the Hilt",     color: "rgba(225,75,100,0.97)", glow: "rgba(225,75,100,0.55)" },
-    { minTier: 8, word: "Public Cum Dump",      color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
-    { minTier: 9, word: "Splattered Cum Toilet", color: "rgba(255,40,60,1)",    glow: "rgba(255,40,60,0.7)" }, // tier 9 = all primary 8 + facial 8
+    { minTier: 4, word: "Totally Full",         color: "rgba(220,130,60,0.9)",  glow: "rgba(220,130,60,0.4)" },
+    { minTier: 5, word: "Stretched Belly",      color: "rgba(220,110,90,0.92)", glow: "rgba(220,110,90,0.45)" },
+    { minTier: 6, word: "Public Disgrace",      color: "rgba(220,90,120,0.95)", glow: "rgba(220,90,120,0.5)" },
+    { minTier: 7, word: "Public Cum Bucket",    color: "rgba(225,75,100,0.97)", glow: "rgba(225,75,100,0.55)" },
+    { minTier: 8, word: "Public Cum Toilet",    color: "rgba(230,60,80,1)",     glow: "rgba(230,60,80,0.6)" },
+    { minTier: 9, word: "Public Free-Use Cum Dumpster", color: "rgba(210,45,150,1)", glow: "rgba(210,45,150,0.7)" }, // tier 9 = all primary 8 + facial 8
   ];
 
   // Expose the canonical label set so the Cumflation Status Labels settings menu
   // reads its defaults from here - one source of truth, no drift.
   AFLP.CF_LABEL_DEFAULTS = CF_LABEL_DEFAULTS;
+
+  // Per-hole descriptor ladders (tiers 1-8). Each hole shows its own escalating
+  // word; colours reuse the overall ramp by tier so the sheet stays consistent.
+  const CF_HOLE_WORDS = {
+    vaginal: ["Freshly Seeded","Slick & Splattered","Filled Womb","Fully Bred","Packed Womb","Bred Heavy","Brimming Broodpot","Bulging Baby-Batter Bunker"],
+    anal:    ["Used Hole","Sloppy Seconds","Leaking Rear","Filled Ass","Anal Cum Twinkie","Gaping Mess","Ass Destruction","Internal Cum Ass to Mouth"],
+    oral:    ["Fed a Load","Throat-Slicked","Swallowing Hard","Throat Full","Gullet-Stuffed","Force-Fed","Cum-Drunk","Throat Sleeve"],
+    facial:  ["Splattered Lips","Glazed Cheeks","Painted Face","Cum-Blinded","Dripping Chin","Coated Chest","Utterly Drenched","Glazed All Over"],
+    paizuri: ["Slick Cleavage","Glazed Tits","Painted Chest","Pearl-Strung","Dripping Valley","Coated Breasts","Drenched Bust","Glazed All Over"],
+  };
+  AFLP.CF_HOLE_WORDS = CF_HOLE_WORDS;
+
+  // Read per-hole word overrides from the CF_HOLE_LABELS setting; blank entries
+  // fall back to the defaults above.
+  function _getHoleWords(hole) {
+    const base = CF_HOLE_WORDS[hole] || [];
+    try {
+      const raw = game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CF_HOLE_LABELS) ?? "";
+      if (!raw) return base;
+      const custom = JSON.parse(raw);
+      const over = custom?.[hole];
+      if (!Array.isArray(over)) return base;
+      return base.map((w, i) => (over[i] && String(over[i]).trim()) || w);
+    } catch { return base; }
+  }
+  AFLP._getCFHoleWords = _getHoleWords;
 
   function _getCFLabels() {
     try {
@@ -95,6 +121,22 @@ AFLP.HScene = (() => {
   AFLP.cumflationWord = function(actor) {
     const c = actor.getFlag(AFLP.FLAG_SCOPE, "cumflation") ?? {};
     return _cumflationWord(c);
+  };
+
+  // Descriptor label for a single hole's tier (1-8), so each hole can show its
+  // own escalating word/colour on the sheet, not just the overall average.
+  AFLP.cumflationWordForTier = function(tier, hole) {
+    const t = Math.min(8, Math.max(0, Math.floor(Number(tier) || 0)));
+    if (t <= 0) return null;
+    // Colour/glow always come from the overall ramp at this tier.
+    const labels = _getCFLabels();
+    const overall = [...labels].sort((a, b) => b.minTier - a.minTier)
+      .find(l => t >= l.minTier && l.minTier <= 8) ?? null;
+    if (hole && CF_HOLE_WORDS[hole]) {
+      const word = _getHoleWords(hole)[t - 1];
+      return { minTier: t, word, color: overall?.color, glow: overall?.glow };
+    }
+    return overall;
   };
 
   // Active scenes keyed by target token ID
@@ -594,13 +636,12 @@ AFLP.HScene = (() => {
     return _container?.querySelector(`[data-target-id="${scene.id}"]`) ?? null;
   }
 
-  // Derive a participant's H-scene role from its live conditions.
+  // Derive a participant's H-Scene role from its live conditions.
   // "sub" if Submitting, "dom" if Dominating, else null (consensual).
   function _roleFromActor(actor) {
     if (!actor) return null;
-    const has = (slug) => actor.items?.some(c => c.slug === slug) || actor.hasCondition?.(slug);
-    if (has("submitting")) return "sub";
-    if (has("dominating")) return "dom";
+    if (AFLP.cond.has(actor, "submitting")) return "sub";
+    if (AFLP.cond.has(actor, "dominating")) return "dom";
     return null;
   }
 
@@ -697,12 +738,13 @@ AFLP.HScene = (() => {
   // "dominated"  — target has Submitting condition (result of Struggle Snuggle)
   // "consensual" — no Submitting condition; scene started via Sexual Advance
   function _sceneMode(scene) {
+    // Lewd 4+ only: below it, the non-consensual ("dominated") framing is suppressed
+    // and every scene presents as consensual, regardless of any Submitting condition
+    // (the condition data is preserved - only the framing/control/theming is gated).
+    if (!AFLP.Settings.allows("noncon")) return "consensual";
     const tgtActor = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId });
     if (!tgtActor) return "consensual";
-    const submittingUUID = AFLP.conditions?.["submitting"]?.uuid ?? "";
-    return tgtActor.items?.some(c =>
-      c.slug === "submitting" || (c.flags?.core?.sourceId ?? c.sourceId) === submittingUUID
-    ) ? "dominated" : "consensual";
+    return AFLP.cond.has(tgtActor, "submitting") ? "dominated" : "consensual";
   }
 
   // Can this user change positions or hole chips for this scene?
@@ -719,8 +761,36 @@ AFLP.HScene = (() => {
     return candidates.some(a => a.isOwner);
   }
 
+  // Apply a dom/sub role condition to an actor (token-first), cross-system:
+  // PF2e creates the compendium condition item (read by _sceneMode), DH sets the
+  // flag (read by hasCondition). No-op if already present.
+  async function _applyControlRole(actor, slug) {
+    const live = actor.token?.actor ?? actor;
+    try {
+      if (AFLP.system.hasCondition?.(live, slug)) return;
+      await AFLP.system.applyCondition(live, slug, AFLP.system.contentUuid(slug) ?? null);
+    } catch (e) { console.warn(`AFLP | control switch: apply ${slug} failed:`, e?.message); }
+  }
+  // Remove both dom/sub role conditions from an actor (token-first), cross-system.
+  async function _clearControlRoles(actor) {
+    const live = actor.token?.actor ?? actor;
+    for (const slug of ["dominating", "submitting"]) {
+      try { await AFLP.system.removeCondition(live, slug); } catch (e) { /* ignore */ }
+    }
+  }
+
   // Root container injected once into #ui-top
   let _container = null;
+
+  // Empty-scene builder state (C2b). When the window is open with no active
+  // scene, a roster of canvas tokens is shown to drag into Talent / Performer
+  // slots. These hold the pending picks until Start Scene is pressed.
+  let _builderEl = null;
+  let _builderTalent = null;            // token id
+  const _builderPerformers = new Set(); // token ids
+  // Manual pointer-drag state (native HTML5 DnD is unreliable inside Foundry's
+  // fixed/transformed container, so the builder uses a mousedown/move/up drag).
+  let _dragId = null, _dragLabel = "", _dragGhost = null, _dragMoved = false, _dragStart = null, _justDragged = false, _dragWired = false;
 
   // -----------------------------------------------
   // Flavour prose generator
@@ -863,7 +933,7 @@ AFLP.HScene = (() => {
   // GM default theme based on whether target is a monster
   function _defaultThemeForScene(scene) {
     const tgtActor = _resolveActor({ id: scene?.targetId, actorId: scene?.targetActorId });
-    const isMon = tgtActor && tgtActor.type === "npc" && !tgtActor.hasPlayerOwner;
+    const isMon = tgtActor && AFLP.system.isMonster(tgtActor);
     return isMon
       ? (AFLP.Settings.hsceneThemeMon ?? "fuckamons")
       : (AFLP.Settings.hsceneThemePc  ?? "aflp-classic");
@@ -903,26 +973,19 @@ AFLP.HScene = (() => {
   function _applyDragHandleTheme(handle, container, mode, scene = null) {
     const th = scene ? _effectiveTheme(scene) : (AFLP.Settings.hsceneTheme ?? "lewd-lite");
     // mode: "dominated" | "consensual" | undefined (no scene or unknown)
-    const modeLabel = mode === "dominated" ? "🔒 Noncon" : mode === "consensual" ? "💗 Consensual" : null;
     const themes = {
       "lewd-lite":   { text: "⠿ LEWD LITE ⠿",        color: "rgba(200,160,80,0.75)", bg: "rgba(200,160,80,0.10)", border: "rgba(200,160,80,0.3)",  font: "inherit" },
       "status-strip": { text: "⠿ H SCENE ACTIVE ⠿",  color: "rgba(100,170,255,0.85)", bg: "rgba(8,12,28,0.96)",  border: "rgba(80,140,220,0.5)", font: "inherit" },
-      "aflp-classic":        { text: "★ SCENE IN PROGRESS ★",      color: "rgba(220,100,130,0.9)", bg: "rgba(200,50,80,0.15)",  border: "rgba(200,50,80,0.4)",  font: "inherit" },
+      "aflp-classic":        { text: "★ H-Scene in Progress ★",      color: "rgba(220,100,130,0.9)", bg: "rgba(200,50,80,0.15)",  border: "rgba(200,50,80,0.4)",  font: "inherit" },
       "dossier":      { text: "// ENCOUNTER FILE — ACTIVE", color: "rgba(80,180,80,0.85)",  bg: "rgba(5,15,8,0.9)",     border: "rgba(30,80,40,0.5)",   font: "'Courier New',monospace" },
       "fuckamons":    { text: "! A WILD ENCOUNTER APPEARED !", color: "#f5e642", bg: "rgba(220,20,60,0.85)", border: "rgba(255,80,80,0.8)", font: "inherit" },
     };
     let t = themes[th] ?? themes["lewd-lite"];
-    // For porno theme, embed mode label in the banner text
-    if (th === "aflp-classic" && modeLabel) {
-      t = { ...t, text: `★ ${modeLabel} H Scene in Progress ★` };
-    }
-    // For gangbang-hud and status-strip, show consensual banner when consensual
-    // All themes except lewd-lite: show consensual vs noncon banner
-    const nonLewdLite = th !== "lewd-lite";
-    if (nonLewdLite && mode === "consensual") {
-      // Keep theme colour - only swap the text to show consensual state
-      t = { ...t, text: "♥ CONSENSUAL H SCENE IN PROGRESS ♥" };
-    } else if (nonLewdLite && mode === "dominated") {
+    // Base UI stays consent-neutral: the banner reads "H-Scene in Progress"
+    // regardless of mode (the noncon framing lives in the PF2e content, not the
+    // base UI). A subtle colour shift still flags a dominated scene for the GM
+    // without any overt wording.
+    if (th !== "lewd-lite" && mode === "dominated") {
       t = { ...t, color: "rgba(200,60,60,0.8)", border: "rgba(200,60,60,0.3)" };
     }
     if (handle) {
@@ -995,6 +1058,19 @@ AFLP.HScene = (() => {
     document.head.appendChild(styleEl);
 
     document.body.appendChild(_container);
+
+    // Portrait click -> open that actor's AFLR sheet docked beside the scene.
+    // Delegated; skips interactive controls (cum/edge buttons, hole chips,
+    // position pickers, performer columns, theme selectors) so it never
+    // collides with their own click behaviour.
+    _container.addEventListener("click", (e) => {
+      if (e.target.closest("button, .aflp-card-btn, .aflp-po-hole, .aflp-leave-btn, .aflp-po-dom-pos, .aflp-po-dom-name, .aflp-card-theme-select, .aflp-card-arousal-select, select, [data-action]")) return;
+      const el = e.target.closest("[data-aflp-token]");
+      if (!el) return;
+      const tid = el.getAttribute("data-aflp-token");
+      if (tid) AFLP.UI?.SceneDock?.openByTokenId(tid);
+    });
+
     return _container;
   }
 
@@ -1030,6 +1106,7 @@ AFLP.HScene = (() => {
             <div class="aflp-card-controls">
               <button type="button" class="aflp-card-btn aflp-card-minimize" title="Minimise">−</button>
               <button type="button" class="aflp-card-btn aflp-card-log-toggle" title="Show/hide scene log">📋</button>
+              ${game.user.isGM ? '<button type="button" class="aflp-card-btn aflp-card-control" title="Change who is in control">\u2696</button>' : ''}
               <select class="aflp-card-theme-select" title="UI Theme" ${(!game.user.isGM && !(AFLP.Settings.hscenePlayerPick??true)) ? 'disabled style="opacity:0.4;pointer-events:none;"' : ""}>
                 <option value="lewd-lite"${(AFLP.Settings.hsceneTheme==="lewd-lite")?" selected":""}>Lewd Lite</option>
                 <option value="status-strip"${(AFLP.Settings.hsceneTheme==="status-strip")?" selected":""}>Status Strip</option>
@@ -1228,13 +1305,19 @@ AFLP.HScene = (() => {
       .aflp-combatant-name.sub { color:#e08080; }
       .aflp-combatant-conditions { display:flex; flex-wrap:wrap; gap:2px; justify-content:center; margin-top:1px; }
       .aflp-cond-badge {
-        display:inline-block; font-size:9px; padding:1px 4px; border-radius:3px;
+        display:inline-block; font-size:9px; padding:1px 5px; border-radius:3px;
         line-height:14px; font-weight:700; white-space:nowrap;
       }
+      .aflp-cond-badge .aflp-cb-ico  { font-weight:700; }
+      .aflp-cond-badge .aflp-cb-word { font-weight:600; letter-spacing:0.2px; }
       .aflp-cond-badge.horny   { background:rgba(192,80,128,0.2); border:1px solid rgba(192,80,128,0.5); color:#d07090; }
       .aflp-cond-badge.exposed { background:rgba(200,160,80,0.15); border:1px solid rgba(200,160,80,0.45); color:#c8a050; }
       .aflp-cond-badge.denied  { background:rgba(128,96,192,0.2); border:1px solid rgba(128,96,192,0.5); color:#a080d0; }
       .aflp-cond-badge.orgasm  { background:rgba(64,160,112,0.2); border:1px solid rgba(64,160,112,0.5); color:#50b882; }
+      .aflp-cond-badge.dominating { background:rgba(200,64,64,0.2);  border:1px solid rgba(200,64,64,0.55);  color:#d05858; }
+      .aflp-cond-badge.submitting { background:rgba(96,128,200,0.2); border:1px solid rgba(96,128,200,0.55); color:#7090d0; }
+      .aflp-cond-badge.mind-break { background:rgba(200,64,160,0.2); border:1px solid rgba(200,64,160,0.55); color:#d058b0; }
+      .aflp-cond-badge.defeated   { background:rgba(150,150,160,0.2); border:1px solid rgba(150,150,160,0.5); color:#9a9aa6; }
 
       .aflp-pos-chip {
         display:inline-block; padding:1px 5px; border-radius:3px;
@@ -1636,23 +1719,49 @@ AFLP.HScene = (() => {
     const hornyTotal = (hornyFlag.temp ?? 0) + (hornyFlag.permanent ?? 0);
     const deniedFlag = actor.getFlag(AFLP.FLAG_SCOPE, "denied") ?? { value: 0 };
     const deniedVal  = deniedFlag.value ?? 0;
-    const exposedItm = actor.items?.find(i => i.slug === "exposed");
-    const exposedVal = exposedItm?.system?.badge?.value ?? 0;
+    const exposedVal = AFLP.cond.value(actor, "exposed");
+    const dominating = AFLP.cond.has(actor, "dominating");
+    const submitting = AFLP.cond.has(actor, "submitting");
+    const mindBreak  = AFLP.cond.value(actor, "mind-break");
+    const defeated   = AFLP.cond.has(actor, "defeated");
+    const defeatTok  = AFLP.system.id === "daggerheart" ? (AFLP.cond.value(actor, "defeat") ?? 0) : 0;
+    // DH token ladder (Bimbofied >= Defeat >= Horny): higher tiers cover lower,
+    // so the badge shows only the highest tier plus any surplus. Bimbofied also
+    // leaves the legacy {temp,permanent} Horny read empty, so derive from flags.
+    const isDH = AFLP.system.id === "daggerheart";
+    let bimbVal = 0, bullVal = 0, hornyShow = hornyTotal, defeatShow = defeatTok;
+    if (isDH) {
+      const b = AFLP.cond.value(actor, "bimbofied") ?? 0;
+      const d = AFLP.cond.value(actor, "defeat") ?? 0;
+      const h = AFLP.cond.value(actor, "horny") ?? 0;
+      bimbVal    = b;
+      bullVal    = AFLP.cond.value(actor, "bullified") ?? 0;
+      defeatShow = Math.max(0, d - b);
+      hornyShow  = Math.max(0, h - Math.max(b, d));
+    }
     const orgasms    = scene ? Object.values(scene.orgasms ?? {}).reduce((a,b)=>a+b,0) : 0;
     // Per-actor orgasms
     const actorOrg   = scene?.orgasms?.[actor.id] ?? 0;
 
-    const mk = (symbol, val, cls, word) => {
+    const mk = (symbol, val, cls, word, label = word) => {
       const el = document.createElement("span");
       el.className = "aflp-cond-badge " + cls;
       el.title = word + (val > 1 ? " " + val : "");
-      el.textContent = val > 1 ? symbol + val : symbol;
+      const valStr = val > 1 ? val : "";
+      el.innerHTML = `<span class="aflp-cb-ico">${symbol}${valStr}</span> <span class="aflp-cb-word">${label}</span>`;
       return el;
     };
-    if (hornyTotal > 0) wrap.appendChild(mk("♥", hornyTotal, "horny",   "Horny"));
+    if (dominating)     wrap.appendChild(mk("▲", 1, "dominating", "Dominating"));
+    if (submitting)     wrap.appendChild(mk("▼", 1, "submitting", "Submitting"));
+    if (bimbVal > 0)    wrap.appendChild(mk("✿", bimbVal, "bimbofied", "Bimbofied"));
+    if (bullVal > 0)    wrap.appendChild(mk("❖", bullVal, "bullified", "Bullified"));
+    if (hornyShow > 0)  wrap.appendChild(mk("♥", hornyShow, "horny",   "Horny"));
     if (exposedVal > 0) wrap.appendChild(mk("✦", exposedVal, "exposed", "Exposed"));
     if (deniedVal  > 0) wrap.appendChild(mk("⊘", deniedVal,  "denied",  "Denied"));
-    if (actorOrg   > 0) wrap.appendChild(mk("★", actorOrg,   "orgasm",  "Orgasms this scene"));
+    if (mindBreak  > 0) wrap.appendChild(mk("✲", mindBreak,  "mind-break", "Mind Break"));
+    if (defeated)       wrap.appendChild(mk("☠", 1, "defeated", "Defeated"));
+    else if (defeatShow > 0) wrap.appendChild(mk("☠", defeatShow, "defeated", "Defeat"));
+    if (actorOrg   > 0) wrap.appendChild(mk("★", actorOrg,   "orgasm",  "Orgasms this scene", "Orgasms"));
     return wrap;
   }
 
@@ -1797,7 +1906,7 @@ AFLP.HScene = (() => {
 
   // -----------------------------------------------
   // ─── Lewd Lite renderer ─ PF2e-style combatant tracker rows ─────────
-  // Font scaling for the H scene card: AFLP Classic gets a baseline +2pt bump, plus
+  // Font scaling for the H-Scene card: AFLP Classic gets a baseline +2pt bump, plus
   // the "Card Font Boost" setting (+N applied to every theme). Implemented by walking
   // the freshly-rendered card and nudging inline px font sizes only - layout/sizing is
   // untouched, and because each refresh rebuilds from base sizes the boost never
@@ -2239,6 +2348,18 @@ AFLP.HScene = (() => {
   }
   const _safeName = n => (n ?? "").replace(/\s*[-–—].*$/, "").trim();
 
+  // Cumflation "coat" overlay for an H-Scene portrait: the exact coat the canvas
+  // token wears, extracted to an image, so the portrait matches the canvas 1:1.
+  // Returns "" when the actor has no coat (no cumflation, or no canvas token).
+  function _portraitCoat(actor) {
+    if (!actor) return "";
+    try {
+      const url = window.AFLP_Splatter?.coatDataURL?.(actor);
+      if (!url) return "";
+      return `<img class="aflp-pcoat" src="${url}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;"/>`;
+    } catch (e) { return ""; }
+  }
+
   // ── AFLP Classic renderer (topology-aware / balanced) ──────────────────────
   // Renders the per-client FOCUSED group as the interactive Talent block (a
   // receiver-group, or an entangled/mutual pair), and every other group as a
@@ -2323,16 +2444,37 @@ AFLP.HScene = (() => {
       return span;
     }
 
+    const tgtCumData = tgtActor ? (tgtActor.getFlag(AFLP.FLAG_SCOPE, "cum") ?? {}) : {};
+    const tgtCumCur  = tgtCumData.current ?? 0;
+    const tgtCumMax  = tgtCumData.max ?? 4;
+    const tgtCumPct  = tgtCumMax > 0 ? Math.min(100, Math.round((tgtCumCur / tgtCumMax) * 100)) : 0;
+    const tgtArousalD = tgtActor ? (tgtActor.getFlag(AFLP.FLAG_SCOPE, "arousal") ?? {}) : {};
+    const tgtArCur   = tgtArousalD.current ?? 0;
+    const tgtArMax   = AFLP.HScene.calcArousalMax ? AFLP.HScene.calcArousalMax(tgtActor) : (tgtArousalD.max ?? 10);
+    const tgtArPct   = tgtArMax > 0 ? Math.min(100, Math.round((tgtArCur / tgtArMax) * 100)) : 0;
+
     const tgtDiv = document.createElement("div");
     tgtDiv.innerHTML = `
       <div class="aflp-po-bottom-label">The Talent</div>
       <div class="aflp-po-bottom-row">
-        <div class="aflp-po-bottom-port" style="${_classicRing(recv)}"><img src="${tgtImg}" alt="${safeTgtName}" width="60" height="60" style="width:60px;height:60px;max-width:60px;max-height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/></div>
+        <div class="aflp-po-bottom-port" data-aflp-token="${tgtId}" title="Open AFLR sheet" style="position:relative;overflow:hidden;${_classicRing(recv)}"><img src="${tgtImg}" alt="${safeTgtName}" width="60" height="60" style="width:60px;height:60px;max-width:60px;max-height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/>${_portraitCoat(tgtActor)}</div>
         <div class="aflp-po-bottom-info">
           <div class="aflp-po-bottom-name">${safeTgtName}</div>
           <div class="aflp-po-bottom-role">Taking everything they've got</div>
           <div class="aflp-po-holes" id="aflp-po-holes-${tgtId}"></div>
           ${airlocked ? `<div class="aflp-po-airlock">★ AIRLOCKED ★</div>` : ""}
+          <div style="margin-top:3px;">
+            <div style="display:flex;align-items:center;gap:3px;margin-bottom:2px;">
+              <span style="font-size:7px;color:rgba(200,160,80,0.5);letter-spacing:0.08em;flex-shrink:0;width:30px;">CUM</span>
+              <div class="aflp-cum-track" style="flex:1;"><div class="aflp-cum-fill" style="width:${tgtCumPct}%;"></div></div>
+              <span style="font-size:8px;color:rgba(200,160,80,0.45);flex-shrink:0;min-width:28px;text-align:right;">${tgtCumCur}mL</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:3px;">
+              <span style="font-size:7px;color:rgba(220,80,80,0.5);letter-spacing:0.08em;flex-shrink:0;width:30px;">ARO</span>
+              <div class="aflp-cum-track" style="flex:1;"><div class="aflp-cum-fill" style="width:${tgtArPct}%;background:linear-gradient(90deg,#c02828,#ff5070);"></div></div>
+              <span style="font-size:8px;color:rgba(220,80,80,0.45);flex-shrink:0;min-width:28px;text-align:right;">${tgtArCur}/${tgtArMax}</span>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -2384,7 +2526,7 @@ AFLP.HScene = (() => {
 
         const atkCumData = atkActorForCock ? (atkActorForCock.getFlag(AFLP.FLAG_SCOPE, "cum") ?? {}) : {};
         const atkCumCur  = atkCumData.current ?? 0;
-        const atkCumMax  = atkCumData.max ?? 80;
+        const atkCumMax  = atkCumData.max ?? 4;
         const atkCumPct  = atkCumMax > 0 ? Math.min(100, Math.round((atkCumCur / atkCumMax) * 100)) : 0;
         const atkArousal = atkActorForCock ? (atkActorForCock.getFlag(AFLP.FLAG_SCOPE, "arousal") ?? {}) : {};
         const atkArCur   = atkArousal.current ?? 0;
@@ -2396,7 +2538,7 @@ AFLP.HScene = (() => {
         else if (atkHasCock) atkChips.push(`<span class="aflp-po-atk-chip" style="opacity:0.35;">COCK ○</span>`);
 
         col.innerHTML = `
-          <div class="aflp-po-dom-port" style="${_classicRing(atk.__participant)}"><img src="${atk.img}" alt="${safeAtkName}" width="60" height="60" style="width:60px;height:60px;max-width:60px;max-height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/></div>
+          <div class="aflp-po-dom-port" data-aflp-token="${atk.id}" title="Open AFLR sheet" style="position:relative;overflow:hidden;${_classicRing(atk.__participant)}"><img src="${atk.img}" alt="${safeAtkName}" width="60" height="60" style="width:60px;height:60px;max-width:60px;max-height:60px;display:block;object-fit:cover;object-position:top;pointer-events:none;"/>${_portraitCoat(atkActorForCock)}</div>
           <div class="aflp-po-dom-infocol" style="min-width:0;flex:1;overflow:hidden;">
             <div class="aflp-po-dom-name">${safeAtkName}</div>
             <div class="aflp-po-dom-pos" title="${posTooltip}" style="cursor:${canControl && AFLP.Settings.positionTracking?'pointer':'default'};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${posStr}</div>
@@ -2418,7 +2560,10 @@ AFLP.HScene = (() => {
         if (canControl && AFLP.Settings.positionTracking) {
           col.style.cursor = "pointer";
           col.title = posTooltip || "Click to change position";
-          col.addEventListener("click", async () => {
+          col.addEventListener("click", async (e) => {
+            // Position picker only on the name / position text; the portrait
+            // opens the AFLR sheet (handled by the delegated container click).
+            if (!e.target.closest(".aflp-po-dom-name, .aflp-po-dom-pos")) return;
             if (!game.user.isGM) {
               game.socket.emit("module.ardisfoxxs-lewd-pf2e", { type:"hscene-player-position-change", targetId: tgtId, atkTokenId: atk.id });
               ui.notifications.info("Position change requested, waiting for GM.");
@@ -2670,7 +2815,7 @@ AFLP.HScene = (() => {
       const arCur = aro.current ?? 0, arMax = AFLP.HScene.calcArousalMax?.(actor) ?? aro.max ?? 10;
       const arPct = arMax > 0 ? Math.min(100, Math.round(arCur / arMax * 100)) : 0;
       const cum = actor?.getFlag?.(FLAG, "cum") ?? {};
-      const cumCur = cum.current ?? 0, cumMax = cum.max ?? 80;
+      const cumCur = cum.current ?? 0, cumMax = cum.max ?? 4;
       const cumPct = cumMax > 0 ? Math.min(100, Math.round(cumCur / cumMax * 100)) : 0;
       const bd = document.createElement("div");
       bd.className = "aflp-do-bars"; bd.dataset.doBarsId = participant.tokenId;
@@ -2759,7 +2904,7 @@ AFLP.HScene = (() => {
       const pActor = _resolveActor(part);
       if (!pActor) continue;
       const pCum = pActor.getFlag?.(FLAG, "cum") ?? {};
-      const pCur = pCum.current ?? 0, pMax = pCum.max ?? 80;
+      const pCur = pCum.current ?? 0, pMax = pCum.max ?? 4;
       const pPct = pMax > 0 ? Math.min(100, Math.round((pCur / pMax) * 100)) : 0;
       const pFill = cumRowEl.querySelector(".aflp-cum-fill");
       const pVal  = cumRowEl.querySelectorAll(".aflp-arousal-val")[0];
@@ -3010,7 +3155,7 @@ AFLP.HScene = (() => {
     // CUM gauge (HP bar)
     const cumData = tgtActor?.getFlag?.(FLAG, "cum") ?? {};
     const cumCur  = cumData.current ?? 0;
-    const cumMax  = cumData.max ?? 80;
+    const cumMax  = cumData.max ?? 4;
     const hpPct   = Math.max(0, Math.min(100, Math.round((cumCur / cumMax) * 100)));
     const hpClass = hpPct > 60 ? "high" : hpPct > 25 ? "mid" : "low";
 
@@ -3131,7 +3276,7 @@ AFLP.HScene = (() => {
       const fmAArPct = fmAArMax > 0 ? Math.min(100, Math.round(fmAArCur / fmAArMax * 100)) : 0;
       const fmACum   = atkActorFM?.getFlag?.(FLAG,"cum") ?? {};
       const fmACumCur= fmACum.current ?? 0;
-      const fmACumMax= fmACum.max ?? 80;
+      const fmACumMax= fmACum.max ?? 4;
       const fmACumPct= fmACumMax > 0 ? Math.min(100, Math.round(fmACumCur / fmACumMax * 100)) : 0;
       row.innerHTML = `
         <img src="${atk.img}" alt="${safeName}" width="28" height="28"
@@ -3515,7 +3660,7 @@ AFLP.HScene = (() => {
         if (!col) continue;
         const atkCumData  = atkActor.getFlag?.(AFLP.FLAG_SCOPE, "cum") ?? {};
         const atkCumCur   = atkCumData.current ?? 0;
-        const atkCumMax   = atkCumData.max ?? 80;
+        const atkCumMax   = atkCumData.max ?? 4;
         const atkCumPct   = atkCumMax > 0 ? Math.min(100, Math.round((atkCumCur / atkCumMax) * 100)) : 0;
         const atkArousal  = atkActor.getFlag?.(AFLP.FLAG_SCOPE, "arousal") ?? {};
         const atkArCur    = atkArousal.current ?? 0;
@@ -3548,7 +3693,7 @@ AFLP.HScene = (() => {
       if (game.user.isGM) {
         const isMon = scene && (() => {
           const ta = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId });
-          return ta && ta.type === "npc" && !ta.hasPlayerOwner;
+          return ta && AFLP.system.isMonster(ta);
         })();
         const gmKey = isMon
           ? AFLP.Settings.KEYS.HSCENE_THEME_MON
@@ -3567,6 +3712,12 @@ AFLP.HScene = (() => {
     card.querySelector(".aflp-card-minimize")?.addEventListener("click", e => {
       e.stopPropagation();
       card.classList.toggle("minimized");
+    });
+
+    // Change who is in control (GM) - re-opens a scene-wide role chooser.
+    card.querySelector(".aflp-card-control")?.addEventListener("click", e => {
+      e.stopPropagation();
+      AFLP.HScene._promptControlSwitch?.(scene);
     });
 
     // Log toggle + log panel close button
@@ -3751,29 +3902,34 @@ AFLP.HScene = (() => {
           const tgtActor  = tgtToken?.actor?.getWorldActor?.() ?? tgtToken?.actor;
           if (!srcActor || !tgtActor) return;
 
-          const UUID_DOM  = AFLP.conditions?.["dominating"]?.uuid;
-          const UUID_SUB  = AFLP.conditions?.["submitting"]?.uuid;
-          const UUID_EXP  = AFLP.conditions?.["exposed"]?.uuid;
+          const UUID_DOM  = AFLP.system.contentUuid("dominating");
+          const UUID_SUB  = AFLP.system.contentUuid("submitting");
+          const UUID_EXP  = AFLP.system.contentUuid("exposed");
           if (!UUID_DOM || !UUID_SUB || !UUID_EXP) {
             console.error("AFLP | hscene-player-ss: conditions not loaded yet");
             return;
           }
 
           async function gmApply(actor, slug, sourceId, value) {
-            const existing = actor.items?.find(i => i.slug === slug);
-            if (existing) {
-              if (slug === "exposed" && (existing.system?.badge?.value ?? 0) < 2) {
-                await existing.update({ "system.badge.value": (existing.system.badge.value ?? 0) + 1 });
-              }
-              return;
+            // Binary AFLR role/state conditions go through the unified flag-aware
+            // API (PF2e item / DH flag).
+            if (slug === "dominating" || slug === "submitting" || slug === "defeated") {
+              if (AFLP.cond.has(actor, slug)) return;
+              return AFLP.cond.apply(actor, slug, value, actor.token?.id ?? null);
             }
+            // Exposed is a level condition: raise-to-at-least (default 1) so a
+            // re-apply never stacks or lowers it. The PF2e item carries the
+            // badge-scaled penalty; raiseTo writes the item badge / DH flag.
+            if (slug === "exposed") {
+              return AFLP.cond.raiseTo(actor, "exposed", value ?? 1, actor.token?.id ?? null);
+            }
+            const existing = actor.items?.find(i => i.slug === slug);
+            if (existing) return;
             try {
-              const doc = await fromUuid(sourceId);
-              const itemData = doc.toObject();
-              if (value !== null && itemData.system?.badge !== undefined) itemData.system.badge.value = value;
-              await actor.createEmbeddedDocuments("Item", [itemData]);
+              const applied = await AFLP.system.applyEffect(actor, sourceId, { badgeValue: value });
+              if (applied === null) await AFLP.system.applyNativeCondition(actor, slug);
             } catch(e) {
-              await actor.increaseCondition?.(slug).catch(() => {});
+              await AFLP.system.applyNativeCondition(actor, slug);
             }
           }
 
@@ -3786,9 +3942,9 @@ AFLP.HScene = (() => {
           // Apply any extra conditions requested (toy effects etc.)
           for (const cond of (data.extraConditions ?? [])) {
             const tgt = cond.onSource ? srcActor : tgtActor;
-            if (cond.slug === "grabbed")    await tgt.increaseCondition?.("grabbed").catch(() => {});
-            if (cond.slug === "restrained") await tgt.increaseCondition?.("restrained").catch(() => {});
-            if (cond.slug === "horny")      await gmApply(tgt, "horny", AFLP.conditions?.["horny"]?.uuid ?? "", cond.value ?? 1);
+            if (cond.slug === "grabbed")    await AFLP.system.applyNativeCondition(tgt, "grabbed");
+            if (cond.slug === "restrained") await AFLP.system.applyNativeCondition(tgt, "restrained");
+            if (cond.slug === "horny")      await gmApply(tgt, "horny", AFLP.system.contentUuid("horny") ?? "", cond.value ?? 1);
             if (cond.slug === "exposed")    await gmApply(tgt, "exposed", UUID_EXP, null);
           }
 
@@ -3809,11 +3965,20 @@ AFLP.HScene = (() => {
             await AFLP_Arousal?.increment?.(tgtActor, data.arousalGain, "Sex Toy Snuggle").catch(() => {});
           }
 
-          // Start the H scene (GM-local, socket will sync to others)
+          // Start the H-Scene (GM-local, socket will sync to others)
           const atkData = { id: data.srcTokenId, actorId: srcActor.id, name: srcActor.name, img: srcActor.img, tokenDoc: srcToken.document };
           const tgtData = { id: data.tgtTokenId, actorId: tgtActor.id, name: tgtActor.name, img: tgtActor.img, tokenDoc: tgtToken.document };
           AFLP.HScene.startScene(atkData, tgtData);
         })().catch(e => console.error("AFLP | hscene-player-ss error:", e));
+      }
+
+      // ── Player requests target Arousal (e.g. Struggle Snuggle sexual damage) ─
+      if (data.type === "aflp-apply-arousal" && _isPrimaryGM()) {
+        (async () => {
+          const tok = canvas?.tokens?.get(data.tgtTokenId);
+          const act = tok?.actor;
+          if (act) await AFLP_Arousal?.increment?.(act, data.amount, data.source ?? "", data.tgtTokenId).catch(() => {});
+        })().catch(e => console.error("AFLP | aflp-apply-arousal error:", e));
       }
 
       // ── Player requests a hole toggle (non-GM allowed user) ─────────────
@@ -3900,7 +4065,7 @@ AFLP.HScene = (() => {
       if (AFLP.Settings.hsceneEnabled) AFLP.HScene.closeAll();
     });
 
-    // Refresh H scene bars when cumflation flags change (e.g. purge macro success)
+    // Refresh H-Scene bars when cumflation flags change (e.g. purge macro success)
     Hooks.on("updateActor", (actor, diff) => {
       if (!AFLP.Settings.hsceneEnabled) return;
 
@@ -3943,7 +4108,7 @@ AFLP.HScene = (() => {
             if (isTarget) {
               // Target dropped to 0 — close the scene entirely
               ChatMessage.create({
-                content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong> has been defeated. The H scene ends.</p></div>`,
+                content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong> has been defeated. The H-Scene ends.</p></div>`,
                 speaker: { alias: "AFLP" },
               });
               AFLP.HScene.closeScene(scene.id);
@@ -3969,7 +4134,7 @@ AFLP.HScene = (() => {
       // Non-SS scene initiator: when Submitting is applied to an actor outside of
       // Struggle Snuggle (e.g. Four-Armed Ravish, Serpent Coil, Engulf, Abduct),
       // find the actor who just received Dominating in the same combat and start
-      // the H scene automatically.
+      // the H-Scene automatically.
       // Only runs on GM to avoid double-firing.
       if (!game.user.isGM) return;
       if (item.slug !== "submitting") return;
@@ -3977,7 +4142,7 @@ AFLP.HScene = (() => {
       if (window._aflpSSInProgress) return;
       const targetActor = item.actor.getWorldActor?.() ?? item.actor;
 
-      // Skip if an H scene already exists for this target
+      // Skip if an H-Scene already exists for this target
       if (AFLP.HScene._getSceneWhereTarget?.(null, targetActor.id)) return;
 
       // Find the attacker: an actor in active combat who has Dominating
@@ -3990,10 +4155,7 @@ AFLP.HScene = (() => {
       for (const combatant of combat.combatants) {
         const a = combatant.actor;
         if (!a || a.id === targetActor.id) continue;
-        const hasDom = a.items?.some(c =>
-          c.slug === "dominating" ||
-          (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.["dominating"]?.uuid ?? "NOMATCH")
-        );
+        const hasDom = AFLP.cond.has(a, "dominating");
         if (!hasDom) continue;
         // Make sure this actor isn't already in a scene as an attacker
         let alreadyInScene = false;
@@ -4076,6 +4238,8 @@ AFLP.HScene = (() => {
       const dy = e.clientY - startY;
       el.style.left = Math.max(0, origLeft + dx) + "px";
       el.style.top  = Math.max(0, origTop  + dy) + "px";
+      AFLP.UI?.SceneDock?.reposition?.();
+      AFLP.UI?.CarnalDock?.reposition?.();
     });
 
     document.addEventListener("mouseup", () => {
@@ -4083,6 +4247,240 @@ AFLP.HScene = (() => {
       dragging = false;
       handle.style.cursor = "grab";
     });
+  }
+
+  // =====================================================================
+  // Empty-scene builder (C2b)
+  // When the window is open and no scene is active, show a roster of canvas
+  // tokens to drag into Talent (the receiver) and Performer slots, then Start
+  // Scene. The roster updates live as tokens are added/removed on the canvas.
+  // =====================================================================
+  function _builderStyle() {
+    if (document.getElementById("aflp-builder-style")) return;
+    const el = document.createElement("style");
+    el.id = "aflp-builder-style";
+    el.textContent = `
+      #aflp-scene-builder { pointer-events: all; padding: 10px; color: var(--aflr-text, #e8dcfb); font-family: var(--aflr-serif, serif); }
+      #aflp-scene-builder .ab-title { text-align: center; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--aflr-gold, #f4b74c); margin-bottom: 8px; }
+      #aflp-scene-builder .ab-slot { border: 1px dashed var(--aflr-border-gold, rgba(244,183,76,0.4)); border-radius: 6px; padding: 6px; margin-bottom: 8px; min-height: 40px; background: var(--aflr-panel, rgba(160,139,216,0.08)); }
+      #aflp-scene-builder .ab-slot.ab-over { background: rgba(244,183,76,0.16); border-style: solid; }
+      #aflp-scene-builder .ab-slot-label { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--aflr-text-muted, #bfaad3); margin-bottom: 4px; }
+      #aflp-scene-builder .ab-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      #aflp-scene-builder .ab-chip { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 3px; background: var(--aflr-panel-2, rgba(160,139,216,0.13)); border: 1px solid var(--aflr-border, rgba(160,139,216,0.3)); border-radius: 5px; cursor: grab; font-size: 11px; max-width: 100%; }
+      #aflp-scene-builder .ab-chip:hover { border-color: var(--aflr-border-gold, rgba(244,183,76,0.4)); }
+      #aflp-scene-builder .ab-chip img { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+      #aflp-scene-builder .ab-chip .ab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #aflp-scene-builder .ab-chip .ab-x { margin-left: 2px; color: var(--aflr-text-dim, #8f7fb0); cursor: pointer; font-size: 12px; }
+      #aflp-scene-builder .ab-chip .ab-x:hover { color: var(--aflr-arousal, #d07090); }
+      #aflp-scene-builder .ab-roster-label { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--aflr-text-dim, #8f7fb0); margin: 4px 0; }
+      #aflp-scene-builder .ab-empty { font-size: 10px; color: var(--aflr-text-dim, #8f7fb0); font-style: italic; padding: 2px; }
+      #aflp-scene-builder .ab-start { width: 100%; margin-top: 6px; padding: 7px; background: rgba(244,183,76,0.18); border: 1px solid var(--aflr-border-gold, rgba(244,183,76,0.4)); border-radius: 6px; color: var(--aflr-gold, #f4b74c); font-family: inherit; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+      #aflp-scene-builder .ab-start:hover:not(:disabled) { background: rgba(244,183,76,0.3); }
+      #aflp-scene-builder .ab-start:disabled { opacity: 0.4; cursor: not-allowed; }
+      #aflp-scene-builder .ab-note { text-align: center; font-size: 11px; color: var(--aflr-text-muted, #bfaad3); font-style: italic; padding: 12px 6px; }
+      .ab-drag-ghost { position: fixed; z-index: 200; pointer-events: none; padding: 3px 8px; font-family: var(--aflr-serif, serif); font-size: 11px; color: var(--aflr-gold, #f4b74c); background: var(--aflr-header-bg, #1c1228); border: 1px solid var(--aflr-border-gold, rgba(244,183,76,0.5)); border-radius: 5px; box-shadow: 0 4px 16px rgba(0,0,0,0.6); opacity: 0.95; }
+    `;
+    document.head.appendChild(el);
+  }
+
+  // Canvas tokens usable as participants (have an actor).
+  function _builderTokens() {
+    return (canvas?.tokens?.placeables ?? []).filter(t => t?.actor).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
+  function _tokenDesc(t) {
+    return {
+      id: t.id,
+      actorId: t.actor?.id ?? t.id,
+      name: t.name,
+      img: t.document?.texture?.src || t.actor?.img || "icons/svg/mystery-man.svg",
+      tokenDoc: t.document ?? null,
+    };
+  }
+  // Drop ids that are no longer on the canvas.
+  function _builderPrune() {
+    const live = new Set(_builderTokens().map(t => t.id));
+    if (_builderTalent && !live.has(_builderTalent)) _builderTalent = null;
+    for (const id of [..._builderPerformers]) if (!live.has(id)) _builderPerformers.delete(id);
+  }
+
+  function _removeBuilder() { if (_builderEl) { _builderEl.remove(); _builderEl = null; } }
+
+  // Decide whether the builder should show, and (re)render it.
+  function _syncBuilder() {
+    const open = !!(_container && document.body.contains(_container) && _container.style.display !== "none");
+    if (!open || _scenes.size > 0) { _removeBuilder(); return; }
+    _renderBuilder();
+  }
+
+  function _chip(t, removable) {
+    const c = document.createElement("div");
+    c.className = "ab-chip";
+    c.draggable = false; // manual drag (see _wireBuilderDrag); native DnD is flaky here
+    c.dataset.tokenId = t.id;
+    c.innerHTML = `<img src="${t.document?.texture?.src || t.actor?.img || ""}"><span class="ab-name">${foundry.utils.escapeHTML?.(t.name) ?? t.name}</span>${removable ? '<span class="ab-x" title="Remove">\u2715</span>' : ''}`;
+    c.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest(".ab-x")) return; // remove button handles its own click
+      _dragId = t.id; _dragLabel = t.name; _dragMoved = false; _dragStart = { x: e.clientX, y: e.clientY };
+      e.preventDefault();
+    });
+    return c;
+  }
+
+  // Slot currently under the cursor (or null).
+  function _slotUnder(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el ? el.closest('#aflp-scene-builder .ab-slot') : null;
+  }
+  function _assignToSlot(id, kind) {
+    if (_builderTalent === id) _builderTalent = null;
+    _builderPerformers.delete(id);
+    if (kind === "talent") _builderTalent = id; else _builderPerformers.add(id);
+    _renderBuilder();
+  }
+  // Document-level move/up listeners, wired once. Handle the active manual drag.
+  function _wireBuilderDrag() {
+    if (_dragWired) return; _dragWired = true;
+    document.addEventListener("mousemove", (e) => {
+      if (!_dragId) return;
+      if (!_dragMoved && _dragStart && (Math.abs(e.clientX - _dragStart.x) > 4 || Math.abs(e.clientY - _dragStart.y) > 4)) {
+        _dragMoved = true;
+        _dragGhost = document.createElement("div");
+        _dragGhost.className = "ab-drag-ghost";
+        _dragGhost.textContent = _dragLabel || "";
+        document.body.appendChild(_dragGhost);
+      }
+      if (_dragMoved && _dragGhost) { _dragGhost.style.left = (e.clientX + 10) + "px"; _dragGhost.style.top = (e.clientY + 10) + "px"; }
+      const slot = _slotUnder(e.clientX, e.clientY);
+      document.querySelectorAll('#aflp-scene-builder .ab-slot').forEach(s => s.classList.toggle("ab-over", s === slot));
+    });
+    document.addEventListener("mouseup", (e) => {
+      if (!_dragId) return;
+      const id = _dragId, moved = _dragMoved;
+      _dragId = null; _dragMoved = false; _dragStart = null;
+      if (_dragGhost) { _dragGhost.remove(); _dragGhost = null; }
+      document.querySelectorAll('#aflp-scene-builder .ab-slot').forEach(s => s.classList.remove("ab-over"));
+      const slot = _slotUnder(e.clientX, e.clientY);
+      // Release over a slot drops there (roster chips never sit inside a slot,
+      // so a plain click on a roster chip releases off-slot and the click
+      // handler assigns instead). Suppress the trailing click after any drag.
+      if (moved) { _justDragged = true; setTimeout(() => { _justDragged = false; }, 0); }
+      if (slot) _assignToSlot(id, slot.dataset.kind);
+    });
+  }
+
+  function _renderBuilder() {
+    _builderStyle();
+    _wireBuilderDrag();
+    _builderPrune();
+    _removeBuilder();
+    _builderEl = document.createElement("div");
+    _builderEl.id = "aflp-scene-builder";
+
+    // Players cannot start scenes; show a simple note.
+    if (!game.user.isGM) {
+      _builderEl.innerHTML = `<div class="ab-note">No active scene. The GM can start one here.</div>`;
+      _container.appendChild(_builderEl);
+      return;
+    }
+
+    const tokens = _builderTokens();
+    const byId = new Map(tokens.map(t => [t.id, t]));
+    const assigned = new Set([...(_builderTalent ? [_builderTalent] : []), ..._builderPerformers]);
+
+    const title = document.createElement("div");
+    title.className = "ab-title";
+    title.textContent = "Build a Scene";
+    _builderEl.appendChild(title);
+
+    // Talent slot (single)
+    const talentSlot = _slot("The Talent", "talent");
+    const talentChips = talentSlot.querySelector(".ab-chips");
+    if (_builderTalent && byId.has(_builderTalent)) {
+      const ch = _chip(byId.get(_builderTalent), true);
+      ch.querySelector(".ab-x").addEventListener("click", (e) => { e.stopPropagation(); _builderTalent = null; _renderBuilder(); });
+      talentChips.appendChild(ch);
+    } else {
+      talentChips.innerHTML = `<div class="ab-empty">Drag a token here</div>`;
+    }
+    _builderEl.appendChild(talentSlot);
+
+    // Performers slot (multi)
+    const perfSlot = _slot("Performers", "performers");
+    const perfChips = perfSlot.querySelector(".ab-chips");
+    const perfLive = [..._builderPerformers].filter(id => byId.has(id));
+    if (perfLive.length) {
+      for (const id of perfLive) {
+        const ch = _chip(byId.get(id), true);
+        ch.querySelector(".ab-x").addEventListener("click", (e) => { e.stopPropagation(); _builderPerformers.delete(id); _renderBuilder(); });
+        perfChips.appendChild(ch);
+      }
+    } else {
+      perfChips.innerHTML = `<div class="ab-empty">Drag one or more tokens here</div>`;
+    }
+    _builderEl.appendChild(perfSlot);
+
+    // Roster (unassigned tokens)
+    const rosterLabel = document.createElement("div");
+    rosterLabel.className = "ab-roster-label";
+    rosterLabel.textContent = "Tokens on this scene";
+    _builderEl.appendChild(rosterLabel);
+    const roster = document.createElement("div");
+    roster.className = "ab-chips";
+    const unassigned = tokens.filter(t => !assigned.has(t.id));
+    if (unassigned.length) {
+      for (const t of unassigned) {
+        const ch = _chip(t, false);
+        // Click to assign: Talent first, then Performers.
+        ch.addEventListener("click", () => {
+          if (_justDragged) return; // a drag just ended on this chip; not a click
+          if (!_builderTalent) _builderTalent = t.id; else _builderPerformers.add(t.id);
+          _renderBuilder();
+        });
+        roster.appendChild(ch);
+      }
+    } else {
+      roster.innerHTML = `<div class="ab-empty">No more tokens. Drop more on the canvas.</div>`;
+    }
+    _builderEl.appendChild(roster);
+
+    // Start button
+    const start = document.createElement("button");
+    start.type = "button";
+    start.className = "ab-start";
+    start.textContent = "Start Scene";
+    start.disabled = !(_builderTalent && _builderPerformers.size > 0);
+    start.addEventListener("click", () => _builderStart());
+    _builderEl.appendChild(start);
+
+    _container.appendChild(_builderEl);
+  }
+
+  function _slot(label, kind) {
+    const slot = document.createElement("div");
+    slot.className = "ab-slot";
+    slot.dataset.kind = kind;
+    slot.innerHTML = `<div class="ab-slot-label">${label}</div><div class="ab-chips"></div>`;
+    // Drops are handled by the manual pointer-drag in _wireBuilderDrag (mouseup
+    // checks the slot under the cursor); highlight is set there too.
+    return slot;
+  }
+
+  function _builderStart() {
+    if (!game.user.isGM) return;
+    _builderPrune();
+    if (!_builderTalent || _builderPerformers.size === 0) return;
+    const talentTok = canvas?.tokens?.get(_builderTalent);
+    const perfToks = [..._builderPerformers].map(id => canvas?.tokens?.get(id)).filter(Boolean);
+    if (!talentTok || !perfToks.length) return;
+    const talent = _tokenDesc(talentTok);
+    const performers = perfToks.map(_tokenDesc);
+    // Clear builder state + remove its UI; startScene/addAttacker build the card.
+    _builderTalent = null; _builderPerformers.clear();
+    _removeBuilder();
+    // First performer creates/joins the scene; the rest are added.
+    AFLP.HScene.startScene(performers[0], talent);
+    for (let i = 1; i < performers.length; i++) AFLP.HScene.addAttacker(talent.id, performers[i]);
   }
 
   // -----------------------------------------------
@@ -4098,15 +4496,48 @@ AFLP.HScene = (() => {
       if (game.user.isGM && AFLP.Settings.hsceneEnabled) {
         setTimeout(() => _restoreSceneState().catch(() => {}), 1500);
       }
+      // Keep the empty-scene builder roster in sync as tokens come and go.
+      // Defer briefly: at delete-hook time the dying token is still present in
+      // canvas.tokens.placeables, so an immediate rebuild would keep showing it.
+      const rosterRefresh = () => { setTimeout(() => { try { _syncBuilder(); } catch (e) { /* ignore */ } }, 60); };
+      Hooks.on("createToken", rosterRefresh);
+      Hooks.on("deleteToken", rosterRefresh);
+      Hooks.on("canvasReady", rosterRefresh);
     },
 
     // Expose theme helpers so module-settings onChange callbacks can call them
     _applyDefaultThemesToAll() { _applyDefaultThemesToAll(); },
     _resetPlayersToDefaultTheme() { _resetPlayersToDefaultTheme(); },
 
+    // Floating-toolbar window controls. The whole H-Scene lives in one fixed
+    // container; minimising hides it and the toolbar button restores it.
+    windowOpen() {
+      return !!(_container && document.body.contains(_container) && _container.style.display !== "none");
+    },
+    showWindow() {
+      _ensureContainer();
+      if (_container) _container.style.display = "flex";
+      // No active scene -> show the empty-scene builder instead of a bare window.
+      _syncBuilder();
+      try { AFLP.UI?.Toolbar?.sync?.(); } catch (e) { /* ignore */ }
+    },
+    hideWindow() {
+      if (_container) _container.style.display = "none";
+      try { AFLP.UI?.Toolbar?.sync?.(); } catch (e) { /* ignore */ }
+    },
+    toggleWindow() { if (this.windowOpen()) this.hideWindow(); else this.showWindow(); },
+
+    // Refresh the builder roster (called from create/delete token + canvas hooks).
+    _syncBuilder() { _syncBuilder(); },
+
     // Calculate true arousal max for an actor
     // Base 6 + Denied level + any flag overrides
     calcArousalMax(actor) {
+      // System bridge: when the adapter backs arousal with a capped native
+      // resource (Daggerheart Stress), that track's max IS the arousal
+      // ceiling — the system owns it, so maxBase/Denied do not extend it.
+      const native = AFLP.system?.nativeArousalMax?.(actor);
+      if (native != null) return native;
       const FLAG = AFLP.FLAG_SCOPE;
       const base = actor.getFlag(FLAG, "arousal")?.maxBase ?? 6;
       // Denied adds to arousal max — read from flag (migrated from condition item in ensureCoreFlags).
@@ -4114,7 +4545,7 @@ AFLP.HScene = (() => {
       return base + deniedVal;
     },
 
-    // Start a new H scene or add attacker to existing one.
+    // Start a new H-Scene or add attacker to existing one.
     // target/attacker objects: { id, actorId, name, img }
     // id = token ID (unique per placed token), actorId = world actor ID.
     // Scenes are keyed by target TOKEN id so two tokens of the same actor
@@ -4129,7 +4560,7 @@ AFLP.HScene = (() => {
     // projected legacy view reproduce the real target. See the comment block
     // on _projectTarget. Inserting attacker-first here silently flips the
     // projected target in every 1v1 and breaks the legacy renderers.
-    // Current H-scene position slug for an actor (or null). Used by the voice
+    // Current H-Scene position slug for an actor (or null). Used by the voice
     // layer to pick an activity-appropriate ambient SFX. Returns the first
     // participant entry with a position across all live scenes.
     positionForActor(actorId) {
@@ -4160,9 +4591,10 @@ AFLP.HScene = (() => {
       return null;
     },
 
-    startScene(attacker, target, fromSocket = false) {
+    startScene(attacker, target, fromSocket = false, { promptPosition = true } = {}) {
       if (!AFLP.Settings.hsceneEnabled) return;
       _ensureContainer();
+      _removeBuilder(); // a real scene supersedes the empty-scene builder
       _applyDragHandleTheme(_container?.querySelector('#aflp-hscene-drag-handle'), _container);
 
       // ── Resolve the ONE scene for this battlemap (create or join) ─────────
@@ -4227,8 +4659,15 @@ AFLP.HScene = (() => {
       const _revealCard = () => { card.style.display = ""; };
       _pendingReveal.set(scene.id, _revealCard);
 
+      // Prompt for a position only when THIS attacker has none yet - a brand-new
+      // scene or a fresh joiner. Re-entries must NOT re-open the dialog: give-in
+      // re-joining the one battlemap scene, the adversary's HSA "press again"
+      // each round, or any other idempotent re-call of startScene. _ensureParticipant
+      // is find-or-create, so on re-entry atkP is the existing participant with its
+      // position intact, and this guard collapses the duplicate prompt.
       const needsPositionPrompt = (
         !fromSocket && AFLP.Settings.positionTracking && game.user.isGM && !isSelfScene
+        && !atkP?.position && promptPosition
       );
 
       // Role selection prompt - only when NEITHER actor has a role yet.
@@ -4236,10 +4675,8 @@ AFLP.HScene = (() => {
       // won't fire for SS-initiated scenes. Skip while the SS macro is running.
       if (!fromSocket && game.user.isGM && !isSelfScene &&
           !window._aflpMacroHandlingPosition && !window._aflpSSInProgress) {
-        const atkHasRole = atkActor?.items?.some(c => c.slug === "dominating" || c.slug === "submitting")
-                        || atkActor?.hasCondition?.("dominating") || atkActor?.hasCondition?.("submitting");
-        const tgtHasRole = tgtActor?.items?.some(c => c.slug === "dominating" || c.slug === "submitting")
-                        || tgtActor?.hasCondition?.("dominating") || tgtActor?.hasCondition?.("submitting");
+        const atkHasRole = atkActor && (AFLP.cond.has(atkActor, "dominating") || AFLP.cond.has(atkActor, "submitting"));
+        const tgtHasRole = tgtActor && (AFLP.cond.has(tgtActor, "dominating") || AFLP.cond.has(tgtActor, "submitting"));
         if (!atkHasRole && !tgtHasRole && atkActor && tgtActor) {
           AFLP.HScene._promptRoleSelection(atkActor, tgtActor).catch(() => {});
         }
@@ -4265,6 +4702,30 @@ AFLP.HScene = (() => {
       if (!fromSocket && game.user.isGM) {
         game.socket.emit("module.ardisfoxxs-lewd-pf2e", _sceneSyncPayload(scene));
       }
+    },
+
+    // Awaitable position pick for a single attacker token. The Carnal layer
+    // calls this so a penetrative H-Scene Action LOCKS the hole before any cum
+    // is deposited or impregnation rolled - the resolution must never race ahead
+    // of the GM's choice. Prompts only when the attacker has no position yet
+    // (otherwise the current scene position stands; change it via the card chip),
+    // reveals the card when done, and resolves to the chosen position id. No-op
+    // (null) if the attacker is not in a scene, tracking is off, or not GM.
+    async ensureAttackerPosition(attackerTokenId, opts = {}) {
+      let scene = null, atkP = null;
+      for (const s of _scenes.values()) {
+        const p = (s.participants ?? []).find(pp => pp.tokenId === attackerTokenId);
+        if (p) { scene = s; atkP = p; break; }
+      }
+      if (!scene) return null;
+      try {
+        if (!atkP.position && AFLP.Settings.positionTracking && game.user.isGM) {
+          const atkData = scene.attackers.find(a => a.id === attackerTokenId) ?? _legacyAttackerProxy(atkP);
+          await AFLP.HScene._promptGroupPosition(scene, atkData, opts);
+        }
+      } catch (e) { console.warn("AFLP | ensureAttackerPosition failed", e); }
+      finally { try { AFLP.HScene.revealCard(scene.id); } catch (e) { /* card may be gone */ } }
+      return atkP.position ?? null;
     },
 
     // Add an attacker to the scene that contains `targetId` (the token the
@@ -4305,12 +4766,9 @@ AFLP.HScene = (() => {
         const atkActor = atkActorEarly;
         if (atkData && atkActor) {
           // New scene joiners default to Dominating unless they already have a role.
-          const hasRole = atkActor.hasCondition?.("dominating") || atkActor.hasCondition?.("submitting");
+          const hasRole = AFLP.cond.has(atkActor, "dominating") || AFLP.cond.has(atkActor, "submitting");
           if (!hasRole) {
-            try {
-              const { increaseCondition } = game.pf2e?.Condition ?? {};
-              if (increaseCondition) increaseCondition(atkActor, "dominating").catch(() => {});
-            } catch {}
+            AFLP.cond.apply(atkActor, "dominating").catch(() => {});
           }
           AFLP.HScene._promptGroupPosition(scene, atkData).catch(() => {});
         }
@@ -4341,19 +4799,12 @@ AFLP.HScene = (() => {
       if (game.user.isGM) {
         const leaverActor = _resolveActor({ id: tokenId, actorId: scene.participants[idx].actorId });
         if (leaverActor) {
-          const wasSub = !!leaverActor.items?.some(c =>
-            c.slug === "submitting" ||
-            (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.["submitting"]?.uuid ?? "NOMATCH")
-          );
+          const wasSub = AFLP.cond.has(leaverActor, "submitting");
           const slugs = wasSub
             ? ["submitting", "dominating", "grabbed", "restrained"]
             : ["submitting", "dominating"];
           for (const slug of slugs) {
-            const cond = leaverActor.items?.find(c =>
-              c.slug === slug ||
-              (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.[slug]?.uuid ?? "NOMATCH")
-            );
-            if (cond) cond.delete().catch(() => {});
+            AFLP.cond.remove(leaverActor, slug).catch(() => {});
           }
         }
       }
@@ -4631,6 +5082,7 @@ AFLP.HScene = (() => {
 
       const card = _cardFor(scene);
       if (card) _refreshPortraits(card, scene);
+      _saveSceneState();   // persist the pending flag so set/clear stay symmetric across reloads
     },
 
     // Is a given participant key currently pending a cum decision?
@@ -4644,6 +5096,7 @@ AFLP.HScene = (() => {
         delete scene.readyToCum[key];
         const card = _cardFor(scene);
         if (card) _refreshPortraits(card, scene);
+        _saveSceneState();   // persist the clear, else a reload restores the stale pending flag
       }
     },
 
@@ -4754,17 +5207,16 @@ AFLP.HScene = (() => {
             const actor = _resolveActor({ id: p.tokenId, actorId: p.actorId, tokenDoc: p.tokenDoc });
             if (!actor || _rolesSeen.has(actor.id)) continue;
             _rolesSeen.add(actor.id);
-            const wasSub = !!actor.items?.some(c =>
-              c.slug === "submitting" || c.sourceId === AFLP.conditions["submitting"]?.uuid
-            );
+            // Reset the per-scene Afterglow gate so the next scene grants it again.
+            if (actor.getFlag(AFLP.FLAG_SCOPE, "afterglowScene") != null) {
+              actor.unsetFlag(AFLP.FLAG_SCOPE, "afterglowScene").catch(() => {});
+            }
+            const wasSub = AFLP.cond.has(actor, "submitting");
             const slugs = wasSub
               ? ["submitting", "dominating", "grabbed", "restrained"]
               : ["submitting", "dominating"];
             for (const slug of slugs) {
-              const cond = actor.items?.find(c =>
-                c.slug === slug || c.sourceId === AFLP.conditions[slug]?.uuid
-              );
-              if (cond) cond.delete().catch(() => {});
+              AFLP.cond.remove(actor, slug).catch(() => {});
             }
           }
 
@@ -4833,6 +5285,27 @@ AFLP.HScene = (() => {
               </div>`
             : "";
 
+          // Kinks the target currently has - so the report reflects kinks (incl.
+          // any gained this scene, like Creature Fetish). Reads the sexual.kinks
+          // flag, which both PF2e and Daggerheart populate.
+          let kinksHtml = "";
+          if (tgtActor) {
+            const _kSexual = tgtActor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {};
+            const _kFlag   = _kSexual.kinks ?? {};
+            const _kNotes  = _kSexual.kinkNotes ?? {};
+            const _kNames  = Object.keys(_kFlag).filter(s => _kFlag[s]).map(s => {
+              const nm   = AFLP.kinks?.[s]?.name ?? s;
+              const note = _kNotes[s] ? ` <span style="color:#aaa;">(${_kNotes[s]})</span>` : "";
+              return nm + note;
+            });
+            if (_kNames.length) {
+              kinksHtml = `<div style="margin-top:8px;border-top:1px solid rgba(200,160,80,0.3);padding-top:6px;">
+                <div style="font-size:10px;color:#c9a96e;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:4px;">Kinks</div>
+                ${_kNames.map(n => `<div style="color:#e0c880;font-style:italic;">${n}</div>`).join("")}
+              </div>`;
+            }
+          }
+
           const reportHtml = `
             <div style="font-family:sans-serif;background:rgba(10,8,4,0.92);border:1px solid rgba(200,160,80,0.35);border-radius:4px;overflow:hidden;">
               <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(200,160,80,0.2);background:rgba(200,160,80,0.06);">
@@ -4860,6 +5333,7 @@ AFLP.HScene = (() => {
                   ${row("Rounds airlocked",    aRounds,     aRounds > 0)}
                 </table>
                 ${titlesHtml}
+                ${kinksHtml}
               </div>
             </div>`;
 
@@ -4910,6 +5384,8 @@ AFLP.HScene = (() => {
       // caused the element to cover the sidebar after dragging (vadenveil bug).
       if (_container && _scenes.size === 0) {
         _container.style.display = "none";
+        _removeBuilder();
+        try { AFLP.UI?.Toolbar?.sync?.(); } catch (e) { /* ignore */ }
       }
     },
 
@@ -4969,10 +5445,9 @@ AFLP.HScene = (() => {
       if (!live) return;
       if (live.items?.some(i => (i.slug ?? i.system?.slug ?? "") === slug)) return;
       try {
-        const uuid = AFLP.conditions?.[slug]?.uuid;
-        const doc  = uuid ? await fromUuid(uuid) : null;
-        if (doc) await live.createEmbeddedDocuments("Item", [doc.toObject()]);
-        else if (typeof live.increaseCondition === "function") await live.increaseCondition(slug);
+        const uuid = AFLP.system.contentUuid(slug);
+        const applied = await AFLP.system.applyEffect(live, uuid);
+        if (applied === null) await AFLP.system.applyNativeCondition(live, slug);
       } catch (e) {
         console.warn(`AFLP | establishRole: could not apply ${slug} to ${actor?.name}:`, e.message);
       }
@@ -5053,7 +5528,7 @@ AFLP.HScene = (() => {
         <button type="button" data-choice="consensual" style="${btnStyle}">
           <div style="width:36px;height:36px;border-radius:3px;background:rgba(180,140,200,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">💗</div>
           <div style="display:flex;flex-direction:column;gap:2px;">
-            <strong style="font-size:11px;color:rgba(180,140,200,0.9);">No one is Dominating (Consensual Sex)</strong>
+            <strong style="font-size:11px;color:rgba(180,140,200,0.9);">No one is in control of the scene</strong>
             <span style="font-size:10px;color:#888;">Both participants have equal say</span>
           </div>
         </button>`;
@@ -5086,16 +5561,9 @@ AFLP.HScene = (() => {
 
       const _applyRole = async (actor, slug) => {
         const live = actor.token?.actor ?? actor;
-        const already = live.items?.find(i => (i.slug ?? i.system?.slug ?? "") === slug);
-        if (already) return;
+        if (AFLP.cond.has(live, slug)) return;
         try {
-          const uuid = AFLP.conditions?.[slug]?.uuid;
-          const doc  = uuid ? await fromUuid(uuid) : null;
-          if (doc) {
-            await live.createEmbeddedDocuments("Item", [doc.toObject()]);
-          } else if (typeof live.increaseCondition === "function") {
-            await live.increaseCondition(slug);
-          }
+          await AFLP.cond.apply(live, slug, null, actor.token?.id ?? null);
         } catch(e) {
           console.warn(`AFLP | Role prompt: could not apply ${slug} to ${actor.name}:`, e.message);
         }
@@ -5104,10 +5572,122 @@ AFLP.HScene = (() => {
       await _applyRole(dominator, "dominating");
       await _applyRole(submitter, "submitting");
 
+      // Refresh the card so the mode/labels reflect the new roles. On PF2e the
+      // condition item-creation hook drove this implicitly; flag-based conditions
+      // on other systems fire no such hook, so refresh explicitly here.
+      try {
+        let scene = null;
+        for (const s of (AFLP.HScene._scenes?.values?.() ?? [])) {
+          const hit = (s.participants ?? []).some(p => {
+            const pa = _resolveActor(p);
+            return pa && (pa.id === atkActor?.id || pa.id === targetActor?.id);
+          });
+          if (hit) { scene = s; break; }
+        }
+        if (scene) {
+          const card = _cardFor(scene);
+          if (card) _refreshPortraits(card, scene);
+          AFLP.HScene.refreshScene?.(scene.targetId ?? scene.id);
+        }
+      } catch (e) { /* non-fatal cosmetic refresh */ }
+
       return choice;
     },
 
-    async _promptAndSetPosition(scene, atkData, atkActor) {
+    // Change who is in control of an ALREADY-RUNNING scene. Re-opens a scene-wide
+    // chooser, clears the existing roles on every participant, then applies the
+    // new ones. "No one in control" simply clears. GM only.
+    async _promptControlSwitch(scene) {
+      if (!game.user.isGM) return;
+      scene = _sceneByAnyId(scene?.id ?? scene?.targetId ?? scene) ?? scene;
+      const parts = scene?.participants ?? [];
+      if (parts.length < 2) { ui.notifications?.info("AFLR: need at least two participants to change control."); return; }
+
+      const recvP = _projectTarget(parts);
+      const recvActor = recvP ? _resolveActor(recvP) : null;
+      const seen = new Set();
+      const perfActors = [];
+      for (const p of parts) {
+        if (p === recvP) continue;
+        const a = _resolveActor(p);
+        if (a && !seen.has(a.id)) { seen.add(a.id); perfActors.push(a); }
+      }
+      if (!recvActor || !perfActors.length) { ui.notifications?.info("AFLR: could not resolve the scene participants."); return; }
+
+      const recvName  = recvActor.name ?? "The Talent";
+      const recvImg   = recvActor.img ?? "";
+      const multi     = perfActors.length > 1;
+      const perfName  = multi ? "The performers" : (perfActors[0].name ?? "The performer");
+      const perfImg   = perfActors[0].img ?? "";
+      const perfVerb  = multi ? "are" : "is";
+
+      // Current state, to flag the active option.
+      const curKey = AFLP.cond.has(recvActor, "submitting") ? "performers-dom"
+                   : AFLP.cond.has(recvActor, "dominating") ? "receiver-dom"
+                   : "none";
+      const tag = (k) => k === curKey ? ' <span style="font-size:9px;color:#c9a96e;">(current)</span>' : "";
+
+      const btnStyle = "display:flex;align-items:center;gap:10px;width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(200,160,80,0.3);border-radius:5px;color:#f0e8d0;cursor:pointer;padding:8px 12px;margin-bottom:8px;text-align:left;font-family:var(--font-primary,serif);font-size:12px;";
+      const imgStyle = "width:36px;height:36px;border-radius:3px;object-fit:cover;object-position:top;pointer-events:none;flex-shrink:0;";
+      const content = `
+        <div style="padding:4px 0 2px;font-size:10px;color:#666;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">Who is in control?</div>
+        <button type="button" data-choice="performers-dom" style="${btnStyle}">
+          <img src="${perfImg}" alt="" style="${imgStyle}"/>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong style="font-size:11px;color:#c9a96e;">${perfName} ${multi ? "are" : "is"} in control${tag("performers-dom")}</strong>
+            <span style="font-size:10px;color:#888;">${recvName} is Submitting</span>
+          </div>
+        </button>
+        <button type="button" data-choice="receiver-dom" style="${btnStyle}">
+          <img src="${recvImg}" alt="" style="${imgStyle}"/>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong style="font-size:11px;color:#c9a96e;">${recvName} is in control${tag("receiver-dom")}</strong>
+            <span style="font-size:10px;color:#888;">${perfName} ${perfVerb} Submitting</span>
+          </div>
+        </button>
+        <button type="button" data-choice="none" style="${btnStyle}">
+          <div style="width:36px;height:36px;border-radius:3px;background:rgba(180,140,200,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">💗</div>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong style="font-size:11px;color:rgba(180,140,200,0.9);">No one is in control of the scene${tag("none")}</strong>
+            <span style="font-size:10px;color:#888;">Everyone has equal say</span>
+          </div>
+        </button>`;
+
+      let resolveChoice;
+      const choicePromise = new Promise(r => { resolveChoice = r; });
+      foundry.applications.api.DialogV2.wait({
+        window:   { title: "Change Who's in Control" },
+        position: { width: 320 },
+        content,
+        buttons: [{ action: "close", label: "✕", callback: async () => resolveChoice(null) }],
+        close:   async () => resolveChoice(null),
+        render(ev, dlg) {
+          dlg.element.querySelectorAll("[data-choice]").forEach(btn => {
+            btn.addEventListener("click", () => { resolveChoice(btn.dataset.choice); dlg.close(); });
+          });
+        },
+      }, { classes: ["aflp-dialog"] });
+
+      const choice = await choicePromise;
+      if (choice === null) return; // dismissed - leave as-is
+
+      // Clear every participant's roles first, then apply the new arrangement.
+      for (const a of [recvActor, ...perfActors]) await _clearControlRoles(a);
+      if (choice === "performers-dom") {
+        for (const a of perfActors) await _applyControlRole(a, "dominating");
+        await _applyControlRole(recvActor, "submitting");
+      } else if (choice === "receiver-dom") {
+        await _applyControlRole(recvActor, "dominating");
+        for (const a of perfActors) await _applyControlRole(a, "submitting");
+      } // "none" -> stays cleared (consensual)
+
+      _saveSceneState();
+      const card = _cardFor(scene);
+      if (card) _refreshPortraits(card, scene);
+      AFLP.HScene.refreshScene?.(scene.targetId ?? scene.id);
+    },
+
+    async _promptAndSetPosition(scene, atkData, atkActor, opts = {}) {
       // Resolve the receiver from the attacker's OWN partner (not the scene's
       // projected target), so position + prose are correct in multi-pair scenes.
       const recv = _receiverParticipant(scene, atkData);
@@ -5118,7 +5698,7 @@ AFLP.HScene = (() => {
       const targetPronouns = AFLP.getPronouns(targetActor);
       const hasCock = !!atkActor?.getFlag(AFLP.FLAG_SCOPE, "cock");
 
-      const positionId = await AFLP.HScene._showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, 1);
+      const positionId = await AFLP.HScene._showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, 1, opts);
       if (!positionId) return; // dismissed — leave unset
 
       // Store on the scene's attacker object
@@ -5262,14 +5842,14 @@ AFLP.HScene = (() => {
 
     // -----------------------------------------------
     // The actual position picker dialog — styled like
-    // the H scene card: dark, actor portraits, clear labeling.
+    // the H-Scene card: dark, actor portraits, clear labeling.
     // -----------------------------------------------
     // ── Unified group position picker ─────────────────────────────────────
     // Called whenever a position chip is clicked OR when an attacker joins.
     // For 1 top  → show 2p categorized position picker (Vaginal/Anal/Oral/Foreplay/Toy).
     // For 2+ tops → show group presets section at top + collapsed individual categories below.
     // newAtk: the attacker entry that just joined (null if triggered by chip click).
-    async _promptGroupPosition(scene, newAtk = null) {
+    async _promptGroupPosition(scene, newAtk = null, opts = {}) {
       // Partner-aware: operate on the receiver-GROUP of the source (newAtk) — the
       // performers sharing newAtk's partner — not every attacker in the scene.
       // This keeps separate nearby pairings on one battlemap independent.
@@ -5287,7 +5867,7 @@ AFLP.HScene = (() => {
       if (nTops === 1) {
         const atk      = perfs[0] ?? newAtk;
         const atkActor = _resolveActor(atk);
-        if (atkActor) await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor);
+        if (atkActor) await AFLP.HScene._promptAndSetPosition(scene, atk, atkActor, opts);
         return;
       }
 
@@ -5555,7 +6135,7 @@ AFLP.HScene = (() => {
       });
     },
 
-    async _showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, topCount = 1) {
+    async _showPositionDialog(atkActor, targetActor, hasCock, targetPronouns, topCount = 1, opts = {}) {
         const atkName    = atkActor?.name  ?? "Attacker";
         const tgtName    = targetActor?.name ?? "Target";
         const atkImg     = atkActor?.img   ?? "";
@@ -5648,13 +6228,22 @@ AFLP.HScene = (() => {
           makeBtn("toy-anal", `${toyLabel} — Ass`),
         ].filter(Boolean).join("");
 
-        const sections = [
+        // A non-penetrative carnal action (no penetration, no deposit - a tease,
+        // a branding, pain play) shows ONLY the non-penetrative options so the
+        // picker fits the fiction instead of offering holes nothing is entering.
+        // Penetrative actions and manual picks show the full list as normal. The
+        // card's position chip always reopens the full picker, so the GM can
+        // still escalate by hand.
+        const nonPen = !!opts.nonPenetrative;
+        const sections = (nonPen ? [
+          makeSection("foreplay", "Foreplay", foreplayBtns, true),
+        ] : [
           vaginalBtns  ? makeSection("vaginal",  "Vaginal",        vaginalBtns,  true) : "",
           analBtns     ? makeSection("anal",     "Anal",           analBtns,     false) : "",
           oralBtns     ? makeSection("oral",     "Oral / Facial",  oralBtns,     false) : "",
           foreplayBtns ? makeSection("foreplay", "Foreplay",       foreplayBtns, false) : "",
           makeSection("toy", "Toy / Implement", toyBtns, false),
-        ].join("");
+        ]).join("");
 
         const content = `
           <div style="background:rgba(10,8,6,0.6);border-radius:4px;padding:0 0 4px;max-width:320px;">
@@ -5721,11 +6310,11 @@ AFLP.HScene = (() => {
     },
 
     // -----------------------------------------------
-    // Fire Sexual Advance from the H scene card SA button.
+    // Fire Sexual Advance from the H-Scene card SA button.
     // Uses stored position if set; prompts first if not.
     // -----------------------------------------------
     // -----------------------------------------------
-    // Fire Sexual Advance from the H scene card SA button.
+    // Fire Sexual Advance from the H-Scene card SA button.
     // Uses stored position if set; prompts first if not.
     // -----------------------------------------------
     async _fireSexualAdvance(scene, atkData, atkActor, atkTokenId) {
@@ -5758,7 +6347,7 @@ AFLP.HScene = (() => {
         ?? canvas?.tokens?.placeables?.find(t => t.actor?.id === scene.targetActorId);
 
       if (!sourceToken || !targetToken) {
-        ui.notifications.warn("AFLP | Could not resolve tokens for Sexual Advance from H scene card.");
+        ui.notifications.warn("AFLP | Could not resolve tokens for Sexual Advance from H-Scene card.");
         return;
       }
 
@@ -5768,7 +6357,9 @@ AFLP.HScene = (() => {
       game.user.targets.forEach(t => t.setTarget(false, { user: game.user, releaseOthers: false, groupSelection: false }));
       targetToken.setTarget(true, { user: game.user, releaseOthers: false, groupSelection: false });
 
-      const saMacro = game.macros.find(m => m.name === "AFLP Sexual Advance" || m.slug === "aflp-sexual-advance");
+      const saMacro = game.macros.find(m =>
+        m.name === "AFLR Carnal Press" || m.name === "AFLR Sexual Advance"
+        || m.name === "AFLP Sexual Advance" || m.slug === "aflp-sexual-advance");
       if (saMacro) {
         await saMacro.execute();
       } else {
@@ -5777,8 +6368,8 @@ AFLP.HScene = (() => {
         await AFLP.ensureCoreFlags(atkActor);
         const targetActor = _resolveActor({ id: scene.targetId, actorId: scene.targetActorId, tokenDoc: scene.targetTokenDoc });
         await AFLP.ensureCoreFlags(targetActor);
-        const atkGain    = await AFLP_Arousal.increment(atkActor,    2, "Sexual Advance (H Scene)", atkTokenId);
-        const targetGain = await AFLP_Arousal.increment(targetActor, 2, "Sexual Advance (H Scene)", scene.targetId);
+        const atkGain    = await AFLP_Arousal.increment(atkActor,    1, "Sexual Advance (H-Scene)", atkTokenId);
+        const targetGain = await AFLP_Arousal.increment(targetActor, 1, "Sexual Advance (H-Scene)", scene.targetId);
         await AFLP_Arousal.postSAChat(atkActor, targetActor, atkGain, targetGain);
       }
     },
@@ -5787,20 +6378,23 @@ AFLP.HScene = (() => {
     // attackerToken / targetToken: Foundry Token objects
     async launchFromTokens(attackerToken, targetToken) {
       if (!attackerToken || !targetToken) {
-        ui.notifications.warn("AFLP | Select an attacker token and target a token to start an H scene.");
+        ui.notifications.warn("AFLP | Select an attacker token and target a token to start an H-Scene.");
         return;
       }
 
       const attacker = _participantFromToken(attackerToken);
       const target   = _participantFromToken(targetToken);
 
-      this.startScene(attacker, target);
+      // Manual scene start: do NOT prompt for a position here. Position is a
+      // consequence of a landing penetrative action (driven, awaited, by the
+      // Carnal layer), or set by hand via the card's position chip.
+      this.startScene(attacker, target, false, { promptPosition: false });
 
       // Post scene start to scene log only
       if (game.user.isGM) {
         const scene = _sceneForToken(target.id, target.actorId);
         if (scene) {
-          AFLP.HScene.addProse(scene.id, `${attacker.name} begins an H scene with ${target.name}.`, "action");
+          AFLP.HScene.addProse(scene.id, `${attacker.name} begins an H-Scene with ${target.name}.`, "action");
         }
       }
     },

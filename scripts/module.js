@@ -25,7 +25,9 @@ Hooks.once("init", async function () {
   // Register AFLP custom traits so they appear in the trait selector on all
   // item types and show a description tooltip on mouseover. Must run in init
   // so the dictionaries exist before any item sheets open.
-  const aflpTraits = {
+  // PF2e-only: other systems have no CONFIG.PF2E trait dictionaries.
+  if (game.system?.id === "pf2e") {
+    const aflpTraits = {
     aphrodisiac: {
       label: "Aphrodisiac",
       description: "This item has the aphrodisiac trait, causing heightened arousal and susceptibility to sexual influences in those who consume or are exposed to it."
@@ -55,6 +57,7 @@ Hooks.once("init", async function () {
       if (CONFIG.PF2E?.[dict]) CONFIG.PF2E[dict][key] = label;
     }
     if (CONFIG.PF2E?.traitDescriptions) CONFIG.PF2E.traitDescriptions[key] = description;
+  }
   }
 });
 

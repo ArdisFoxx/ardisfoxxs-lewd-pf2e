@@ -62,6 +62,9 @@ window.AFLP_Bitchsuit = {
   // Register all hooks
   // -----------------------------------------------
   register() {
+    // PF2e-only: the bitchsuit automation keys off PF2e item slugs/UUIDs that do
+    // not exist in other systems. On Daggerheart/5e it cleanly does nothing.
+    if (AFLP.system?.id !== "pf2e") return;
     // Only the GM applies automated effects to avoid double-firing
     if (!game.user.isGM) return;
 
@@ -93,7 +96,7 @@ window.AFLP_Bitchsuit = {
       await AFLP_Arousal.increment(actor, 2, "Animated Bitchsuit", combatant.tokenId ?? null);
       await ChatMessage.create({
         content: `<div class="aflp-chat-card">
-          <p>The <strong>Animated Bitchsuit</strong> relentlessly stimulates <strong>${actor.name}</strong>, forcing +2 Arousal.</p>
+          <p>The <strong>Animated Bitchsuit</strong> relentlessly stimulates <strong>${actor.name}</strong>, forcing them to ${AFLP.system.deltaText(2)}.</p>
         </div>`,
         speaker: { alias: "AFLP" },
       });
@@ -135,12 +138,10 @@ window.AFLP_Bitchsuit = {
               await existing.update({ "system.badge.value": targetTier });
             } else {
               // Create fresh at correct tier
-              const bimboDoc = await fromUuid(BIMBO_UUID);
-              if (bimboDoc) {
-                const effect = bimboDoc.toObject();
-                foundry.utils.setProperty(effect, "system.badge.value", targetTier);
-                await actor.createEmbeddedDocuments("Item", [effect], { noHook: true });
-              }
+              await AFLP.system.applyEffect(actor, BIMBO_UUID, {
+                noHook: true,
+                badgeValue: targetTier,
+              });
             }
 
             await actor.setFlag(FLAG, "bitchsuitBimbofiedTier", targetTier);
@@ -269,13 +270,12 @@ window.AFLP_Bitchsuit = {
       }
     } else {
       try {
-        const doc  = await fromUuid(this.UUID_CF);
-        if (!doc) throw new Error("CF UUID not found");
-        const data = doc.toObject();
-        data.system.badge.value = 3;
-        // Tag the granted item so we can remove it cleanly on unequip
-        foundry.utils.setProperty(data, "flags.aflp.grantedByBitchsuit", true);
-        await liveActor.createEmbeddedDocuments("Item", [data]);
+        const r = await AFLP.system.applyEffect(liveActor, this.UUID_CF, {
+          badgeValue: 3,
+          // Tag the granted item so we can remove it cleanly on unequip
+          flagProps: { "flags.aflp.grantedByBitchsuit": true },
+        });
+        if (r === null) throw new Error("CF UUID not found");
         console.log(`AFLP | Primal Bitchsuit: Creature Fetish 3 granted to ${liveActor.name}`);
       } catch (e) {
         console.warn(`AFLP | Primal Bitchsuit: could not grant Creature Fetish:`, e);

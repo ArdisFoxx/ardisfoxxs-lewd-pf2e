@@ -4,17 +4,200 @@
 
 if (!window.AFLP) window.AFLP = {};
 
+// Cum per shot ("load size"), a rating set by size. A hole's capacity is 8, so
+// anything above that overflows onto the ground (see cumSpillRange). Most folk
+// sit low; huge and gargantuan monsters shoot massive loads that flood the floor.
 AFLP.BASE_CUM_BY_SIZE = {
   tiny: 1,
-  sm: 2,
-  med: 2,
-  lg: 40,
-  huge: 800,
-  grg: 1600
+  sm: 1,
+  med: 1,
+  lg: 4,
+  huge: 12,
+  grg: 24
 };
 
+// Genital subtypes that nudge a creature's per-shot Cum. Keyed by the bare
+// subtype name (as stored in genitalTypes). No longer clamped - mods stack.
+AFLP.CUM_SUBTYPE_MOD = {
+  girthy: 1, breeder: 1, ovidepositor: 2, knot: 1, hemipenis: 1, litter: 1,
+};
+
+// Default / cap for Coomer (now the number of loads before a rest).
+AFLP.COOMER_DEFAULT = 4;
+AFLP.COOMER_MAX     = 6;
+
+// Per-shot Cum for an actor: size base + subtype mods, or a per-actor override
+// flag world.cumPerShot. Minimum 1, NO upper cap - big creatures shoot big, and
+// the excess past a hole's capacity of 8 spills onto the ground.
+AFLP.cumPerShot = (actor) => {
+  if (!actor) return 2;
+  const FLAG = AFLP.FLAG_SCOPE;
+  const MOD = "ardisfoxxs-lewd-pf2e"; // item-flag scope for worn gear
+  // Additive Cum Shot bonus: a manual flag plus any worn Cum Shot gear/effects.
+  // Read live from the actor's items so equipping applies and removing removes.
+  let bonus = Number(actor.getFlag?.(FLAG, "cumShotBonus")) || 0;
+  let oneRing = false;
+  for (const it of (actor.items ?? [])) {
+    const b = Number(it.getFlag?.(MOD, "cumShotBonus"));
+    if (Number.isFinite(b)) bonus += b;
+    if (it.getFlag?.(MOD, "oneCockRing")) oneRing = true;
+  }
+  // The One Cock Ring floods like a gargantuan regardless of the wearer's size.
+  if (oneRing) return Math.max(1, AFLP.BASE_CUM_BY_SIZE.grg + bonus);
+  const override = actor.getFlag?.(FLAG, "cumPerShot");
+  if (Number.isFinite(override)) return Math.max(1, override + bonus);
+  const sizeKey = AFLP.system?.cumSizeKey?.(actor)
+    ?? ({ tiny:"tiny", small:"sm", sm:"sm", medium:"med", med:"med", large:"lg", lg:"lg", huge:"huge", gargantuan:"grg", grg:"grg" }[String(actor.system?.traits?.size?.value ?? actor.system?.size ?? "med").toLowerCase()] ?? "med");
+  let v = AFLP.BASE_CUM_BY_SIZE[sizeKey] ?? AFLP.BASE_CUM_BY_SIZE.med;
+  const gt = actor.getFlag?.(FLAG, "genitalTypes") ?? {};
+  for (const [k, on] of Object.entries(gt)) {
+    if (!on) continue;
+    const bare = k.replace(/^(cock|pussy)-/, "");
+    v += AFLP.CUM_SUBTYPE_MOD[bare] ?? 0;
+  }
+  return Math.max(1, v + bonus);
+};
+
+// True when an actor never depletes its load pool: a manual flag, or worn gear
+// (The One Cock Ring, or anything flagged infiniteLoads).
+AFLP.hasInfiniteLoads = (actor) => {
+  if (actor?.getFlag?.(AFLP.FLAG_SCOPE, "infiniteLoads")) return true;
+  const MOD = "ardisfoxxs-lewd-pf2e";
+  for (const it of (actor?.items ?? [])) {
+    if (it.getFlag?.(MOD, "oneCockRing") || it.getFlag?.(MOD, "infiniteLoads")) return true;
+  }
+  return false;
+};
+
+// Effective loads = stored base (trainable, manually editable, uncapped) plus any
+// worn loads gear: loadsBonus adds, loadsOverride sets a floor (e.g. Endless Loads = 20).
+AFLP.effectiveLoads = (actor) => {
+  if (!actor) return AFLP.COOMER_DEFAULT;
+  const FLAG = AFLP.FLAG_SCOPE, MOD = "ardisfoxxs-lewd-pf2e";
+  let base = Number(actor.getFlag?.(FLAG, "coomer")?.level);
+  if (!Number.isFinite(base)) base = AFLP.COOMER_DEFAULT;
+  let bonus = 0, override = 0;
+  for (const it of (actor.items ?? [])) {
+    const b = Number(it.getFlag?.(MOD, "loadsBonus"));   if (Number.isFinite(b)) bonus += b;
+    const o = Number(it.getFlag?.(MOD, "loadsOverride")); if (Number.isFinite(o)) override = Math.max(override, o);
+  }
+  return Math.max(1, base + bonus, override);
+};
+
+// Default loads by tier of play: a flat baseline (all sizes) plus a step per tier.
+// Tier 1-4 maps to level bands 1-5 / 6-10 / 11-15 / 16-20 (PF2e and 5e alike); DH
+// adapters may override via AFLP.system.tierOfActor(actor) returning 1-4.
+// Baseline 4, +2 per tier -> 4 / 6 / 8 / 10. Cum/shot (by size) supplies the size
+// scaling; this axis supplies the level/tier scaling.
+AFLP.LOADS_BASE     = 4;
+AFLP.LOADS_PER_TIER = 2;
+AFLP.tierOfLevel = (lvl) => (lvl <= 5 ? 1 : lvl <= 10 ? 2 : lvl <= 15 ? 3 : 4);
+AFLP.defaultLoadsForActor = (actor) => {
+  const lvl = Number(actor?.system?.details?.level?.value ?? actor?.system?.level?.value ?? actor?.system?.level ?? 1) || 1;
+  const tier = AFLP.system?.tierOfActor?.(actor) ?? AFLP.tierOfLevel(lvl);
+  return AFLP.LOADS_BASE + (Math.max(1, tier) - 1) * AFLP.LOADS_PER_TIER;
+};
+
+// A hole's per-hole capacity. Cum beyond this on a shot spills onto the ground.
+AFLP.CUM_HOLE_CAP = 8;
+
+// DH range ladder (distance in scene grid units). Read live from the daggerheart
+// system when present, with a fallback to the SRD values.
+AFLP.DH_RANGE_FALLBACK = [
+  { id: "melee",     name: "Melee",      distance: 1  },
+  { id: "veryClose", name: "Very Close", distance: 3  },
+  { id: "close",     name: "Close",      distance: 10 },
+  { id: "far",       name: "Far",        distance: 20 },
+  { id: "veryFar",   name: "Very Far",   distance: 30 },
+];
+AFLP.dhRanges = () => {
+  try {
+    const r = CONFIG?.DH?.GENERAL?.range;
+    if (r) {
+      const order = ["melee","veryClose","close","far","veryFar"];
+      const out = order.filter(k => r[k]).map(k => ({
+        id: k,
+        name: (() => { try { return game.i18n.localize(r[k].label || r[k].name); } catch { return r[k].name || k; } })(),
+        distance: r[k].distance,
+      }));
+      if (out.length) return out;
+    }
+  } catch (e) { /* fall through */ }
+  return AFLP.DH_RANGE_FALLBACK;
+};
+
+// Which range band a creature's overflow floods to, keyed to SIZE so a tabletop
+// GM needs no math: read the size, read the band. One band per size step over
+// Medium. Anything beyond gargantuan (homebrew colossi) reaches Very Far.
+AFLP.CUM_SPILL_BY_SIZE = {
+  tiny: "melee", sm: "melee", med: "melee",
+  lg: "veryClose", huge: "close", grg: "far",
+};
+
+// Resolve the spill for a shot. overflowUnits is the Cum past the hole's
+// capacity (0 = contained, no ground spill). The BAND comes from the shooter's
+// size (simple, table-friendly); the units ride along for puddle/vial volume.
+AFLP.cumSpillRange = (overflowUnits, giverActor) => {
+  const u = Math.max(0, Math.round(overflowUnits ?? 0));
+  if (u <= 0) return null;
+  const bands = AFLP.dhRanges();
+  const byId  = Object.fromEntries(bands.map(b => [b.id, b]));
+  let bandId = "melee";
+  if (giverActor) {
+    const sizeKey = AFLP.system?.cumSizeKey?.(giverActor)
+      ?? ({ tiny:"tiny", small:"sm", sm:"sm", medium:"med", med:"med", large:"lg", lg:"lg", huge:"huge", gargantuan:"grg", grg:"grg" }[String(giverActor.system?.traits?.size?.value ?? giverActor.system?.size ?? "med").toLowerCase()] ?? "med");
+    bandId = AFLP.CUM_SPILL_BY_SIZE[sizeKey] ?? "melee";
+  }
+  const band = byId[bandId] ?? bands[0];
+  return { units: u, ...band };
+};
+
+// Shared spill recorder: given a deposit of `units` into a hole that was at
+// `prevTier` before the shot, work out the overflow, stamp the receiver's
+// cumSpill flag (max-merged so the widest pool sticks until mopped), and whisper
+// the GM. Used by both the Daggerheart Carnal deposit and the pf2e cum macro so
+// the floor-flood behaves identically on both systems.
+AFLP.recordCumSpill = async (receiver, giver, prevTier, units) => {
+  try {
+    if (!receiver) return null;
+    const spillUnits = Math.max(0, (units ?? 0) - (AFLP.CUM_HOLE_CAP - (prevTier ?? 0)));
+    if (spillUnits <= 0) return null;
+    const spill = AFLP.cumSpillRange?.(spillUnits, giver);
+    if (!spill) return null;
+    try {
+      const prev = receiver.getFlag(AFLP.FLAG_SCOPE, "cumSpill");
+      const keep = (prev && (prev.units ?? 0) >= spill.units) ? prev : spill;
+      await receiver.setFlag(AFLP.FLAG_SCOPE, "cumSpill", keep);
+    } catch (e) { /* read-only actor */ }
+    try {
+      const ml = spill.units * (AFLP.CUM_UNIT_ML ?? 250);
+      let poolText;
+      if (AFLP.system?.id === "daggerheart") {
+        // Daggerheart measures the spread in range bands, not feet.
+        const gridUnits = (typeof canvas !== "undefined" && canvas?.scene?.grid?.units) || "spaces";
+        poolText = `pooling out to <strong>${spill.name}</strong> range (${spill.distance} ${gridUnits})`;
+      } else {
+        // PF2e (and other gridded systems) use feet: translate the band distance
+        // through the scene's grid scale (default 5 ft/square) and describe it as
+        // an emanation centered on the flooded creature.
+        const gridDist = (typeof canvas !== "undefined" && canvas?.scene?.grid?.distance) || 5;
+        const feet = spill.distance * gridDist;
+        poolText = `pooling into a <strong>${feet}-foot emanation</strong> centered on ${receiver?.name ?? "them"}`;
+      }
+      await ChatMessage.create({
+        speaker: { alias: giver?.name ?? "" },
+        content: `<div class="aflp-chat-card aflp-carnal-card"><p><strong>${giver?.name ?? "Someone"}</strong>'s load floods past ${receiver?.name ?? "them"}'s brim - about ${ml}ml spills onto the floor, ${poolText}.</p></div>`,
+        whisper: ChatMessage.getWhisperRecipients?.("GM").map(u => u.id) ?? [],
+      });
+    } catch (e) { /* chat unavailable */ }
+    return spill;
+  } catch (e) { console.warn("AFLR | recordCumSpill failed", e); return null; }
+};
+
+
+
 Object.assign(window.AFLP, {
-  SCHEMA_VERSION: 2,
+  SCHEMA_VERSION: 3,
   FLAG_SCOPE: "world",
 
   // 1 unit = 250ml
@@ -48,7 +231,7 @@ Object.assign(window.AFLP, {
   },
 
   cumDefaults:    { current: 0, max: 0 },
-  coomerDefaults: { level: 0 },
+  coomerDefaults: { level: 4 },   // Loads = times you can cum before a rest (baseline 4)
   arousalDefaults: { current: 0, max: 6, maxBase: 6 },
   // Horny flag — replaces the Horny / Horny (Always) condition items.
   // temp:      clears on cum (equivalent to old Horny condition)
@@ -95,7 +278,6 @@ Object.assign(window.AFLP, {
     "exhibitionist":     { name: "Exhibitionist",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JRXfjU2WvdruuhWD" },
     "party-animal":      { name: "Party Animal",      uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.pfs8GCIbh6E8polc" },
     "purity":            { name: "Purity",            uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.eFcEwxfe56UxqlJc" },
-    "monstrous-prowess": { name: "Monstrous Prowess", uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.0HV6GDwcBG8Yw1ZU" },
     "bimbo":             { name: "Bimbo",             uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.mTSsjimziKIcEbLO" },
     "gangslut":          { name: "Gangslut",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.fNSwvzZ3ddJmu7yG" },
     "voyeurism":         { name: "Voyeurism",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.NKiO32mIdFJZpwnb" },
@@ -120,8 +302,80 @@ Object.assign(window.AFLP, {
     "horny":         { name: "Horny",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.hmYj3xU7xrdjMHpe" },
     "horny-always":  { name: "Horny (Permanent)", uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.RekITrc0sIsHFXvK" },
     "bimbofied":     { name: "Bimbofied",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.9ySsqXnpfZkhmp2V" },
+    "bullified":     { name: "Bullified" },
+    "birth-control": { name: "Birth Control" },
+    "breeding":      { name: "Breeding" },
     "mind-break":  { name: "Mind Break",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.B74Z3GBzgNMoVXr7" },
     "submitting":  { name: "Submitting",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.kBLJPOJNjz8fmxrQ" },
+  },
+
+  // ===============================
+  // Unified Condition API (flag-first, legacy-item fallback)
+  // ===============================
+  // One read/write surface for AFLR-owned conditions so UI and mechanics share a
+  // single source of truth across PF2e / Daggerheart / D&D5e. Reads consult the
+  // system adapter first (flag-backed on DH, item-backed on PF2e today) and fall
+  // back to a legacy PF2e condition item - so call sites keep working throughout
+  // the 8.0.0 flag migration, before AND after PF2e storage is flipped to flags.
+  // Writes delegate to the adapter (which applies the per-system mechanical part).
+  cond: {
+    _live(actor, tokenId = null) {
+      if (!actor) return null;
+      if (tokenId) return AFLP.system?.liveActor?.(actor, tokenId) ?? actor;
+      return actor.token?.actor ?? actor;
+    },
+    _legacyItem(actor, slug, tokenId = null) {
+      const live = this._live(actor, tokenId);
+      const uuid = AFLP.conditions?.[slug]?.uuid;
+      return live?.items?.find(c =>
+        c.slug === slug || (uuid && (c.flags?.core?.sourceId ?? c.sourceId) === uuid)
+      ) ?? null;
+    },
+    // True if the condition is present via the adapter (flag/item per system) OR
+    // a legacy PF2e item.
+    has(actor, slug, tokenId = null) {
+      if (!actor) return false;
+      try { if (AFLP.system?.hasCondition?.(actor, slug, tokenId)) return true; } catch (e) { /* ignore */ }
+      return !!this._legacyItem(actor, slug, tokenId);
+    },
+    // Numeric value of a valued condition (0 if absent).
+    value(actor, slug, tokenId = null) {
+      if (!actor) return 0;
+      try {
+        const v = AFLP.system?.conditionValue?.(actor, slug, tokenId);
+        if (v) return v;
+      } catch (e) { /* ignore */ }
+      const item = this._legacyItem(actor, slug, tokenId);
+      return item ? (item.system?.badge?.value ?? 1) : 0;
+    },
+    // Apply / remove delegate to the adapter (PF2e item or DH flag, plus the
+    // mechanical effect). Passing the registry uuid lets PF2e build the item.
+    async apply(actor, slug, value = null, tokenId = null) {
+      if (!actor) return;
+      const uuid = AFLP.system?.contentUuid?.(slug) ?? AFLP.conditions?.[slug]?.uuid ?? null;
+      return AFLP.system?.applyCondition?.(actor, slug, uuid, value, tokenId);
+    },
+    async remove(actor, slug, tokenId = null) {
+      if (!actor) return;
+      return AFLP.system?.removeCondition?.(actor, slug, tokenId);
+    },
+    // Set a valued condition to an absolute value (PF2e item badge / DH flag).
+    async setValue(actor, slug, value, tokenId = null) {
+      if (!actor) return;
+      return AFLP.system?.setConditionValue?.(actor, slug, value, tokenId);
+    },
+    // Raise a valued condition to AT LEAST `value` (set-to-at-least semantics).
+    // This is the correct operation for level-style conditions such as Exposed:
+    // re-applying a lower level must not lower it, and applying the same level
+    // must not stack it. Distinct from apply(), which increments by `value` for
+    // accumulating conditions (horny / mind-break / creature-fetish).
+    async raiseTo(actor, slug, value, tokenId = null) {
+      if (!actor || !(value > 0)) return;
+      const cur = this.value(actor, slug, tokenId);
+      if (value <= cur) return;                                   // already at/above
+      if (cur <= 0) return this.apply(actor, slug, value, tokenId); // absent: create at value
+      return this.setValue(actor, slug, value, tokenId);          // present: raise
+    },
   },
 
   // ===============================
@@ -177,16 +431,6 @@ Object.assign(window.AFLP, {
       "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.6dNLoCR1QpbKkZ7Z",
       "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.daPFCWR10Ssrp4Mq"
     ],
-    cumSlutTotal: [
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.SCS8b1rPtr8iHZwV",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QQRDqOzJq7PM59bw",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.dtUe8d0ROUEacRGE",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.dpymEL6QzRqN3LcJ",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.R8remTSWla3YR2Va",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.lr0gqv7s7b9iUIPJ",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.2tUflRcpwq1iWvE6",
-      "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.1g4jNQNGGcHhhWEn"
-    ],
     "struggle-snuggle":          { name: "Struggle Snuggle",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.k7M7WiI0Kgyn0pFX" },
     "sexual-advance":            { name: "Sexual Advance",            uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.1Ty2edYgjwn7m6sh" },
     "cum":                       { name: "Cum",                       uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.N9U6snPV0DVE9L5H" },
@@ -201,19 +445,21 @@ Object.assign(window.AFLP, {
   // ===============================
   // Kink Immunity Helpers
   // ===============================
-  // Returns true if the actor has the Monstrous Prowess kink.
+  // Monstrous Prowess was removed in the DH refactor (the asymmetric design and
+  // the Bullified condition cover its role). Always false so dependent callers
+  // fall through to their default behavior.
   actorHasMonstrousProwess(actor) {
-    if (!actor) return false;
-    const uuid = this.kinks["monstrous-prowess"].uuid;
-    return actor.items?.some(i =>
-      i.slug === "monstrous-prowess" || i.sourceId === uuid
-    ) ?? false;
+    return false;
   },
 
   // Generic kink check helper — use instead of hardcoding slugs/UUIDs.
   // e.g. AFLP.actorHasKink(actor, "edge-master")
   actorHasKink(actor, slug) {
     if (!actor || !slug) return false;
+    // Lewd 3+ only: below it, all kink automation goes dormant. The sheet's kink
+    // list reads the raw sexual.kinks flag directly, not this helper, so assigned
+    // kinks still display and the data is preserved - only automation is gated.
+    if (!AFLP.Settings.allows("kinks")) return false;
     const uuid = this.kinks[slug]?.uuid;
     // Check 1: kink item present on the actor (e.g. dragged from compendium)
     const hasItem = actor.items?.some(i =>
@@ -277,6 +523,7 @@ Object.assign(window.AFLP, {
     { id:"fingering",   uuid:null, desc:"Fingers working inside, probing and exploring at a pace the bottom has no say in.",             label:(p)=>`Fingering ${p.object}`,     logPhrase:(a,t,p)=>`${a} fingers ${t}`,                hole:null,       positionTrait:"biped",  penile:false },
     { id:"licking",     uuid:null, desc:"Tongue against skin, finding every place worth lingering.",                                     label:(p)=>`Using Tongue`,              logPhrase:(a,t,p)=>`${a} teases ${t} with their tongue`, hole:null,     positionTrait:"biped",  penile:false },
     { id:"other",       uuid:null, desc:"Something between the two of them that doesn't fit neatly into a category.",                  label:(p)=>`Teasing`,                   logPhrase:(a,t,p)=>`${a} teases ${t}`,                 hole:null,       positionTrait:"biped",  penile:false },
+    { id:"painplay",    uuid:null, desc:"Marks, heat, and deliberate cruelty - branding, biting, the kind of attention that leaves a reminder.",          label:(p)=>`Pain Play`,                 logPhrase:(a,t,p)=>`${a} works ${t} over with deliberate cruelty`, hole:null, positionTrait:"biped",  penile:false },
     { id:"oral-give",   uuid:null, desc:"Top's mouth on the bottom. Deliberate, attentive, deeply unfair to whoever is receiving it.", label:(p)=>`Going Down`,                logPhrase:(a,t,p)=>`${a} goes down on ${t}`,           hole:"oral",     positionTrait:"biped",  penile:false },
     { id:"oral-receive",uuid:null, desc:"The bottom's mouth, put to use.",                                                              label:(p)=>`Using ${p.possessive} Mouth`, logPhrase:(a,t,p)=>`${a} uses ${t}'s mouth`,         hole:"oral",     positionTrait:"biped",  penile:true  },
     { id:"facial",      uuid:null, desc:"The top finishes on the bottom's face. Not accidental.",                                       label:(p)=>`Finishing on ${p.possessive} Face`, logPhrase:(a,t,p)=>`${a} finishes on ${t}'s face`, hole:"facial", positionTrait:"biped", penile:true },
@@ -587,7 +834,7 @@ Object.assign(window.AFLP, {
       ?? this._detectPositionTrait(actor);
     const ids = this.positionTraitDefaults[positionTrait] ?? this.positionTraitDefaults.biped;
     // Also always include non-positional options
-    const extras = ["groping","fingering","licking","oral-give","oral-receive","facial","other"];
+    const extras = ["groping","fingering","licking","oral-give","oral-receive","facial","other","painplay"];
     return [...new Set([...ids, ...extras])];
   },
 
@@ -624,7 +871,21 @@ Object.assign(window.AFLP, {
   // ===============================
   genitalTypes: {
     pussy:               { name: "Pussy",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.pXivTb1f84SDm2xc", parent: null },
+    "pussy-litter":      { name: "Litter",        uuid: null, parent: "pussy" },
+    "pussy-breeder":     { name: "Breeder",       uuid: null, parent: "pussy" },
+    "pussy-milking":     { name: "Milking",       uuid: null, parent: "pussy" },
+    "pussy-gripping":    { name: "Gripping",      uuid: null, parent: "pussy" },
+    "pussy-venomous":    { name: "Venomous",      uuid: null, parent: "pussy" },
+    "pussy-electric":    { name: "Electric",      uuid: null, parent: "pussy" },
+    "pussy-honeyed":     { name: "Honeyed",       uuid: null, parent: "pussy" },
+    "pussy-clutch":      { name: "Clutch",        uuid: null, parent: "pussy" },
+    "pussy-slick":       { name: "Slick",         uuid: null, parent: "pussy" },
+    "pussy-fanged":      { name: "Fanged",        uuid: null, parent: "pussy" },
+    "pussy-bottomless":  { name: "Bottomless",    uuid: null, parent: "pussy" },
+    "pussy-fertile":     { name: "Fertile",       uuid: null, parent: "pussy" },
+    "pussy-pacifying":   { name: "Pacifying",     uuid: null, parent: "pussy" },
     cock:                { name: "Cock",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.PR96OQsnDSzt1e4i", parent: null },
+    "cock-barbed":       { name: "Barbed",        uuid: null, parent: "cock" },
     "cock-breeder":      { name: "Breeder",       uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Lsd1xTTpGv7irtB", parent: "cock" },
     "cock-electrifying": { name: "Electrifying",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.jkRFNqFtRcKkAZwC", parent: "cock" },
     "cock-fertile":      { name: "Fertile",       uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tUqN9UtQhawLd5Nq", parent: "cock" },
@@ -632,6 +893,7 @@ Object.assign(window.AFLP, {
     "cock-girthy":       { name: "Girthy",         uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.EOo3rbWwAybJFmlv", parent: "cock" },
     "cock-hemipenis":    { name: "Hemipenis",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.JTWCaeV5zCKpT7uk", parent: "cock" },
     "cock-knot":         { name: "Knot",          uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.A8cubySA9aPKmNCF", parent: "cock" },
+    "cock-litter":       { name: "Litter",        uuid: null, parent: "cock" },
     "cock-ovidepositor": { name: "Ovidepositor",  uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.7Hp4H1QcJiiMM9Gp", parent: "cock" },
     "cock-pacifying":    { name: "Pacifying",     uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.tuc39pbCilMKvYx8", parent: "cock" },
     "cock-paralyzing":   { name: "Paralyzing",    uuid: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.vy3wCGu8tRKwfAP5", parent: "cock" },
@@ -654,9 +916,28 @@ Object.assign(window.AFLP, {
 
   async ensureCoreFlags(actor) {
     await this.ensureFlag(actor, "sexual",      structuredClone(this.sexualDefaults));
+    // ensureFlag only seeds when the whole flag is absent, so an actor with a partial
+    // or reset `sexual` flag can be missing sub-keys (e.g. per-hole act counts), which
+    // silently breaks lifetime tracking and title automation. Backfill missing defaults.
+    {
+      const sx = actor.getFlag(this.FLAG_SCOPE, "sexual");
+      if (sx && typeof sx === "object") {
+        let changed = false;
+        const merged = { ...sx };
+        for (const [k, v] of Object.entries(this.sexualDefaults)) {
+          if (merged[k] === undefined) { merged[k] = structuredClone(v); changed = true; }
+        }
+        const ltMerged = { ...(merged.lifetime ?? {}) };
+        for (const [k, v] of Object.entries(this.sexualDefaults.lifetime)) {
+          if (ltMerged[k] === undefined) { ltMerged[k] = structuredClone(v); changed = true; }
+        }
+        merged.lifetime = ltMerged;
+        if (changed) await actor.setFlag(this.FLAG_SCOPE, "sexual", merged);
+      }
+    }
     await this.ensureFlag(actor, "cum",         structuredClone(this.cumDefaults));
     await this.ensureFlag(actor, "cumOverflow", { anal: 0, oral: 0, vaginal: 0, facial: 0, paizuri: 0 });
-    await this.ensureFlag(actor, "coomer",      structuredClone(this.coomerDefaults));
+    await this.ensureFlag(actor, "coomer",      { level: AFLP.defaultLoadsForActor(actor) });
     await this.ensureFlag(actor, "arousal",     structuredClone(this.arousalDefaults));
     await this.ensureFlag(actor, "horny",       structuredClone(this.hornyDefaults));
     // Denied: migrate from condition item to flag on first ensureCoreFlags call.
@@ -702,16 +983,68 @@ Object.assign(window.AFLP, {
       }
       await actor.setFlag(this.FLAG_SCOPE, "schemaVersion", 2);
     }
+
+    if (storedVersion < 3) {
+      // v3: Cum/Coomer redesign. Coomer is now "loads before a rest" (default 2,
+      // cap 6) and Cum is a small per-shot rating. Remap the old multiplier coomer
+      // to a load count and recompute the pool (perShot x loads).
+      const oldCo = (actor.getFlag(this.FLAG_SCOPE, "coomer")?.level) ?? 0;
+      const loads = Math.max(this.COOMER_DEFAULT, oldCo + this.COOMER_DEFAULT);
+      await actor.setFlag(this.FLAG_SCOPE, "coomer", { level: loads });
+      await this.recalculateCum(actor);
+      console.log(`AFLP | ${actor.name}: migrated to schema v3 (Coomer ${oldCo} -> ${loads} loads, Cum/shot ${this.cumPerShot(actor)})`);
+      await actor.setFlag(this.FLAG_SCOPE, "schemaVersion", 3);
+    }
   },
 
   recalculateCum: async actor => {
     if (!actor) { console.warn("AFLP.recalculateCum called without actor"); return null; }
-    const FLAG = AFLP.FLAG_SCOPE;
-    const coomer = (await actor.getFlag(FLAG, "coomer")) ?? { level: 0 };
-    const size   = actor.system?.traits?.size?.value ?? "med";
-    const base   = AFLP.BASE_CUM_BY_SIZE[size] ?? AFLP.BASE_CUM_BY_SIZE.med;
-    const max    = base * (1 + (coomer.level ?? 0));
+    const FLAG    = AFLP.FLAG_SCOPE;
+    const perShot = AFLP.cumPerShot(actor);
+    const loads   = AFLP.effectiveLoads(actor);
+    const max     = perShot * loads;
     await actor.setFlag(FLAG, "cum", { current: max, max });
-    return { current: max, max };
+    return { current: max, max, perShot, loads };
+  },
+
+  // Pussy training: a creature that cums in a Slick or Milking pussy gets
+  // "trained" to cum more. The FIRST time they finish inside a given such pussy
+  // they gain 1 Coomer level (a Coomer token) from it, scaling their Cum Volume
+  // up. Tracked per-partner per-type (coomerTrainedBy) so repeated sex with the
+  // same pussy never stacks Coomer infinitely.
+  pussyTrainCoomer: async (cummer, pussyHaver) => {
+    if (!cummer || !pussyHaver) return;
+    const FLAG = AFLP.FLAG_SCOPE;
+    const gt = pussyHaver.getFlag(FLAG, "genitalTypes") ?? {};
+    const types = [];
+    if (gt["pussy-slick"])   types.push("slick");
+    if (gt["pussy-milking"]) types.push("milking");
+    if (!types.length) return;
+    const live = cummer.getWorldActor?.() ?? cummer;
+    const trained = foundry.utils.deepClone(live.getFlag(FLAG, "coomerTrainedBy") ?? {});
+    const gainedFrom = [];
+    for (const t of types) {
+      const list = trained[t] ?? (trained[t] = []);
+      if (!list.includes(pussyHaver.id)) { list.push(pussyHaver.id); gainedFrom.push(t); }
+    }
+    if (!gainedFrom.length) return; // already trained by this pussy - no infinite Coomer
+    const coomer   = live.getFlag(FLAG, "coomer") ?? { level: AFLP.COOMER_DEFAULT };
+    const oldLevel = coomer.level ?? AFLP.COOMER_DEFAULT;
+    const newLevel = oldLevel + gainedFrom.length; // uncapped; soft limits come from gear/feats
+    await live.setFlag(FLAG, "coomer", { level: newLevel });
+    await live.setFlag(FLAG, "coomerTrainedBy", trained);
+    // Recompute the load pool from the new Coomer (loads x per-shot Cum), and
+    // grant a fresh load on top of whatever is left.
+    {
+      const perShot = AFLP.cumPerShot(live);
+      const newMax  = perShot * newLevel;
+      const cumNow  = live.getFlag(FLAG, "cum");
+      await live.setFlag(FLAG, "cum", { current: Math.min((cumNow?.current ?? newMax) + perShot, newMax), max: newMax });
+    }
+    const lbl = gainedFrom.map(t => t === "slick" ? "Slick" : "Milking").join(" and ");
+    await ChatMessage.create({
+      content: `<div class="aflp-chat-card"><p><strong>${live.name}</strong> spends inside <strong>${pussyHaver.name}</strong>'s ${lbl} pussy for the first time and is trained by it - they gain <strong>Loads +${gainedFrom.length}</strong> (now Loads ${newLevel}) and will cum harder from here on.</p></div>`,
+      speaker: { alias: "AFLR" },
+    });
   }
 });

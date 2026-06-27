@@ -20,6 +20,7 @@ window.AFLP_Arousal = {
   // -----------------------------------------------
   async increment(actor, amount, source = "", tokenId = null) {
     if (!actor) return;
+    if (!AFLP.Settings.allows("arousal")) return;   // Lewd 3+ only
     const FLAG = AFLP.FLAG_SCOPE;
 
     // ════════════════════════════════════════════════════════════════════════
@@ -51,23 +52,23 @@ window.AFLP_Arousal = {
     // ════════════════════════════════════════════════════════════════════════
 
     await AFLP.ensureCoreFlags(actor);
-    const arousal = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
-    const max     = AFLP.HScene.calcArousalMax(actor);
+    // Arousal current/max go through the system adapter (AFLP.system) so a
+    // bridged system (Daggerheart Stress) reads/writes its native resource.
+    // calcArousalMax is already adapter-aware via nativeArousalMax.
+    const max = AFLP.HScene.calcArousalMax(actor);
 
     let total          = amount;
     let submittingBonus = 0;
     let hornyBonus      = 0;
 
     if (AFLP.Settings.automation) {
-      const hasMonstrousProwess = AFLP.actorHasMonstrousProwess(actor);
 
       const liveActorForBonus = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
-      // Submitting bonus: +1 per Arousal increase while Submitting.
-      const isSubmitting = liveActorForBonus.items?.some(c =>
-        c.slug === "submitting" ||
-        c.sourceId === AFLP.conditions["submitting"].uuid
-      );
-      if (isSubmitting) {
+      // Submitting bonus: +1 per Arousal increase while Submitting (PF2e only).
+      const isSubmitting = AFLP.cond.has(liveActorForBonus, "submitting");
+      // In Daggerheart, Submitting is a scene role (bottoming to the dominant; no
+      // moves against it except Struggle Escape) and grants NO arousal.
+      if (isSubmitting && AFLP.system?.id !== "daggerheart") {
         submittingBonus = 1;
         // Gangslut L1: +1 per Dominator past the first (Dominators directed at
         // this Submitting actor in the unified battlemap scene).
@@ -85,55 +86,47 @@ window.AFLP_Arousal = {
               const directedAtMe = p.partnerId === myTok || me?.partnerId === p.tokenId;
               if (!directedAtMe) continue;
               const atkActor = canvas?.tokens?.get(p.tokenId)?.actor ?? game.actors?.get(p.actorId ?? p.tokenId);
-              if (atkActor?.items?.some(c => c.slug === "dominating" || (c.flags?.core?.sourceId ?? c.sourceId) === AFLP.conditions["dominating"]?.uuid)) domCount++;
+              if (AFLP.cond.has(atkActor, "dominating")) domCount++;
             }
             if (domCount > 1) submittingBonus += (domCount - 1);
           }
         }
-        // Cock (Girthy) or Cock (Flared): +1 additional Submitting arousal.
-        // Stacks on top of the base Submitting +1 bonus.
-        // Scans canvas for any Dominating token with either cock type.
-        const domUUID = AFLP.conditions?.["dominating"]?.uuid ?? "";
+        // Cock (Girthy): +1 additional Submitting arousal, stacking on the base
+        // Submitting +1. Scans canvas for any Dominating token with a Girthy
+        // cock. (Flared no longer shares this; it has its own edging effect at
+        // climax - see the Arousal reset in _onArousalMax.)
         const FLAG_S  = AFLP.FLAG_SCOPE;
-        const girthyOrFlaredDom = canvas?.tokens?.placeables?.find(t => {
+        const girthyDom = canvas?.tokens?.placeables?.find(t => {
           if (!t.actor || t.actor.id === (liveActorForBonus.id ?? actor.id)) return false;
-          const isDom = t.actor.items?.some(i =>
-            i.slug === "dominating" ||
-            (i.flags?.core?.sourceId ?? i.sourceId) === domUUID
-          );
+          const isDom = AFLP.cond.has(t.actor, "dominating");
           if (!isDom) return false;
           const gt = t.actor.getFlag(FLAG_S, "genitalTypes") ?? {};
-          return gt["cock-girthy"] === true || gt["cock-flared"] === true;
+          return gt["cock-girthy"] === true;
         });
-        if (girthyOrFlaredDom) {
+        if (girthyDom) {
           submittingBonus += 1;
-          const cockTypeName = (girthyOrFlaredDom.actor.getFlag(FLAG_S, "genitalTypes") ?? {})["cock-girthy"]
-            ? "Girthy" : "Flared";
-          console.log(`AFLP | ${actor.name} Submitting to ${cockTypeName} cock — +1 bonus arousal`);
+          console.log(`AFLP | ${actor.name} Submitting to Girthy cock — +1 bonus arousal`);
         }
         total += submittingBonus;
         console.log(`AFLP | ${actor.name} is Submitting — +${submittingBonus} bonus arousal (total +${total} from ${source})`);
       }
 
-      // Horny bonus: add Horny value (temp + permanent) to the arousal increase.
-      // Skipped entirely for actors with Monstrous Prowess.
-      if (!hasMonstrousProwess) {
-        // Read Horny from liveActorForBonus (token-first resolved instance — see
-        // the FOUNDRY ACTOR-RESOLUTION RULE block at the top of this function).
-        // Previously this used game.actors.get(actor.id), which returns the
-        // shared base template for UNLINKED tokens and so ignored a monster
-        // mook's own per-token Horny value. liveActorForBonus is correct for
-        // both linked PCs and unlinked mooks.
-        const hornyRaw   = liveActorForBonus.getFlag(FLAG, "horny");
-        const horny      = (hornyRaw != null) ? hornyRaw : AFLP.hornyDefaults;
-        const hornyValue = (horny.temp ?? 0) + (horny.permanent ?? 0);
+      // Horny bonus: each Horny token adds extra Arousal whenever Arousal climbs.
+      // Independent track — Defeat and Bimbofied no longer feed this.
+      {
+        let hornyValue;
+        if (AFLP.system?.id === "daggerheart") {
+          hornyValue = AFLP.cond?.value?.(liveActorForBonus, "horny") ?? 0;
+        } else {
+          const hornyRaw = liveActorForBonus.getFlag(FLAG, "horny");
+          const horny    = (hornyRaw != null) ? hornyRaw : AFLP.hornyDefaults;
+          hornyValue     = (horny.temp ?? 0) + (horny.permanent ?? 0);
+        }
         if (hornyValue > 0) {
           hornyBonus = hornyValue;
           total += hornyValue;
           console.log(`AFLP | ${actor.name} is Horny ${hornyValue} — +${hornyValue} bonus arousal (total +${total} from ${source})`);
         }
-      } else {
-        console.log(`AFLP | ${actor.name} has Monstrous Prowess — Horny bonus skipped`);
       }
 
       // ── Defeated flat check ─────────────────────────────────────────
@@ -144,28 +137,27 @@ window.AFLP_Arousal = {
       await AFLP_Arousal._checkDefeatedFlatCheck(actor, tokenId);
     }
 
-    const prev    = arousal.current ?? 0;
-    arousal.current = Math.min(prev + total, max);
-    arousal.max     = max;
-    await actor.setFlag(FLAG, "arousal", arousal);
+    const prev = AFLP.system.getArousalCurrent(actor);
+    const next = Math.min(prev + total, max);
+    await AFLP.system.setArousalCurrent(actor, next, max);
 
-    console.log(`AFLP | ${actor.name} arousal: ${prev} → ${arousal.current}/${max} (+${total} from ${source})`);
+    console.log(`AFLP | ${actor.name} arousal: ${prev} → ${next}/${max} (+${total} from ${source})`);
 
     // Lovense: emit arousal tier event
-    if (window.AFLP_Lovense) AFLP_Lovense.emitArousal(actor, arousal.current, max);
+    if (window.AFLP_Lovense) AFLP_Lovense.emitArousal(actor, next, max);
 
-    // Refresh H scene card arousal bars — after flag write so bars read updated value
+    // Refresh H-Scene card arousal bars — after flag write so bars read updated value
     if (AFLP.Settings.hsceneEnabled) {
       // Small timeout ensures the flag has propagated before we re-read it for the bar
       setTimeout(() => AFLP.HScene.refreshArousalForActor(actor.id), 50);
     }
 
     // Auto-trigger cum sequence if max reached
-    if (arousal.current >= max) {
+    if (next >= max) {
       await AFLP_Arousal._onArousalMax(actor, tokenId);
     }
 
-    return { current: arousal.current, applied: total, base: amount, submittingBonus, hornyBonus };
+    return { current: next, applied: total, base: amount, submittingBonus, hornyBonus };
   },
 
   // -----------------------------------------------
@@ -191,24 +183,19 @@ window.AFLP_Arousal = {
     // Girthy / Flared note: shown when source has either cock type and target is Submitting
     const FLAG = AFLP.FLAG_SCOPE;
     const sourceGT = sourceActor.getFlag(FLAG, "genitalTypes") ?? {};
-    const targetIsSubmitting = targetActor.items?.some(i =>
-      i.slug === "submitting" ||
-      (i.flags?.core?.sourceId ?? i.sourceId) === (AFLP.conditions?.["submitting"]?.uuid ?? "")
-    );
-    const activeCockType = (sourceGT["cock-girthy"] && targetIsSubmitting) ? "Girthy"
-      : (sourceGT["cock-flared"] && targetIsSubmitting) ? "Flared"
-      : null;
+    const targetIsSubmitting = AFLP.cond.has(targetActor, "submitting");
+    const activeCockType = (sourceGT["cock-girthy"] && targetIsSubmitting) ? "Girthy" : null;
     const girthyNote = activeCockType
-      ? `<p style="font-size:11px;color:#806040;"><em>Cock (${activeCockType}): +1 bonus Arousal stacked with Submitting bonus.</em></p>`
+      ? `<p style="font-size:11px;color:#806040;"><em>Cock (${activeCockType}): ${AFLP.system.deltaText(1, "bonus Arousal")} stacked with the Submitting bonus.</em></p>`
       : "";
 
     const content = `<div class="aflp-chat-card">
-      <p><strong>${sourceActor.name}</strong> uses <strong>Sexual Advance</strong> on <strong>${targetActor.name}</strong>!</p>
+      <p><strong>${sourceActor.name}</strong> uses <strong>${AFLP.system?.id === "daggerheart" ? "Carnal Press" : "Sexual Advance"}</strong> on <strong>${targetActor.name}</strong>!</p>
       ${sameSimple
-        ? `<p>Both gain <strong>${sourceGain?.applied ?? 2} Arousal</strong>.</p>`
+        ? `<p>Both <strong>${AFLP.system.deltaText(sourceGain?.applied ?? 2)}</strong>.</p>`
         : `<ul style="margin:2px 0 4px 16px;padding:0">
-            <li>${sourceActor.name} gains ${gainLine(sourceGain)}</li>
-            <li>${targetActor.name} gains ${gainLine(targetGain)}</li>
+            <li>${sourceActor.name} ${AFLP.system.markVerb}s ${gainLine(sourceGain)}</li>
+            <li>${targetActor.name} ${AFLP.system.markVerb}s ${gainLine(targetGain)}</li>
           </ul>`
       }
       ${girthyNote}
@@ -240,21 +227,18 @@ window.AFLP_Arousal = {
   },
 
   async decrement(actor, amount, source = "") {    if (!actor) return;
-    const FLAG = AFLP.FLAG_SCOPE;
-
     await AFLP.ensureCoreFlags(actor);
-    const arousal   = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
-    const prev      = arousal.current ?? 0;
-    arousal.current = Math.max(0, prev - amount);
-    await actor.setFlag(FLAG, "arousal", arousal);
+    const prev = AFLP.system.getArousalCurrent(actor);
+    const next = Math.max(0, prev - amount);
+    await AFLP.system.setArousalCurrent(actor, next);
 
-    console.log(`AFLP | ${actor.name} arousal: ${prev} → ${arousal.current} (-${amount} from ${source})`);
+    console.log(`AFLP | ${actor.name} arousal: ${prev} → ${next} (-${amount} from ${source})`);
 
     if (AFLP.Settings.hsceneEnabled) {
       AFLP.HScene.refreshArousalForActor(actor.id);
     }
 
-    return arousal.current;
+    return next;
   },
 
   // -----------------------------------------------
@@ -262,23 +246,19 @@ window.AFLP_Arousal = {
   // -----------------------------------------------
   async set(actor, value, source = "", tokenId = null) {
     if (!actor) return;
-    const FLAG    = AFLP.FLAG_SCOPE;
-    const max     = AFLP.HScene.calcArousalMax(actor);
-    const arousal = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
-
-    arousal.current = Math.max(0, Math.min(value, max));
-    arousal.max     = max;
-    await actor.setFlag(FLAG, "arousal", arousal);
+    const max  = AFLP.HScene.calcArousalMax(actor);
+    const next = Math.max(0, Math.min(value, max));
+    await AFLP.system.setArousalCurrent(actor, next, max);
 
     if (AFLP.Settings.hsceneEnabled) {
       AFLP.HScene.refreshArousalForActor(actor.id);
     }
 
-    if (arousal.current >= max) {
+    if (next >= max) {
       await AFLP_Arousal._onArousalMax(actor, tokenId);
     }
 
-    return arousal.current;
+    return next;
   },
 
   // -----------------------------------------------
@@ -297,12 +277,9 @@ window.AFLP_Arousal = {
   // only roll once (e.g. Submitting bonus granting +2 in one call).
   // -----------------------------------------------
   async _checkDefeatedFlatCheck(actor, tokenId = null) {
+    if (!AFLP.Settings.allows("sexualDefeat")) return;   // Lewd 4+ only
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
-    const defeatedCond = liveActor.items?.find(c =>
-      c.slug === "defeated" ||
-      c.sourceId?.includes(AFLP.conditions?.["defeated"]?.uuid ?? "NOMATCH")
-    );
-    if (!defeatedCond) return;
+    if (!AFLP.cond.has(liveActor, "defeated", tokenId)) return;
 
     // Debounce: only one flat check per actor per event loop tick
     const debounceKey = `_aflpDefeatedCheck_${actor.id}`;
@@ -320,7 +297,7 @@ window.AFLP_Arousal = {
 
     if (!success) {
       // Remove Defeated
-      await liveActor.deleteEmbeddedDocuments("Item", [defeatedCond.id]);
+      await AFLP.cond.remove(liveActor, "defeated", tokenId);
 
       // Apply Mind Break (stack if already present, otherwise apply fresh MB 1)
       await AFLP_Arousal._stackOrApplyMindBreak(liveActor, 1, tokenId);
@@ -364,8 +341,9 @@ window.AFLP_Arousal = {
     if (!AFLP.Settings.automation) return false;
     if (!AFLP.Settings.edgeAuto) return false;
     if (AFLP.Settings.edgeSkipDialog) return false;
-    const isNPC = actor.type === "npc" || actor.type === "hazard";
+    const isNPC = AFLP.system.isNPC(actor);
     if (isNPC && !AFLP.Settings.edgeIncludeNpc) return false;
+    if (isNPC && !AFLP.Settings.allows("npcEdge")) return false;   // Lewd 4+ only
     return true;
   },
 
@@ -492,7 +470,7 @@ window.AFLP_Arousal = {
         }
       }
     } else {
-      // No H scene — solo message (only for actors with cocks; no-cock path posts its own below)
+      // No H-Scene — solo message (only for actors with cocks; no-cock path posts its own below)
       if (actorHasCock) {
         const soloLines = [
           `<p><strong>${actor.name}</strong> can't hold back any longer  -  they cum, hard, with a broken moan they couldn't suppress even if they wanted to.</p>`,
@@ -509,27 +487,46 @@ window.AFLP_Arousal = {
 
     // Reset arousal immediately so we don't re-trigger.
     // Collect all flag writes to this actor into one batched update at the end.
-    const arousal   = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
-    arousal.current = 0;
+    //
+    // Bridged native arousal (Daggerheart Stress): a climax clears marked
+    // Stress fully (back to 0), for PCs and adversaries alike — this matches
+    // AFLP's standard arousal loop. (An earlier partial 1d4 clear left PCs
+    // pinned near max and immediately re-cumming, so it was dropped.) The
+    // batched flag write below carries the same 0 so the mirror stays in step
+    // with the Stress track.
+    // Cock (Flared) edging: a creature that climaxes while Submitting to a
+    // Dominating creature with a Flared cock floors its Arousal at 3 instead of
+    // 0, kept simmering at the edge. It still has to climb back to max to cum
+    // again, so this is a faster re-cum, not an instant-repeat loop.
+    let _floor = 0;
+    try {
+      if (AFLP.cond.has(actor, "submitting")) {
+        const FLAG_S = AFLP.FLAG_SCOPE;
+        const flaredDom = canvas?.tokens?.placeables?.find(t =>
+          t.actor && t.actor.id !== actor.id && AFLP.cond.has(t.actor, "dominating")
+          && (t.actor.getFlag(FLAG_S, "genitalTypes") ?? {})["cock-flared"] === true);
+        if (flaredDom) _floor = 3;
+      }
+    } catch (e) { /* canvas unavailable */ }
+    const arousal = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults);
+    const _nativeMax = AFLP.system?.nativeArousalMax?.(actor);
+    const _resetMax = _nativeMax ?? arousal.max ?? 6;
+    if (_floor > _resetMax - 1) _floor = Math.max(0, _resetMax - 1);
+    arousal.current = _floor;
+    if (_nativeMax != null) {
+      arousal.max = _nativeMax;
+      await AFLP.system.setArousalCurrent(actor, _floor);
+    }
     const _batchedFlags = { [`flags.${FLAG}.arousal`]: arousal };
 
     if (AFLP.Settings.hsceneEnabled) {
       AFLP.HScene.incrementSceneOrgasm(actor.id, tokenId);
     }
 
-    // ── Clear temp Horny on cum (permanent Horny survives) ────────────────
-    // Reads/writes via `actor`, which is the correctly-resolved per-token
-    // instance (synthetic for unlinked mooks, world actor for linked PCs —
-    // see the FOUNDRY ACTOR-RESOLUTION RULE in increment()). Zeros temp,
-    // leaves permanent intact.
-    if (AFLP.Settings.automation) {
-      const horny = structuredClone(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
-      if ((horny.temp ?? 0) > 0) {
-        horny.temp = 0;
-        _batchedFlags[`flags.${FLAG}.horny`] = horny;
-        console.log(`AFLP | ${actor.name} temp Horny cleared on cum (permanent ${horny.permanent ?? 0} preserved)`);
-      }
-    }
+    // ── Horny persists through cum ────────────────────────────────────────
+    // Horny no longer clears on orgasm. Temp Horny is shed when the character
+    // completes daily preparations (the AFLP Daily Preparations macro clears it).
+    // Permanent Horny always persists.
 
     // ── Lifetime counter: timesCummed ──────────────────────────────────
     const sexual = structuredClone(actor.getFlag(FLAG, "sexual") ?? AFLP.sexualDefaults);
@@ -543,15 +540,10 @@ window.AFLP_Arousal = {
 
       // ── Mind Break escalation ────────────────────────────────────────
       // Rule: "When you cum your Mind Break level increases by 1."
-      const mindBreakCond = liveActor.items?.find(c =>
-        c.slug === "mind-break" ||
-        c.sourceId?.includes(AFLP.conditions?.["mind-break"]?.uuid ?? "NOMATCH")
-      );
-      if (mindBreakCond) {
-        const currentMBValue = mindBreakCond.system?.badge?.value ?? 1;
-        const newMBValue     = currentMBValue + 1;
-        // Update whichever path is populated
-        await mindBreakCond.update({ "system.badge.value": newMBValue });
+      const mindBreakVal = AFLP.cond.value(liveActor, "mind-break", tokenId);
+      if (mindBreakVal > 0) {
+        const newMBValue = mindBreakVal + 1;
+        await AFLP.cond.setValue(liveActor, "mind-break", newMBValue, tokenId);
         await ChatMessage.create({
           content: `<div class="aflp-chat-card">
             <p><strong>${actor.name}</strong>'s Mind Break deepens to ${newMBValue}!</p>
@@ -561,31 +553,36 @@ window.AFLP_Arousal = {
         console.log(`AFLP | ${actor.name} Mind Break escalated to ${newMBValue} (cummed while mind-broken)`);
       }
 
+      // ── Horny: every climax adds a Horny token (DH, independent, cap 3) ──
+      // Rule: "You gain a token each time you climax." Cleared at scene end.
+      if (AFLP.system.id === "daggerheart") {
+        const hv = AFLP.cond.value(liveActor, "horny", tokenId) ?? 0;
+        if (hv < 3) {
+          await AFLP.cond.setValue(liveActor, "horny", Math.min(3, hv + 1), tokenId);
+          console.log(`AFLP | ${actor.name} Horny token on climax (${Math.min(3, hv + 1)}/3)`);
+        }
+      }
+
       // ── Apply Defeated if a Dominator caused this cum ───────────────
       // Rule: Dominating — "if you cause it to Cum it is Defeated."
       // Partner-aware: applies when the CUMMER is Submitting and at least one
       // Dominating participant is directed at them (their dom partner, or any
       // attacker pointing at them in a gangbang). Mind Break supersedes Defeated.
       const cummerTok = cummerP?.tokenId ?? tokenId;
-      const cummerIsSubmitting = liveActor.items?.some(c =>
-        c.slug === "submitting" ||
-        c.sourceId?.includes(AFLP.conditions?.["submitting"]?.uuid ?? "NOMATCH")
-      );
-      const isAlreadyDefeated = liveActor.items?.some(c =>
-        c.slug === "defeated" ||
-        c.sourceId?.includes(AFLP.conditions?.["defeated"]?.uuid ?? "NOMATCH")
-      );
-      const hasMindBreak = liveActor.items?.some(c =>
-        c.slug === "mind-break" ||
-        c.sourceId?.includes(AFLP.conditions?.["mind-break"]?.uuid ?? "NOMATCH")
-      );
+      const cummerIsSubmitting = AFLP.cond.has(liveActor, "submitting", tokenId);
+      const isAlreadyDefeated  = AFLP.cond.has(liveActor, "defeated", tokenId);
+      const hasMindBreak       = AFLP.cond.has(liveActor, "mind-break", tokenId);
+      const isDH = AFLP.system.id === "daggerheart";
+      // DH: Defeat is its own 0-3 track, gained on climax while Submitting to an
+      // adversary — independent of Mind Break and Bimbofied. PF2e keeps the
+      // single Defeated state (blocked once already Defeated or Mind Broken).
+      const defeatNow = isDH ? (AFLP.cond.value(liveActor, "defeat", tokenId) ?? 0) : 0;
+      const canDefeat = isDH ? !hasMindBreak : (!isAlreadyDefeated && !hasMindBreak);
 
-      if (scene && cummerIsSubmitting && !isAlreadyDefeated && !hasMindBreak) {
-        // The cummer's dominators: participants directed at the cummer (or the
-        // cummer's own partner) who currently have the Dominating condition.
-        const isDomActor = (a) => a?.items?.some(c =>
-          c.slug === "dominating" ||
-          c.sourceId?.includes(AFLP.conditions?.["dominating"]?.uuid ?? "NOMATCH"));
+      if (scene && cummerIsSubmitting && canDefeat && AFLP.Settings.allows("sexualDefeat")) {
+        // The party the cummer submits to: a participant directed at the cummer
+        // who is an adversary, a Bullified PC (adversary mode), or Dominating.
+        const isDomActor = (a) => a && (a.type === "adversary" || AFLP.cond.has(a, "bullified") || AFLP.cond.has(a, "dominating"));
         const dominators = [];
         for (const p of (scene.participants ?? [])) {
           if (p.tokenId === cummerTok) continue;
@@ -604,20 +601,51 @@ window.AFLP_Arousal = {
         }
 
         if (dominatorFound) {
-          // Mark so createItem hook skips the counter (we're counting here)
-          AFLP_Arousal._setCounterDebounce(actor, "defeated");
+          if (AFLP.system.id === "daggerheart") {
+            // DH: Defeat is its own 0-3 track. Climax while Submitting to an
+            // adversary marks one Defeat token. Past Defeat 3 it overflows into
+            // 3 Stress (DH cascade -> HP -> Mind Break), so a trapped creature
+            // keeps sliding toward a break instead of plateauing at Defeat 3.
+            if (defeatNow < 3) {
+              const dn = await AFLP.system.markSpiralToken(liveActor, 1);
+              sexual.lifetime.timesDefeated = (sexual.lifetime.timesDefeated ?? 0) + 1;
+              await ChatMessage.create({
+                content: `<div class="aflp-chat-card">
+                  <p><strong>${actor.name}</strong> is worn down - <strong>Defeat ${dn ?? "+1"}/3</strong>.</p>
+                  <p><em>Dominated to climax, losing the will to fight back.</em></p>
+                </div>`,
+                speaker: { alias: "AFLP" },
+              });
+              console.log(`AFLP | ${actor.name} Defeat token (DH) - cummed while Dominated`);
+            } else {
+              const ov = (AFLP.Carnal?.defeatOverflow)
+                ? await AFLP.Carnal.defeatOverflow(liveActor, 1)
+                : { stressMarked: 0, brokeMind: false };
+              await ChatMessage.create({
+                content: `<div class="aflp-chat-card">
+                  <p><strong>${actor.name}</strong> is already broken down to <strong>Defeat 3/3</strong> - the climax overflows into <strong>+${ov.stressMarked} Stress</strong>${ov.brokeMind ? " and triggers <strong>Mind Break</strong>" : ""}.</p>
+                  <p><em>Nothing left to wear down but the mind.</em></p>
+                </div>`,
+                speaker: { alias: "AFLP" },
+              });
+              console.log(`AFLP | ${actor.name} Defeat overflow -> +${ov.stressMarked} Stress${ov.brokeMind ? " (Mind Break)" : ""}`);
+            }
+          } else {
+            // Mark so createItem hook skips the counter (we're counting here)
+            AFLP_Arousal._setCounterDebounce(actor, "defeated");
 
-          await AFLP_Arousal._applyCondition(liveActor, "defeated", AFLP.conditions["defeated"]?.uuid, null);
-          sexual.lifetime.timesDefeated = (sexual.lifetime.timesDefeated ?? 0) + 1;
+            await AFLP_Arousal._applyCondition(liveActor, "defeated", AFLP.system.contentUuid("defeated"), null);
+            sexual.lifetime.timesDefeated = (sexual.lifetime.timesDefeated ?? 0) + 1;
 
-          await ChatMessage.create({
-            content: `<div class="aflp-chat-card">
-              <p><strong>${actor.name}</strong> is Defeated!</p>
-              <p><em>Completely dominated sexually, starting to lose the will to fight back.</em></p>
-            </div>`,
-            speaker: { alias: "AFLP" },
-          });
-          console.log(`AFLP | ${actor.name} Defeated — cummed while Dominated`);
+            await ChatMessage.create({
+              content: `<div class="aflp-chat-card">
+                <p><strong>${actor.name}</strong> is Defeated!</p>
+                <p><em>Completely dominated sexually, starting to lose the will to fight back.</em></p>
+              </div>`,
+              speaker: { alias: "AFLP" },
+            });
+            console.log(`AFLP | ${actor.name} Defeated — cummed while Dominated`);
+          }
         }
       }
     }
@@ -626,17 +654,29 @@ window.AFLP_Arousal = {
     _batchedFlags[`flags.${FLAG}.sexual`] = sexual;
     await actor.update(_batchedFlags);
 
-    // ── Apply base Afterglow ─────────────────────────────────────────────
+    // ── Apply base Afterglow (first partnered climax of a scene only) ────
+    // Afterglow is the glow of shared sex, and only the FIRST time: you gain it
+    // the first time you climax with a partner in a given scene. Later partnered
+    // climaxes in the same scene - and any solo climax - still relieve Arousal
+    // and Cum Volume but grant no Afterglow. Gated per scene via a flag that is
+    // cleared when the scene closes (see HScene.closeScene).
     // Applied before kink post-effects so Edge Master can remove and replace it.
-    if (AFLP.Settings.automation) {
-      const afterglowUUID = AFLP.conditions?.["afterglow"]?.uuid;
+    const _partneredClimax = !!partnerTokenId
+      || (!!scene && (scene.participants ?? []).some(p => p.tokenId !== tokenId && p.actorId !== actor.id));
+    const _afterglowSceneId = scene?.id ?? null;
+    const _glowedThisScene  = _afterglowSceneId != null
+      && actor.getFlag(FLAG, "afterglowScene") === _afterglowSceneId;
+    if (AFLP.Settings.automation && _partneredClimax && !_glowedThisScene) {
+      const afterglowUUID = AFLP.system.contentUuid("afterglow");
       if (afterglowUUID) {
         const liveActorAg = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
-        const alreadyHas  = liveActorAg.items?.some(c =>
-          c.slug === "afterglow" || (c.flags?.core?.sourceId ?? c.sourceId) === afterglowUUID
-        );
+        const alreadyHas  = AFLP.cond.has(liveActorAg, "afterglow", tokenId);
         if (!alreadyHas) {
           await AFLP_Arousal._applyCondition(liveActorAg, "afterglow", afterglowUUID, null);
+        }
+        // Mark this scene so later partnered climaxes don't grant Afterglow again.
+        if (_afterglowSceneId != null) {
+          await actor.setFlag(FLAG, "afterglowScene", _afterglowSceneId);
         }
       }
     }
@@ -645,8 +685,6 @@ window.AFLP_Arousal = {
     if (AFLP.Settings.automation && AFLP.Kinks) {
       // Edge Master: block Afterglow, apply Sickened 2 + Edge Master's Afterglow
       await AFLP.Kinks.onCumPostEffect(actor, tokenId);
-      // Purity: Sickened 1 if cumming while Submitting (non-consensual)
-      await AFLP.Kinks.onCumPurityCheck(actor, tokenId);
       // Aphrodisiac Junkie L7: re-enforce permanent Horny 3 (Horny was just removed above)
       await AFLP.Kinks.enforceAphrodisiacJunkieL7(actor);
       // Aphrodisiac Junkie L7: Stunned 2 to Dominators/Submitting creatures
@@ -671,7 +709,7 @@ window.AFLP_Arousal = {
     if (window.AFLP_Lovense) AFLP_Lovense.emitCum(actor);
 
     // ── Fire cum macro ──────────────────────────────────────────────────
-    // Only fire if automation is on, an H scene exists, AND this actor is the
+    // Only fire if automation is on, an H-Scene exists, AND this actor is the
     // designated macro runner for this cum event.
     // _aflpCumMacroActor is set to actor.id by the first actor in the pending-cum
     // window, and cleared after the macro fires. The second (combined-message)
@@ -701,7 +739,7 @@ window.AFLP_Arousal = {
     // ── No-cock orgasm: record mlGiven (pussy squirt) and post chat, skip macro ──
     if (!actorHasCock) {
       const cum = actor.getFlag(FLAG, "cum") ?? { current: 0, max: 10 };
-      const cumUnitsSpent = Math.ceil(cum.current / 2);
+      const cumUnitsSpent = AFLP.cumPerShot?.(actor) ?? Math.ceil(cum.current / 2);
       if (cumUnitsSpent > 0) {
         const sexualNoCock = structuredClone(actor.getFlag(FLAG, "sexual") ?? AFLP.sexualDefaults);
         sexualNoCock.lifetime = sexualNoCock.lifetime ?? {};
@@ -711,9 +749,9 @@ window.AFLP_Arousal = {
         sexualNoCock.lifetime.cumGiven = (sexualNoCock.lifetime.cumGiven ?? 0) + cumUnitsSpent;
         // Batch cum + sexual into one write — skip cum deduction for NPCs with infinite cum on
         const isNPCNoCock = actor.type === "npc";
-        const cumUpdate   = (isNPCNoCock && AFLP.Settings.infiniteCum)
+        const cumUpdate   = ((isNPCNoCock && AFLP.Settings.infiniteCum) || AFLP.hasInfiniteLoads(actor))
           ? {}
-          : { [`flags.${FLAG}.cum`]: { current: cum.current - cumUnitsSpent, max: cum.max } };
+          : { [`flags.${FLAG}.cum`]: { current: Math.max(0, cum.current - cumUnitsSpent), max: cum.max } };
         await actor.update({
           ...cumUpdate,
           [`flags.${FLAG}.sexual`]: sexualNoCock,
@@ -732,7 +770,8 @@ window.AFLP_Arousal = {
       return;
     }
 
-    const cumMacro = game.macros.find(m => m.name === "AFLP Cum" || m.slug === "aflp-cum");
+    const cumMacro = game.macros.find(m =>
+      m.name === "AFLR Cum" || m.name === "AFLP Cum" || m.slug === "aflr-cum" || m.slug === "aflp-cum");
     if (cumMacro) {
       // Hand the cummer (source) and partner (target) to the cum macro via
       // globals so it can resolve them WITHOUT us changing the GM's on-screen
@@ -752,7 +791,7 @@ window.AFLP_Arousal = {
       }
       await cumMacro.execute();
     } else {
-      ui.notifications.warn(`AFLP | ${actor.name} reached max arousal but no 'AFLP Cum' macro found. Run manually.`);
+      ui.notifications.warn(`AFLR | ${actor.name} reached max arousal but no 'AFLR Cum' macro found. Run manually.`);
     }
     } catch(e) {
       console.error("AFLP | Error during cum macro execution:", e);
@@ -767,17 +806,13 @@ window.AFLP_Arousal = {
   // If not, applies a fresh condition at value `amount`.
   // -----------------------------------------------
   async _stackOrApplyMindBreak(actor, amount = 1, tokenId = null) {
+    if (!AFLP.Settings.allows("mindBreak")) return;   // Lewd 4+ only
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
-    const existing = liveActor.items?.find(c =>
-      c.slug === "mind-break" ||
-      c.sourceId?.includes(AFLP.conditions?.["mind-break"]?.uuid ?? "NOMATCH")
-    );
-    if (existing) {
-      const currentVal = existing.system?.badge?.value ?? 1;
-      const newVal = currentVal + amount;
-      await existing.update({ "system.badge.value": newVal });
+    if (AFLP.cond.has(liveActor, "mind-break", tokenId)) {
+      const newVal = AFLP.cond.value(liveActor, "mind-break", tokenId) + amount;
+      await AFLP.cond.setValue(liveActor, "mind-break", newVal, tokenId);
     } else {
-      await AFLP_Arousal._applyCondition(liveActor, "mind-break", AFLP.conditions["mind-break"]?.uuid, amount, tokenId);
+      await AFLP_Arousal._applyCondition(liveActor, "mind-break", AFLP.system.contentUuid("mind-break"), amount, tokenId);
     }
   },
 
@@ -795,64 +830,12 @@ window.AFLP_Arousal = {
   // -----------------------------------------------
   // Helper: apply an AFLP condition from UUID, with
   // value override for valued conditions (Mind Break).
-  // Falls back to PF2e ConditionManager if UUID fails.
+  // Delegates to the active system adapter (AFLP.system);
+  // the condition caps / singular handling and the UUID-vs-
+  // fallback logic now live in the adapter so every system
+  // shares one path. Signature preserved for existing callers.
   // -----------------------------------------------
-  // slug-based caps: conditions that increment instead of duplicating
-  // and their max value (null = no cap)
-  _STACKABLE: {
-    "horny":           3,    // Horny caps at 3 in practice (kinks go higher but base is 3)
-    "mind-break":      null, // No cap
-    "exposed":         2,    // 1-2
-    "creature-fetish": 9,    // Up to 9
-  },
-
-  // Conditions that are singular — never stack, silently skip if already present
-  _SINGULAR: new Set(["dominating", "submitting", "defeated", "restrained", "grabbed"]),
-
   async _applyCondition(actor, slug, uuid, value = null, tokenId = null) {
-    // Always check conditions on the live token actor (synthetic instance for unlinked tokens).
-    // actor.token?.actor gives the token's synthetic actor; safe fallback for linked actors.
-    const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
-    const existing = liveActor.items?.find(c =>
-      c.slug === slug || (uuid && c.sourceId === uuid)
-    );
-
-    if (existing) {
-      if (slug in this._STACKABLE) {
-        // Increment valued condition, respecting cap
-        const cap = this._STACKABLE[slug];
-        const current = existing.system?.badge?.value ?? 0;
-        const next = current + (value ?? 1);
-        const capped = cap !== null ? Math.min(next, cap) : next;
-        if (capped > current) {
-          await existing.update({ "system.badge.value": capped });
-        }
-      }
-      // Singular or already-present stackable at cap — do nothing
-      return;
-    }
-
-    // Not present — apply fresh
-    try {
-      if (uuid) {
-        const condDoc = await fromUuid(uuid);
-        if (condDoc) {
-          const itemData = condDoc.toObject();
-          if (value !== null && itemData.system?.badge !== undefined) {
-            itemData.system.badge.value = value;
-          }
-          await actor.createEmbeddedDocuments("Item", [itemData]);
-          return;
-        }
-      }
-    } catch(e) {
-      console.warn(`AFLP | _applyCondition UUID path failed for ${slug}:`, e);
-    }
-    // Fallback: use PF2e actor.increaseCondition for core conditions
-    if (typeof actor.increaseCondition === "function") {
-      await actor.increaseCondition(slug);
-    } else {
-      console.warn(`AFLP | Could not apply condition ${slug} to ${actor.name}`);
-    }
+    return AFLP.system.applyCondition(actor, slug, uuid, value, tokenId);
   },
 };

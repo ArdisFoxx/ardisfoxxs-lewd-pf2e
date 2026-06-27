@@ -1,6 +1,6 @@
 // =====================================================
 // AFLP Custom Position Manager
-// Allows GMs to define custom positions for the H Scene
+// Allows GMs to define custom positions for the H-Scene
 // position picker, stored as world data.
 // =====================================================
 
@@ -66,7 +66,7 @@ export function mergeCustomPositions() {
     if (p.posType === "individual") {
       // Individual (2p) position — appears in categorised individual section
       const hole  = (p.hole === "none" || !p.hole) ? null : p.hole;
-      const penile = ["vaginal", "anal", "oral", "facial"].includes(hole);
+      const penile = ["vaginal", "anal", "oral", "facial", "paizuri"].includes(hole);
       const trait  = p.positionTrait || "biped";
       AFLP?.positions?.push({
         id: p.id,
@@ -112,7 +112,7 @@ export function mergeCustomPositions() {
 export class AFLPPositionManager extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id:       "aflp-position-manager",
-    window:   { title: "Custom H Scene Positions", resizable: true },
+    window:   { title: "Custom H-Scene Positions", resizable: true },
     position: { width: 740, height: 560 },
     classes:  ["aflp-app"],
   };
@@ -166,7 +166,7 @@ export class AFLPPositionManager extends foundry.applications.api.ApplicationV2 
         }).join("");
 
     root.innerHTML = `
-      <p style="margin:0;font-size:11px;color:#888">Custom positions appear in the H Scene position picker alongside built-in options. Individual positions appear per-actor; Group positions appear in the shared Group Positions section.</p>
+      <p style="margin:0;font-size:11px;color:#888">Custom positions appear in the H-Scene position picker alongside built-in options. Individual positions appear per-actor; Group positions appear in the shared Group Positions section.</p>
       <div style="flex:1;overflow-y:auto;border:1px solid rgba(200,160,80,0.15);border-radius:4px">
         <table style="width:100%;border-collapse:collapse">
           <thead style="background:rgba(200,160,80,0.06);border-bottom:1px solid rgba(200,160,80,0.2)">

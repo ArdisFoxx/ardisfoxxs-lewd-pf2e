@@ -14,6 +14,8 @@ AFLP.Kinks = {
 
   register() {
     console.log("AFLP | Kink system ready");
+    this._bindBimboChatButtons();
+    this._registerBimbomancyDomainGrant();
 
     // Bimbomancer Dedication: intercept Stupified and convert to Bimbofied
     Hooks.on("preCreateItem", async (item, data, options, userId) => {
@@ -42,8 +44,30 @@ AFLP.Kinks = {
       "XpL5afd2Zygfxkz2": "skycladIdolDedication",   // Skyclad Idol Dedication
     };
 
+    // DH (and any system): our authored Bimbomancy items carry an aflrKey flag.
+    const AFLR_KEY_FLAGS = {
+      bimbomancer:             "bimbomancerDedication",
+      myBodyIsAWeapon:         "myBodyIsAWeapon",
+      likeOhmigawd:            "likeOhmigawd",
+      saturationAura:          "saturationAura",
+      permanentTransformation: "permanentTransformation",
+      skycladIdol:             "skycladIdolDedication",
+      bareNakedThreat:         "bareNakedThreat",
+      nakedDiplomacy:          "nakedDiplomacy",
+      luckyPervert:            "luckyPervert",
+      showMustGoOn:            "showMustGoOn",
+      oathOfNudity:            "oathOfNudity",
+      sharedPerversion:        "sharedPerversion",
+    };
+
     const getFeatFlagKey = (item) => {
-      if (!item.actor || item.type !== "feat") return null;
+      if (!item.actor) return null;
+      // DH/native: match our authored items by their aflrKey designer flag.
+      const ak = item.getFlag?.("ardisfoxxs-lewd-pf2e", "aflrKey")
+              ?? item.flags?.["ardisfoxxs-lewd-pf2e"]?.aflrKey;
+      if (ak && AFLR_KEY_FLAGS[ak]) return AFLR_KEY_FLAGS[ak];
+      // PF2e: match dedication/feat items by compendium source ID.
+      if (item.type !== "feat") return null;
       // Match by compendium source ID or by direct _id if already embedded
       const src = item.flags?.core?.sourceId ?? item.sourceId ?? "";
       for (const [id, flagKey] of Object.entries(BIMBO_FEAT_FLAGS)) {
@@ -57,6 +81,20 @@ AFLP.Kinks = {
       const flagKey = getFeatFlagKey(item);
       if (!flagKey) return;
       await item.actor.setFlag(AFLP.FLAG_SCOPE, flagKey, true);
+      // DH Bimbomancer access feature: seed the Bimbo/Bull path and offer the toggle.
+      if (flagKey === "bimbomancerDedication" && AFLP.system?.id === "daggerheart") {
+        const path = item.getFlag?.("ardisfoxxs-lewd-pf2e", "bimbomancerPath")
+                  || item.actor.getFlag(AFLP.FLAG_SCOPE, "bimbomancerPath") || "bimbo";
+        await item.actor.setFlag(AFLP.FLAG_SCOPE, "bimbomancerPath", path);
+        try { await AFLP.Kinks._postBimbomancerPathCard(item.actor, path); } catch (e) {}
+      }
+      // DH Skyclad Idol access feature: seed the Nudist/Stripper path and offer the toggle.
+      if (flagKey === "skycladIdolDedication" && AFLP.system?.id === "daggerheart") {
+        const path = item.getFlag?.("ardisfoxxs-lewd-pf2e", "skycladPath")
+                  || item.actor.getFlag(AFLP.FLAG_SCOPE, "skycladPath") || "nudist";
+        await item.actor.setFlag(AFLP.FLAG_SCOPE, "skycladPath", path);
+        try { await AFLP.Kinks._postSkycladPathCard(item.actor, path); } catch (e) {}
+      }
       console.log(`AFLP | Bimbomancer: set flag ${flagKey} on ${item.actor.name}`);
     });
 
@@ -118,83 +156,64 @@ AFLP.Kinks = {
     });
 
     // Mind Break gained: store the primary creature type of scene attackers,
-    // and Purity L3 CF save. Both fire from createItem.
+    // and Purity L3 CF save. On PF2e MB is a condition item, so this fires from
+    // createItem; flag-based systems (Daggerheart/5e) run the same logic from the
+    // aflpConditions flag transition handled by the updateActor hook below.
     Hooks.on("createItem", async (item) => {
       if (!game.user.isGM || !item.actor) return;
-      const isMindBreak = item.slug === "mind-break" || (item.flags?.core?.sourceId ?? item.sourceId) === AFLP.conditions?.["mind-break"]?.uuid;
+      const isMindBreak = item.slug === "mind-break" || (item.flags?.core?.sourceId ?? item.sourceId) === AFLP.system.contentUuid("mind-break");
       if (!isMindBreak) return;
 
       AFLP.Kinks.onMindBreakGainedPurity(item.actor);
 
-      // Prompt GM to choose which creature type to assign for CF grant at MB end.
-      // Only fires on first application (badge value 1) — don't re-prompt on re-apply.
+      // Prompt GM to choose the CF creature type. Only on first application
+      // (badge value 1); the method itself skips if a type is already chosen.
       const isFirst = (item.system?.badge?.value ?? 1) === 1;
-      const alreadySet = !!item.actor.getFlag(AFLP.FLAG_SCOPE, "mbCreatureType");
-      if (isFirst && !alreadySet) {
-        const CREATURE_TYPES = new Set(["aberration","animal","beast","celestial","construct","daemon","dragon","elemental","fey","fiend","fungus","giant","humanoid","monitor","ooze","petitioner","plant","spirit","undead"]);
-        // Gather all creature types present on scene attackers, preserving order
-        const hscene = AFLP.Settings.hsceneEnabled ? AFLP.HScene._getScene?.(item.actor.id) : null;
-        const availableTypes = [];
-        for (const atk of hscene?.attackers ?? []) {
-          const atkActor = game.actors?.get(atk.actorId);
-          if (!atkActor) continue;
-          const traits = atkActor.system?.traits?.value ?? [];
-          for (const t of traits) {
-            if (CREATURE_TYPES.has(t) && !availableTypes.includes(t)) availableTypes.push(t);
-          }
-        }
-        // Fall back to full list if no scene / no typed attackers
-        const typeList = availableTypes.length ? availableTypes : [...CREATURE_TYPES].sort();
-
-        // Build dialog — auto-confirm if only one type available
-        const chooseType = await new Promise(resolve => {
-          if (typeList.length === 1) { resolve(typeList[0]); return; }
-          const optionsHtml = typeList.map(t =>
-            `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
-          ).join("");
-          foundry.applications.api.DialogV2.wait({
-            window: { title: "Mind Break — Creature Fetish" },
-            content: `
-              <p style="margin-bottom:8px;">
-                <strong>${item.actor.name}</strong> has broken. Choose the creature type
-                they will develop a fetish for when Mind Break ends.
-              </p>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex-shrink:0;">Creature type:</label>
-                <select id="aflp-mb-type" style="flex:1;">${optionsHtml}</select>
-              </div>`,
-            buttons: [
-              {
-                action: "ok",
-                label: "Confirm",
-                default: true,
-                callback: (ev, btn, dlg) => resolve(dlg.element.querySelector("#aflp-mb-type")?.value ?? null),
-              },
-              {
-                action: "none",
-                label: "No Fetish",
-                callback: () => resolve(null),
-              },
-            ],
-            close: () => resolve(null),
-            rejectClose: false,
-          });
-        });
-
-        if (chooseType) {
-          await item.actor.setFlag(AFLP.FLAG_SCOPE, "mbCreatureType", chooseType);
-        }
-      }
+      if (isFirst) await AFLP.Kinks._promptMBCreatureType(item.actor);
     });
     Hooks.on("deleteItem", (item) => {
       if (!game.user.isGM || !item.actor) return;
       if (item.slug === "bimbofied" || (item.flags?.core?.sourceId ?? item.sourceId) === "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.9ySsqXnpfZkhmp2V") {
         AFLP.Kinks.syncBimboActive(item.actor);
       }
-      const isMindBreak = item.slug === "mind-break" || (item.flags?.core?.sourceId ?? item.sourceId) === AFLP.conditions?.["mind-break"]?.uuid;
+      const isMindBreak = item.slug === "mind-break" || (item.flags?.core?.sourceId ?? item.sourceId) === AFLP.system.contentUuid("mind-break");
       if (isMindBreak) AFLP.Kinks.onMindBreakEndPurity(item.actor);
       if (isMindBreak) AFLP.Kinks.onMindBreakEndCreatureFetish(item);  // pass full item — badge value read here
       if (isMindBreak) AFLP.Kinks.onMindBreakEndCumSlut(item);         // L7: long rest reminder
+    });
+
+    // Mind Break onset/end for flag-based systems (Daggerheart, 5e). There MB
+    // lives in the aflpConditions flag, so no createItem/deleteItem hook fires;
+    // watch the flag transition and run the identical onset/end automation. PF2e
+    // keeps MB as a condition item and never writes it to this flag, so the two
+    // paths are mutually exclusive and never double-fire. preUpdateActor captures
+    // the pre-change MB value (the actor already reflects the new value by the
+    // time updateActor runs).
+    Hooks.on("preUpdateActor", (actor, changes) => {
+      if (!game.user.isGM || !actor) return;
+      const w = foundry.utils.getProperty(changes, `flags.${AFLP.FLAG_SCOPE}`);
+      if (w && ("aflpConditions" in w)) {
+        AFLP.Kinks._mbPrevByActor.set(actor.id, AFLP.Kinks._mbFlagValue(actor));
+      }
+    });
+    Hooks.on("updateActor", async (actor) => {
+      if (!game.user.isGM || !actor) return;
+      if (!AFLP.Kinks._mbPrevByActor.has(actor.id)) return;
+      const prevVal = AFLP.Kinks._mbPrevByActor.get(actor.id);
+      AFLP.Kinks._mbPrevByActor.delete(actor.id);
+      const newVal = AFLP.Kinks._mbFlagValue(actor);
+      if (newVal === prevVal) return;
+
+      if (prevVal === 0 && newVal > 0) {
+        AFLP.Kinks.onMindBreakGainedPurity(actor);
+        if (newVal === 1) await AFLP.Kinks._promptMBCreatureType(actor);
+      } else if (prevVal > 0 && newVal === 0) {
+        // Shim carries the last-known badge value the end handlers read off `item`.
+        const shim = { actor, system: { badge: { value: prevVal } } };
+        await AFLP.Kinks.onMindBreakEndPurity(actor);
+        await AFLP.Kinks.onMindBreakEndCreatureFetish(shim);
+        await AFLP.Kinks.onMindBreakEndCumSlut(shim);
+      }
     });
 
     // Party Animal: +1 Horny (max 3) when a drug affliction stage advances
@@ -278,10 +297,28 @@ AFLP.Kinks = {
 
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
 
+    // DH-native: cumming as an Edge Master is high-risk/high-reward. The blocked
+    // afterglow becomes withdrawal (1 Stress + a disadvantage token), while the
+    // Edge Master's own afterglow grants Hope.
+    const emStress = await AFLP.system.markStress(liveActor, 1);
+    if (emStress != null) {
+      const tok = await AFLP.system.markSpiralToken(liveActor, 1);
+      const hope = await AFLP.system.gainHope(liveActor, 1);
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card">
+          <p><strong>${liveActor.name}</strong>'s Edge Master climax: withdrawal marks <strong>1 Stress</strong> and a <strong>disadvantage token</strong> (Defeat ${tok}); the master's afterglow grants <strong>1 Hope</strong>${hope != null ? ` (now ${hope})` : ""}.</p>
+          <p><em>Satisfaction breeds weakness... and power.</em></p>
+        </div>`,
+        speaker: { alias: "AFLP" },
+      });
+      console.log(`AFLP | ${actor.name} Edge Master (DH): +1 Stress, +1 Defeat token, +1 Hope`);
+      return true;
+    }
+
     // Remove Afterglow if it was applied
     const afterglow = liveActor.items?.find(c =>
       c.slug === "afterglow" ||
-      c.sourceId?.includes(AFLP.conditions?.["afterglow"]?.uuid ?? "NOMATCH")
+      c.sourceId?.includes(AFLP.system.contentUuid("afterglow") ?? "NOMATCH")
     );
     if (afterglow) {
       await afterglow.delete().catch(() => {});
@@ -296,7 +333,7 @@ AFLP.Kinks = {
           await existing.update({ "system.badge.value": 2 });
         }
       } else {
-        await liveActor.increaseCondition("sickened");
+        await AFLP.system.applyNativeCondition(liveActor, "sickened");
         const sickened = liveActor.items?.find(c => c.slug === "sickened");
         if (sickened) {
           const val = sickened.system?.badge?.value ?? sickened.system?.value?.value ?? 1;
@@ -315,14 +352,10 @@ AFLP.Kinks = {
 
     // Apply Edge Master's Afterglow effect item (level-scaled bonus to attacks/saves/skills/perception)
     const emAfterglowUUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.2ptIXXAZQMESJuuZ";
-    const emAfterglowDoc  = await fromUuid(emAfterglowUUID);
-    if (emAfterglowDoc) {
-      const emEffect = emAfterglowDoc.toObject();
-      emEffect.system = foundry.utils.mergeObject(emEffect.system ?? {}, {
-        level: { value: liveActor.level ?? 1 }
-      });
-      await liveActor.createEmbeddedDocuments("Item", [emEffect], { noHook: true });
-    }
+    await AFLP.system.applyEffect(liveActor, emAfterglowUUID, {
+      noHook: true,
+      systemMerge: { level: { value: liveActor.level ?? 1 } },
+    });
 
     console.log(`AFLP | ${actor.name} Edge Master: Sickened 2 applied instead of Afterglow`);
     return true;
@@ -336,16 +369,24 @@ AFLP.Kinks = {
 
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
 
-    const isSubmitting = liveActor.items?.some(c =>
-      c.slug === "submitting" ||
-      c.sourceId?.includes(AFLP.conditions?.["submitting"]?.uuid ?? "NOMATCH")
-    );
+    const isSubmitting = AFLP.cond.has(liveActor, "submitting", tokenId);
     if (!isSubmitting) return;
+
+    // DH-native: non-consensual orgasm marks 1 Stress + a disadvantage token.
+    const purStress = await AFLP.system.markStress(liveActor, 1);
+    if (purStress != null) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong>'s Purity recoils: a non-consensual climax marks <strong>1 Stress</strong>. No Defeat - their Defeat only comes from failing a resist with Fear.</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+      console.log(`AFLP | ${actor.name} Purity (DH): +1 Stress on climax (no Defeat)`);
+      return;
+    }
 
     if (typeof liveActor.increaseCondition === "function") {
       const existing = liveActor.items?.find(c => c.slug === "sickened");
       if (!existing) {
-        await liveActor.increaseCondition("sickened");
+        await AFLP.system.applyNativeCondition(liveActor, "sickened");
       }
     }
 
@@ -368,8 +409,17 @@ AFLP.Kinks = {
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
 
     const bsAfterglowUUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.PYSvYSzceLKvqwvb";
-    const bsAfterglowDoc  = await fromUuid(bsAfterglowUUID);
-    if (!bsAfterglowDoc) return;
+
+    // DH-native: afterglow maps to Hope.
+    const dhHope = await AFLP.system.gainHope(liveActor, 1);
+    if (dhHope != null) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Brood Sow afterglow: gains <strong>1 Hope</strong> (now ${dhHope}).</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+      console.log(`AFLP | ${actor.name} Brood Sow (DH): +1 Hope (afterglow)`);
+      return;
+    }
 
     // Remove any existing Brood Sow's Afterglow before applying fresh
     const existing = liveActor.items?.find(i =>
@@ -377,11 +427,10 @@ AFLP.Kinks = {
     );
     if (existing) await existing.delete().catch(() => {});
 
-    const effect = bsAfterglowDoc.toObject();
-    effect.system = foundry.utils.mergeObject(effect.system ?? {}, {
-      level: { value: liveActor.level ?? 1 }
+    await AFLP.system.applyEffect(liveActor, bsAfterglowUUID, {
+      noHook: true,
+      systemMerge: { level: { value: liveActor.level ?? 1 } },
     });
-    await liveActor.createEmbeddedDocuments("Item", [effect], { noHook: true });
 
     await ChatMessage.create({
       content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Brood Sow kink: <strong>Brood Sow's Afterglow</strong> applied.</p></div>`,
@@ -395,20 +444,18 @@ AFLP.Kinks = {
   // Exposed (Nude) always counts as 2. Regular Exposed uses badge value.
   // -----------------------------------------------
   _getEffectiveExposedLevel(actor) {
-    const EXPNUDE_UUID = AFLP.conditions?.["exposed-nude"]?.uuid ?? "";
-    const EXP_UUID     = AFLP.conditions?.["exposed"]?.uuid ?? "";
+    // DH: Exposed maps to the native Vulnerable condition (binary, no levels).
+    if (AFLP.system?.id === "daggerheart") {
+      const a = actor?.getWorldActor?.() ?? actor;
+      const vuln = a?.statuses?.has?.("vulnerable")
+        || AFLP.system.hasCondition?.(a, "vulnerable")
+        || AFLP.cond.has(a, "vulnerable");
+      return vuln ? 1 : 0;
+    }
     // Exposed (Nude) is always level 2
-    const hasNude = actor.items?.some(i =>
-      i.slug === "exposed-nude" ||
-      (i.flags?.core?.sourceId ?? i.sourceId) === EXPNUDE_UUID
-    );
-    if (hasNude) return 2;
-    // Regular Exposed — read badge value
-    const expItem = actor.items?.find(i =>
-      i.slug === "exposed" ||
-      (i.flags?.core?.sourceId ?? i.sourceId) === EXP_UUID
-    );
-    return expItem?.system?.badge?.value ?? 0;
+    if (AFLP.cond.has(actor, "exposed-nude")) return 2;
+    // Regular Exposed — read badge/flag value
+    return AFLP.cond.value(actor, "exposed");
   },
 
   // -----------------------------------------------
@@ -432,7 +479,7 @@ AFLP.Kinks = {
     await AFLP.ensureCoreFlags(actor);
     await AFLP_Arousal.increment(actor, gain, `Skyclad Engine (Exposed ${exposedLevel})`, tokenId);
     await ChatMessage.create({
-      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Skyclad Engine: +${gain} Arousal (Exposed ${exposedLevel}, ${observerCount} observer${observerCount !== 1 ? "s" : ""}).</p></div>`,
+      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Skyclad Engine: ${AFLP.system.deltaText(gain)} (Exposed ${exposedLevel}, ${observerCount} observer${observerCount !== 1 ? "s" : ""}).</p></div>`,
       speaker: { alias: "AFLP" },
     });
   },
@@ -488,6 +535,17 @@ AFLP.Kinks = {
   async applyBroodSowEndurance(actor) {
     if (!AFLP.actorHasKink(actor, "brood-sow")) return;
 
+    // DH-native: the brood sow's stamina manifests as relief - clear 1 Stress.
+    const dhEndStress = await AFLP.system.clearStress(actor, 1);
+    if (dhEndStress != null) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong>'s Brood Sow endurance: clears <strong>1 Stress</strong> (now ${dhEndStress}).</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+      console.log(`AFLP | ${actor.name} Brood Sow (DH): cleared 1 Stress (endurance)`);
+      return;
+    }
+
     const bsEnduranceUUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.hImH05z16v9vh9Ob";
 
     // Don't stack — only apply if not already present
@@ -496,14 +554,10 @@ AFLP.Kinks = {
     );
     if (existing) return;
 
-    const bsEnduranceDoc = await fromUuid(bsEnduranceUUID);
-    if (!bsEnduranceDoc) return;
-
-    const effect = bsEnduranceDoc.toObject();
-    effect.system = foundry.utils.mergeObject(effect.system ?? {}, {
-      level: { value: actor.level ?? 1 }
+    await AFLP.system.applyEffect(actor, bsEnduranceUUID, {
+      noHook: true,
+      systemMerge: { level: { value: actor.level ?? 1 } },
     });
-    await actor.createEmbeddedDocuments("Item", [effect], { noHook: true });
     console.log(`AFLP | ${actor.name} Brood Sow: Endurance applied`);
   },
 
@@ -682,7 +736,7 @@ AFLP.Kinks = {
       return false;
     }
 
-    const isNPC = actor.type === "npc" || actor.type === "hazard";
+    const isNPC = AFLP.system.isNPC(actor);
     if (isNPC && !AFLP.Settings.edgeIncludeNpc) return false;
     // At Lewd 4 (edgeSkipDialog=true) monsters never Edge — auto-rolling edge on
     // monsters creates an unfun denial loop. Monsters at Lewd 3 (edgeSkipDialog=false)
@@ -743,32 +797,20 @@ AFLP.Kinks = {
   async _rollEdge(actor, liveActor, tokenId, actorName, actorLevel, dcModifier = 0) {
     const dc = AFLP.Kinks._normalDC(actorLevel) + dcModifier;
 
-    // Use PF2e's built-in save roll
+    // Resist roll via the active system adapter. PF2e rolls a Fortitude save
+    // (posting its own card); other systems map "fortitude" to their own
+    // resist mechanic. The d20 fallback flavor is preserved for any system
+    // whose native roll is unavailable.
     const rollOptions = ["action:edge"];
-    let roll;
-    try {
-      // PF2e system: actor.saves.fortitude.roll({ ...options })
-      roll = await actor.saves?.fortitude?.roll({
-        dc: { value: dc },
-        rollMode: "publicroll",
-        extraRollOptions: rollOptions,
-      });
-    } catch (e) {
-      console.warn("AFLP | Edge: Fortitude roll failed, defaulting to manual.", e);
-      roll = null;
-    }
-
-    if (!roll) {
-      // Fallback: plain d20 roll posted to chat
-      roll = await new Roll("1d20").evaluate();
-      await roll.toMessage({
-        speaker: ChatMessage.getSpeaker({ actor }),
-        flavor:  `<strong>${actorName}</strong> attempts to Edge (Fortitude DC ${dc})`,
-      });
-    }
+    const flavor = `<strong>${actorName}</strong> attempts to Edge (Fortitude DC ${dc})`;
+    const { total } = await AFLP.system.rollResist(actor, {
+      dc,
+      kind: "fortitude",
+      flavor,
+      options: rollOptions,
+    });
 
     // Determine outcome from roll total vs DC
-    const total = roll.total ?? roll._total ?? 0;
     const succeeded = total >= dc;
     const crit = total >= dc + 10;
 
@@ -857,7 +899,7 @@ AFLP.Kinks = {
     // Find the Bimbo kink item on the actor and flip its RollOption toggle
     const bimboItem = liveActor.items?.find(i =>
       i.slug === "bimbo" ||
-      (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.kinks["bimbo"]?.uuid
+      (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.system.contentUuid("bimbo")
     );
     if (!bimboItem) return;
     const rules = foundry.utils.deepClone(bimboItem.system?.rules ?? []);
@@ -887,18 +929,14 @@ AFLP.Kinks = {
           const atkActor = canvas?.tokens?.get(atk.id)?.actor
                         ?? game.actors?.get(atk.actorId ?? atk.id);
           if (!atkActor) continue;
-          const isDom = atkActor.items?.some(i =>
-            i.slug === "dominating" ||
-            (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.conditions["dominating"]?.uuid
-          );
-          if (isDom) domCount++;
+          if (AFLP.cond.has(atkActor, "dominating")) domCount++;
         }
       }
     }
 
     const gangItem = liveActor.items?.find(i =>
       i.slug === "gangslut" ||
-      (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.kinks["gangslut"]?.uuid
+      (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.system.contentUuid("gangslut")
     );
     if (!gangItem) return;
     const rules = foundry.utils.deepClone(gangItem.system?.rules ?? []);
@@ -925,19 +963,13 @@ AFLP.Kinks = {
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
 
     // Is this actor currently Submitting?
-    const subUUID = AFLP.conditions?.["submitting"]?.uuid ?? "";
-    const isSubmitting = liveActor.items?.some(i =>
-      i.slug === "submitting" || (i.flags?.core?.sourceId ?? i.sourceId) === subUUID
-    );
-    if (!isSubmitting) return;
+    const subUUID = AFLP.system.contentUuid("submitting") ?? "";
+    if (!AFLP.cond.has(liveActor, "submitting")) return;
 
     // Find any token on scene with cock-pacifying: true that is Dominating
-    const domUUID = AFLP.conditions?.["dominating"]?.uuid ?? "";
     const pacifyingSource = canvas?.tokens?.placeables?.find(t => {
       if (!t.actor || t.actor.id === liveActor.id) return false;
-      const isDominating = t.actor.items?.some(i =>
-        i.slug === "dominating" || (i.flags?.core?.sourceId ?? i.sourceId) === domUUID
-      );
+      const isDominating = AFLP.cond.has(t.actor, "dominating");
       if (!isDominating) return false;
       const gt = t.actor.getFlag(FLAG, "genitalTypes") ?? {};
       return gt["cock-pacifying"] === true;
@@ -953,7 +985,7 @@ AFLP.Kinks = {
     }
 
     await ChatMessage.create({
-      content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong> is @UUID[${subUUID}]{Submitting} to <strong>${pacifyingSource.name}</strong>'s pacifying cock. ${liveActor.name} is @UUID[${AFLP.conditions?.["horny"]?.uuid}]{Horny 2} (minimum) and cannot make hostile actions or attempt to Escape.</p></div>`,
+      content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong> is @UUID[${subUUID}]{Submitting} to <strong>${pacifyingSource.name}</strong>'s pacifying cock. ${liveActor.name} is @UUID[${AFLP.system.contentUuid("horny")}]{Horny 2} (minimum) and cannot make hostile actions or attempt to Escape.</p></div>`,
       speaker: { alias: "AFLP" },
     });
   },
@@ -982,20 +1014,22 @@ AFLP.Kinks = {
       return dist <= 30;
     });
 
-    const hornyUUID = AFLP.conditions?.["horny"]?.uuid ?? "";
+    const hornyUUID = AFLP.system.contentUuid("horny") ?? "";
     for (const t of nearby) {
       const liveActor = t.actor;
       const existingHorny = liveActor.items?.find(i =>
         i.slug === "horny" || (i.flags?.core?.sourceId ?? i.sourceId) === hornyUUID
       );
-      const currentLevel = existingHorny?.system?.badge?.value ?? 0;
+      const currentLevel = Math.max(
+        existingHorny?.system?.badge?.value ?? 0,
+        AFLP.cond?.value?.(liveActor, "horny") ?? 0
+      );
       if (currentLevel < 1) {
-        // Apply Horny 1 via condition item
-        const hornyItem = await fromUuid(hornyUUID).catch(() => null);
-        if (hornyItem) {
-          await liveActor.createEmbeddedDocuments("Item", [
-            foundry.utils.mergeObject(hornyItem.toObject(), {"system.badge.value": 1})
-          ]);
+        // DH stores Horny as a flag condition; PF2e as an item. Route per system.
+        if (AFLP.system.id === "daggerheart") {
+          await AFLP.system.applyCondition(liveActor, "horny", hornyUUID, 1);
+        } else {
+          await AFLP.system.applyEffect(liveActor, hornyUUID, { badgeValue: 1 });
         }
       }
     }
@@ -1003,6 +1037,247 @@ AFLP.Kinks = {
     await ChatMessage.create({
       content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Paizuri Aura is active (${cumflation.paizuri} ml). All creatures within 30 feet gain @UUID[${hornyUUID}]{Horny 1}.</p></div>`,
       speaker: { alias: "AFLP" },
+    });
+  },
+
+  // -----------------------------------------------
+  // Bimbomancy domain: Bimbo/Bull path toggle + My Body is a Weapon.
+  // -----------------------------------------------
+  _bimboPathLabel(path) { return path === "bull" ? "Bull" : "Bimbo"; },
+
+  // The Bimbomancer feature grants vault access to the Bimbomancy domain.
+  // DH derives a character's domains from their class, so we wrap the character
+  // model's `domains` getter to append "bimbomancy" whenever the actor carries
+  // the bimbomancerDedication flag. libWrapper if present; safe monkeypatch else.
+  _registerBimbomancyDomainGrant() {
+    if (this._bimboDomainWrapped || AFLP.system?.id !== "daggerheart") return;
+    const SCOPE = AFLP.FLAG_SCOPE;
+    const ARCHETYPE_DOMAINS = {
+      bimbomancerDedication: "bimbomancy",
+      skycladIdolDedication: "skyclad",
+    };
+    const addBimbo = (base, model) => {
+      try {
+        const a = model?.parent;
+        if (!a?.getFlag) return base;
+        let arr = null;
+        for (const [flag, domain] of Object.entries(ARCHETYPE_DOMAINS)) {
+          if (a.getFlag(SCOPE, flag)) {
+            arr = arr ?? (Array.isArray(base) ? base.slice() : [...(base || [])]);
+            if (!arr.includes(domain)) arr.push(domain);
+          }
+        }
+        return arr ?? base;
+      } catch (e) { /* never break data prep */ }
+      return base;
+    };
+    const doWrap = () => {
+      if (this._bimboDomainWrapped) return;
+      const proto = CONFIG.Actor?.dataModels?.character?.prototype;
+      if (!proto) return;
+      if (game.modules.get("lib-wrapper")?.active) {
+        libWrapper.register("ardisfoxxs-lewd-pf2e",
+          "CONFIG.Actor.dataModels.character.prototype.domains",
+          function (wrapped, ...args) { return addBimbo(wrapped(...args), this); },
+          "WRAPPER");
+        this._bimboDomainWrapped = true;
+      } else {
+        const desc = Object.getOwnPropertyDescriptor(proto, "domains");
+        if (desc?.get) {
+          const orig = desc.get;
+          Object.defineProperty(proto, "domains", {
+            configurable: true, enumerable: desc.enumerable,
+            get() { return addBimbo(orig.call(this), this); },
+          });
+          this._bimboDomainWrapped = true;
+        }
+      }
+
+      // Loadout-add gate. The domainCard model's _preCreate returns false to
+      // cancel any card whose domain is not one of the character's CLASS domains.
+      // That blocks cards from an archetype-granted domain even though the vault
+      // browser lists them (the browser reads the wrapped `domains` getter; the
+      // gate reads the class). Wrap _preCreate so a card whose domain is
+      // archetype-granted is allowed through when the actor holds the matching
+      // dedication flag. Without this, players can browse the archetype cards but
+      // cannot add them to a loadout. Proven live before shipping.
+      const cardProto = CONFIG.Item?.dataModels?.domainCard?.prototype;
+      if (cardProto && !this._bimboCardPreCreateWrapped) {
+        if (game.modules.get("lib-wrapper")?.active) {
+          libWrapper.register("ardisfoxxs-lewd-pf2e",
+            "CONFIG.Item.dataModels.domainCard.prototype._preCreate",
+            async function (wrapped, data, options, user) {
+              const r = await wrapped(data, options, user);
+              if (r === false) {
+                try {
+                  const domain = data?.system?.domain ?? this?.domain ?? this?.parent?.system?.domain;
+                  const actor  = options?.parent ?? this?.parent?.parent ?? this?.parent?.actor;
+                  if (actor && domain) {
+                    for (const [flag, dom] of Object.entries(ARCHETYPE_DOMAINS)) {
+                      if (dom === domain && actor.getFlag?.(SCOPE, flag)) return; // allow
+                    }
+                  }
+                } catch (e) { /* never break creation */ }
+              }
+              return r;
+            },
+            "WRAPPER");
+          this._bimboCardPreCreateWrapped = true;
+        } else {
+          const origPC = cardProto._preCreate;
+          cardProto._preCreate = async function (data, options, user) {
+            const r = await origPC.call(this, data, options, user);
+            if (r === false) {
+              try {
+                const domain = data?.system?.domain ?? this?.domain ?? this?.parent?.system?.domain;
+                const actor  = options?.parent ?? this?.parent?.parent ?? this?.parent?.actor;
+                if (actor && domain) {
+                  for (const [flag, dom] of Object.entries(ARCHETYPE_DOMAINS)) {
+                    if (dom === domain && actor.getFlag?.(SCOPE, flag)) return; // allow
+                  }
+                }
+              } catch (e) { /* never break creation */ }
+            }
+            return r;
+          };
+          this._bimboCardPreCreateWrapped = true;
+        }
+      }
+
+      if (this._bimboDomainWrapped) console.log("AFLP | Bimbomancy domain grant wired (domains getter + loadout gate).");
+    };
+    if (CONFIG.Actor?.dataModels?.character?.prototype) doWrap();
+    else Hooks.once("ready", doWrap);
+  },
+
+  async _postBimbomancerPathCard(actor, path = "bimbo") {
+    const cur = this._bimboPathLabel(actor.getFlag(AFLP.FLAG_SCOPE, "bimbomancerPath") || path);
+    const aid = actor.id;
+    await ChatMessage.create({
+      speaker: { alias: "AFLP" },
+      content: `<div class="aflp-chat-card">
+        <p><strong>${actor.name}</strong> is a <strong>Bimbomancer</strong>. Current path: <strong>${cur}</strong>.</p>
+        <p>Choose a path - it shapes every Bimbomancy transformation:</p>
+        <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+          <button type="button" class="aflp-bimbo-path" data-actor="${aid}" data-path="bimbo">Bimbo (impose Bimbofied)</button>
+          <button type="button" class="aflp-bimbo-path" data-actor="${aid}" data-path="bull">Bull (impose Bullified)</button>
+        </div>
+      </div>`,
+    });
+  },
+
+  async setBimbomancerPath(actor, path) {
+    if (!actor) return;
+    const p = (path === "bull") ? "bull" : "bimbo";
+    await actor.setFlag(AFLP.FLAG_SCOPE, "bimbomancerPath", p);
+    await ChatMessage.create({
+      speaker: { alias: "AFLP" },
+      content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong> takes the <strong>${this._bimboPathLabel(p)}</strong> path. Transformations now impose <strong>${p === "bull" ? "Bullified" : "Bimbofied"}</strong>.</p></div>`,
+    });
+    console.log(`AFLP | Bimbomancer path set to ${p} on ${actor.name}`);
+  },
+
+  async _postSkycladPathCard(actor, path = "nudist") {
+    const cur = path === "stripper" ? "Stripper" : "Nudist";
+    const aid = actor.id;
+    await ChatMessage.create({
+      speaker: { alias: "AFLP" },
+      content: `<div class="aflp-chat-card">
+        <p><strong>${actor.name}</strong> is a <strong>Skyclad Idol</strong>. Current path: <strong>${cur}</strong>.</p>
+        <p>Choose a path - it shapes your Skyclad benefits:</p>
+        <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+          <button type="button" class="aflp-skyclad-path" data-actor="${aid}" data-path="nudist">Nudist (defensive)</button>
+          <button type="button" class="aflp-skyclad-path" data-actor="${aid}" data-path="stripper">Stripper (reactive)</button>
+        </div>
+      </div>`,
+    });
+  },
+
+  async setSkycladPath(actor, path) {
+    if (!actor) return;
+    const p = (path === "stripper") ? "stripper" : "nudist";
+    await actor.setFlag(AFLP.FLAG_SCOPE, "skycladPath", p);
+    await ChatMessage.create({
+      speaker: { alias: "AFLP" },
+      content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong> takes the <strong>${p === "stripper" ? "Stripper" : "Nudist"}</strong> path.</p></div>`,
+    });
+    console.log(`AFLP | Skyclad path set to ${p} on ${actor.name}`);
+  },
+
+  // My Body is a Weapon: impose the actor's path condition on each targeted token.
+  async bimbomancyMyBody(actor, targets = null) {
+    if (!actor) return;
+    const path = actor.getFlag(AFLP.FLAG_SCOPE, "bimbomancerPath") || "bimbo";
+    const tks = targets ?? Array.from(game.user?.targets ?? []);
+    if (!tks.length) { ui.notifications?.warn("AFLR | Target a token first (My Body is a Weapon)."); return; }
+    const apply = path === "bull" ? "setBullified" : "setBimbofied";
+    const cond  = path === "bull" ? "bullified" : "bimbofied";
+    const label = path === "bull" ? "Bullified" : "Bimbofied";
+    for (const t of tks) {
+      const tgt = t.actor ?? t;
+      if (!tgt) continue;
+      const cur = AFLP.cond?.value?.(tgt, cond) ?? 0;
+      const n = await AFLP.system[apply]?.(tgt, cur + 1);
+      await ChatMessage.create({
+        speaker: { alias: "AFLP" },
+        content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong> presses in - <strong>${tgt.name}</strong> takes <strong>${label} ${n ?? cur + 1}/3</strong>.</p></div>`,
+      });
+    }
+  },
+
+  // When the "My Body is a Weapon" domain card is posted to chat by a
+  // Bimbomancer, inject an Apply button (delegated handler does the work).
+  _maybeInjectMyBodyButton(msg, root) {
+    try {
+      if (!root?.querySelector || root.querySelector(".aflp-mybody-apply")) return;
+      if (!/My Body is a Weapon/i.test(root.textContent || "")) return;
+      const aid = msg?.speaker?.actor;
+      const actor = aid ? game.actors?.get(aid) : null;
+      if (!actor?.getFlag?.(AFLP.FLAG_SCOPE, "bimbomancerDedication")) return;
+      const path = actor.getFlag(AFLP.FLAG_SCOPE, "bimbomancerPath") || "bimbo";
+      const label = path === "bull" ? "Bullified" : "Bimbofied";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "aflp-mybody-apply";
+      btn.dataset.actor = actor.id;
+      btn.textContent = `Apply ${label} to target`;
+      btn.style.marginTop = "4px";
+      (root.querySelector(".message-content") || root).appendChild(btn);
+    } catch (e) { /* never break chat render */ }
+  },
+
+  // Delegated click handling for Bimbomancy chat buttons (bound once in register()).
+  _bindBimboChatButtons() {
+    if (this._bimboChatBound) return;
+    this._bimboChatBound = true;
+    const inject = (m, h) => {
+      const root = h?.jquery ? h[0] : (h instanceof HTMLElement ? h : h?.[0]);
+      AFLP.Kinks._maybeInjectMyBodyButton(m, root);
+    };
+    Hooks.on("renderChatMessageHTML", inject);
+    Hooks.on("renderChatMessage", inject); // fallback for older cores
+    document.addEventListener("click", async (e) => {
+      const pathBtn = e.target?.closest?.(".aflp-bimbo-path");
+      if (pathBtn) {
+        e.preventDefault();
+        const a = game.actors?.get(pathBtn.dataset.actor);
+        if (a) await AFLP.Kinks.setBimbomancerPath(a, pathBtn.dataset.path);
+        return;
+      }
+      const skyBtn = e.target?.closest?.(".aflp-skyclad-path");
+      if (skyBtn) {
+        e.preventDefault();
+        const a = game.actors?.get(skyBtn.dataset.actor);
+        if (a) await AFLP.Kinks.setSkycladPath(a, skyBtn.dataset.path);
+        return;
+      }
+      const mbBtn = e.target?.closest?.(".aflp-mybody-apply");
+      if (mbBtn) {
+        e.preventDefault();
+        const a = game.actors?.get(mbBtn.dataset.actor);
+        if (a) await AFLP.Kinks.bimbomancyMyBody(a);
+        return;
+      }
     });
   },
 
@@ -1023,7 +1298,32 @@ AFLP.Kinks = {
 
     const stupLevel = itemData?.system?.badge?.value ?? 1;
     // Get current bimbofied item
-    const bimbofiedUUID = AFLP.conditions?.["bimbofied"]?.uuid ?? "";
+    const bimbofiedUUID = AFLP.system.contentUuid("bimbofied") ?? "";
+
+    // DH-native: route by path. Bimbo deepens into Bimbofied; Bull hardens into Bullified.
+    const path = worldActor.getFlag(FLAG, "bimbomancerPath") || "bimbo";
+    if (AFLP.system?.id === "daggerheart" && path === "bull") {
+      const cur = AFLP.cond?.value?.(worldActor, "bullified") ?? 0;
+      const dhBull = await AFLP.system.setBullified(worldActor, cur + stupLevel);
+      if (dhBull != null) {
+        await ChatMessage.create({
+          content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Bimbomancer (Bull path) turns Stupefied ${stupLevel} into raw dominance - <strong>Bullified ${dhBull}/3</strong>.</p></div>`,
+          speaker: { alias: "AFLP" },
+        });
+        return true;
+      }
+    }
+
+    // Bimbo path (and PF2e): Bimbofied is a valued token condition (cap 3), not an item.
+    const dhBimbo = await AFLP.system.setBimbofied(worldActor, (AFLP.cond?.value?.(worldActor, "bimbofied") ?? 0) + stupLevel);
+    if (dhBimbo != null) {
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Bimbomancer Dedication converts Stupefied ${stupLevel} into <strong>Bimbofied ${dhBimbo}/3</strong> (token track; replaces the Defeat spiral while active).</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+      return true;
+    }
+
     const existing = worldActor.items?.find(i =>
       i.slug === "bimbofied" || (i.flags?.core?.sourceId ?? i.sourceId) === bimbofiedUUID
     );
@@ -1033,12 +1333,7 @@ AFLP.Kinks = {
     if (existing) {
       await existing.update({"system.badge.value": newLevel});
     } else {
-      const bimbofiedItem = await fromUuid(bimbofiedUUID).catch(() => null);
-      if (bimbofiedItem) {
-        await worldActor.createEmbeddedDocuments("Item", [
-          foundry.utils.mergeObject(bimbofiedItem.toObject(), {"system.badge.value": newLevel})
-        ]);
-      }
+      await AFLP.system.applyEffect(worldActor, bimbofiedUUID, { badgeValue: newLevel });
     }
 
     await ChatMessage.create({
@@ -1063,7 +1358,7 @@ AFLP.Kinks = {
     const fetchTypes = fetchTypesRaw.split(",").map(t => t.trim()).filter(Boolean);
     if (fetchTypes.length === 0) return;
     // CF arousal gain = the value of the Creature Fetish condition on the actor, not kink level
-    const cfCondUuid = AFLP.kinks?.["creature-fetish"]?.uuid;
+    const cfCondUuid = AFLP.system.contentUuid("creature-fetish");
     const liveActor = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
     const cfCond = liveActor.items?.find(i =>
       i.slug === "creature-fetish" ||
@@ -1112,10 +1407,8 @@ AFLP.Kinks = {
     for (const p of [...(sceneData.attackers ?? []), { actorId: sceneData.targetActorId }]) {
       const pActor = game.actors?.get(p.actorId ?? p.id);
       if (!pActor || pActor.id === actor.id) continue;
-      const domUUID = AFLP.conditions["dominating"]?.uuid;
-      const subUUID = AFLP.conditions["submitting"]?.uuid;
-      const isDom = pActor.items?.some(i => i.slug === "dominating"  || (i.flags?.core?.sourceId ?? i.sourceId) === domUUID);
-      const isSub = pActor.items?.some(i => i.slug === "submitting"  || (i.flags?.core?.sourceId ?? i.sourceId) === subUUID);
+      const isDom = AFLP.cond.has(pActor, "dominating");
+      const isSub = AFLP.cond.has(pActor, "submitting");
       if (isDom || isSub) affected.push(pActor);
     }
     if (!affected.length) return;
@@ -1124,7 +1417,7 @@ AFLP.Kinks = {
       await AFLP_Arousal.increment(pActor, 1, `Aphrodisiac Junkie L2 (${actor.name})`, null);
     }
     await ChatMessage.create({
-      content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong>'s aphrodisiac sweat affects ${affected.map(a => a.name).join(", ")} (+1 Arousal each).</p></div>`,
+      content: `<div class="aflp-chat-card"><p><strong>${actor.name}</strong>'s aphrodisiac sweat affects ${affected.map(a => a.name).join(", ")} (${AFLP.system.deltaText(1)} each).</p></div>`,
       speaker: { alias: "AFLP" },
     });
   },
@@ -1147,14 +1440,8 @@ AFLP.Kinks = {
     const arousal = worldActor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults;
     const current = arousal.current ?? 0;
 
-    const isDominating = worldActor.items?.some(c =>
-      c.slug === "dominating" ||
-      (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.["dominating"]?.uuid ?? "NOMATCH")
-    ) ?? false;
-    const isSubmitting = worldActor.items?.some(c =>
-      c.slug === "submitting" ||
-      (c.flags?.core?.sourceId ?? c.sourceId) === (AFLP.conditions?.["submitting"]?.uuid ?? "NOMATCH")
-    ) ?? false;
+    const isDominating = AFLP.cond.has(worldActor, "dominating");
+    const isSubmitting = AFLP.cond.has(worldActor, "submitting");
 
     if (!isDominating && !isSubmitting) {
       // Still snapshot for next turn
@@ -1200,15 +1487,13 @@ AFLP.Kinks = {
     const sceneData = AFLP.Settings.hsceneEnabled ? AFLP.HScene._getScene?.(actor.id) : null;
     if (!sceneData) return;
     const stunned = [];
-    const domUUID = AFLP.conditions["dominating"]?.uuid;
-    const subUUID = AFLP.conditions["submitting"]?.uuid;
     for (const p of [...(sceneData.attackers ?? []), { actorId: sceneData.targetActorId }]) {
       const pActor = game.actors?.get(p.actorId ?? p.id);
       if (!pActor || pActor.id === actor.id) continue;
-      const isDom = pActor.items?.some(i => i.slug === "dominating" || (i.flags?.core?.sourceId ?? i.sourceId) === domUUID);
-      const isSub = pActor.items?.some(i => i.slug === "submitting" || (i.flags?.core?.sourceId ?? i.sourceId) === subUUID);
+      const isDom = AFLP.cond.has(pActor, "dominating");
+      const isSub = AFLP.cond.has(pActor, "submitting");
       if (!isDom && !isSub) continue;
-      try { await pActor.increaseCondition("stunned", { value: 2 }); } catch { /* no-op */ }
+      await AFLP.system.applyNativeCondition(pActor, "stunned", 2);
       stunned.push(pActor.name);
     }
     if (stunned.length) {
@@ -1249,17 +1534,30 @@ AFLP.Kinks = {
     const FLAG = AFLP.FLAG_SCOPE;
     const worldActor = game.actors?.get(actor.id) ?? actor;
 
+    // Purity: a pure heart does not eroticise the ordeal - no Creature Fetish
+    // develops when their Mind Break ends.
+    if (AFLP.actorHasKink(actor, "purity")) {
+      await worldActor.unsetFlag(FLAG, "mbCreatureType").catch(() => {});
+      await ChatMessage.create({
+        content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Purity holds through the Mind Break - it ends leaving no Creature Fetish behind.</p></div>`,
+        speaker: { alias: "AFLP" },
+      });
+      return;
+    }
+
     // Creature type was stored when MB was first applied (onMindBreakGained).
     let fetchType = worldActor.getFlag(FLAG, "mbCreatureType") ?? "";
     await worldActor.unsetFlag(FLAG, "mbCreatureType").catch(() => {});
 
     // Fallback: current H-Scene attackers (covers edge cases where gain hook didn't fire)
     if (!fetchType) {
+      const isDH = AFLP.system?.id === "daggerheart";
       const CREATURE_TYPES = new Set(["aberration","animal","beast","celestial","construct","daemon","dragon","elemental","fey","fiend","fungus","giant","humanoid","monitor","ooze","petitioner","plant","spirit","undead"]);
       const hscene = AFLP.Settings.hsceneEnabled ? AFLP.HScene._getScene?.(actor.id) : null;
       for (const atk of hscene?.attackers ?? []) {
         const atkActor = game.actors?.get(atk.actorId);
         if (!atkActor) continue;
+        if (isDH) { fetchType = atkActor.name; break; }
         const traits = atkActor.system?.traits?.value ?? [];
         const match  = traits.find(t => CREATURE_TYPES.has(t)) ?? traits[0];
         if (match) { fetchType = match; break; }
@@ -1269,7 +1567,7 @@ AFLP.Kinks = {
     if (!fetchType) return; // No creature type to assign — nothing to do
 
     const CF_MAX = 6;
-    const cfKinkUUID = AFLP.kinks?.["creature-fetish"]?.uuid;
+    const cfKinkUUID = AFLP.system.contentUuid("creature-fetish");
 
     // Mark kink active and append creature type to comma-separated list in kinkNotes.
     // Don't overwrite existing types — accumulate them.
@@ -1283,45 +1581,130 @@ AFLP.Kinks = {
     sexual.kinkNotes["creature-fetish"] = existingTypes.join(", ");
     await worldActor.setFlag(FLAG, "sexual", sexual);
 
-    // Apply or update the Creature Fetish condition item
+    // Apply or update the Creature Fetish condition
     const liveActor = canvas?.tokens?.placeables?.find(t => t.actor?.id === actor.id)?.actor ?? worldActor;
-    const existingCF = liveActor.items?.find(i =>
-      i.slug === "creature-fetish" ||
-      (cfKinkUUID && (i.flags?.core?.sourceId ?? i.sourceId) === cfKinkUUID)
-    );
-    const currentCFLevel = existingCF?.system?.badge?.value ?? 0;
-    const newCFLevel = Math.min(CF_MAX, currentCFLevel + mbLevel);
-
-    if (existingCF) {
-      await existingCF.update({ "system.badge.value": newCFLevel });
-    } else if (cfKinkUUID) {
-      const cfTemplate = await fromUuid(cfKinkUUID).catch(() => null);
-      if (cfTemplate) {
-        await liveActor.createEmbeddedDocuments("Item", [
-          foundry.utils.mergeObject(cfTemplate.toObject(), {
-            "system.badge.value": newCFLevel,
-            "flags.core.sourceId": cfKinkUUID,
-          })
-        ]);
+    let cfDisplay;
+    if (AFLP.system.id === "daggerheart") {
+      // DH: creature-fetish is a binary flag (no token track) - the tracked-token
+      // set stays small (Bimbofied / Defeat / Horny only).
+      if (!AFLP.cond.has(liveActor, "creature-fetish")) {
+        await AFLP.system.applyCondition(liveActor, "creature-fetish", cfKinkUUID, 1);
       }
+      cfDisplay = "Creature Fetish";
+    } else {
+      const existingCF = liveActor.items?.find(i =>
+        i.slug === "creature-fetish" ||
+        (cfKinkUUID && (i.flags?.core?.sourceId ?? i.sourceId) === cfKinkUUID)
+      );
+      const currentCFLevel = existingCF?.system?.badge?.value ?? 0;
+      const newCFLevel = Math.min(CF_MAX, currentCFLevel + mbLevel);
+
+      if (existingCF) {
+        await existingCF.update({ "system.badge.value": newCFLevel });
+      } else if (cfKinkUUID) {
+        await AFLP.system.applyEffect(liveActor, cfKinkUUID, {
+          badgeValue: newCFLevel,
+          flagProps: { "flags.core.sourceId": cfKinkUUID },
+        });
+      }
+      cfDisplay = `Creature Fetish ${newCFLevel}`;
     }
 
     const typeLabel = existingTypes.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(", ");
     await ChatMessage.create({
-      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Mind Break ends. They gain <strong>Creature Fetish ${newCFLevel} (${typeLabel})</strong> from their ordeal.</p></div>`,
+      content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s Mind Break ends. They gain <strong>${cfDisplay} (${typeLabel})</strong> from their ordeal.</p></div>`,
       speaker: { alias: "AFLP" },
     });
-    console.log(`AFLP | ${worldActor.name}: Mind Break ended at level ${mbLevel}, Creature Fetish ${newCFLevel} (${typeLabel}) granted`);
+    console.log(`AFLP | ${worldActor.name}: Mind Break ended at level ${mbLevel}, ${cfDisplay} (${typeLabel}) granted`);
   },
 
   // Purity L3 — save CF level when Mind Break is gained; restore on removal.
   // -----------------------------------------------
+  // Session cache of the last-seen flag Mind Break value per actor id, written by
+  // preUpdateActor and consumed by updateActor to detect onset/end transitions on
+  // flag-based systems. Not persisted: each update cycle sets its own snapshot.
+  _mbPrevByActor: new Map(),
+  _mbFlagValue(actor) {
+    return Number(actor?.getFlag?.(AFLP.FLAG_SCOPE, "aflpConditions")?.["mind-break"] ?? 0);
+  },
+
+  // GM prompt to choose the creature type a broken actor will fetishize when Mind
+  // Break ends. Shared by the PF2e createItem hook and the flag onset handler.
+  // Skips if a type is already chosen.
+  async _promptMBCreatureType(actor) {
+    if (!actor || actor.getFlag(AFLP.FLAG_SCOPE, "mbCreatureType")) return;
+    const isDH = AFLP.system?.id === "daggerheart";
+    const CREATURE_TYPES = new Set(["aberration","animal","beast","celestial","construct","daemon","dragon","elemental","fey","fiend","fungus","giant","humanoid","monitor","ooze","petitioner","plant","spirit","undead"]);
+    // Gather the fetish options from scene attackers. PF2e uses creature TYPES
+    // (from traits); Daggerheart has no creature types, so it uses the NAME of
+    // the creature(s) that fucked the PC into Mind Break.
+    const hscene = AFLP.Settings.hsceneEnabled ? AFLP.HScene._getScene?.(actor.id) : null;
+    const available = [];
+    for (const atk of hscene?.attackers ?? []) {
+      const atkActor = game.actors?.get(atk.actorId);
+      if (!atkActor) continue;
+      if (isDH) {
+        if (atkActor.name && !available.includes(atkActor.name)) available.push(atkActor.name);
+      } else {
+        const traits = atkActor.system?.traits?.value ?? [];
+        for (const t of traits) {
+          if (CREATURE_TYPES.has(t) && !available.includes(t)) available.push(t);
+        }
+      }
+    }
+    const label = isDH ? "Creature" : "Creature type";
+
+    const chooseType = await new Promise(resolve => {
+      // DH: a free text field (creature names are arbitrary), pre-filled with the
+      // attacker name(s). PF2e: a dropdown of creature types.
+      let fieldHtml;
+      if (isDH) {
+        const def = available.join(", ");
+        fieldHtml = `<input id="aflp-mb-type" type="text" style="flex:1;" value="${def}" placeholder="e.g. Goblin, Owlbear"/>`;
+      } else {
+        const typeList = available.length ? available : [...CREATURE_TYPES].sort();
+        if (typeList.length === 1) { resolve(typeList[0]); return; }
+        const optionsHtml = typeList.map(t =>
+          `<option value="${t}">${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
+        ).join("");
+        fieldHtml = `<select id="aflp-mb-type" style="flex:1;">${optionsHtml}</select>`;
+      }
+      foundry.applications.api.DialogV2.wait({
+        window: { title: "Mind Break — Creature Fetish" },
+        content: `
+          <p style="margin-bottom:8px;">
+            <strong>${actor.name}</strong> has broken. Choose the ${isDH ? "creature" : "creature type"}
+            they will develop a fetish for when Mind Break ends.
+          </p>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <label style="flex-shrink:0;">${label}:</label>
+            ${fieldHtml}
+          </div>`,
+        buttons: [
+          {
+            action: "ok",
+            label: "Confirm",
+            default: true,
+            callback: (ev, btn, dlg) => resolve((dlg.element.querySelector("#aflp-mb-type")?.value ?? "").trim() || null),
+          },
+          { action: "none", label: "No Fetish", callback: () => resolve(null) },
+        ],
+        close: () => resolve(null),
+        rejectClose: false,
+      });
+    });
+
+    if (chooseType) {
+      await actor.setFlag(AFLP.FLAG_SCOPE, "mbCreatureType", chooseType);
+    }
+  },
+
   onMindBreakGainedPurity(actor) {
     if (!AFLP.actorHasKink(actor, "purity")) return;
     if ((actor.system?.details?.level?.value ?? 0) < 3) return;
     const liveActor = game.actors?.get(actor.id) ?? actor;
     const cfItem = liveActor.items?.find(i =>
-      i.slug === "creature-fetish" || (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.kinks["creature-fetish"]?.uuid
+      i.slug === "creature-fetish" || (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.system.contentUuid("creature-fetish")
     );
     const savedLevel = cfItem?.system?.badge?.value ?? 0;
     actor.setFlag(AFLP.FLAG_SCOPE, "puritySavedCFLevel", savedLevel);
@@ -1340,11 +1723,13 @@ AFLP.Kinks = {
     const stickyData = worldActor.getFlag(FLAG, "_stickyBombTurns");
     if (!stickyData) return;
 
-    // Check actor is still Grabbed or Restrained
-    const isGrabbedOrRestrained = worldActor.items?.some(c =>
-      c.slug === "grabbed" || c.slug === "restrained"
-    );
-    if (!isGrabbedOrRestrained || stickyData.remaining <= 0) {
+    // Check actor is still Restrained. DH exposes Restrained as a native token
+    // status; PF2e carries it as a condition item; AFLP flag-conditions too.
+    // Grabbed is not a DH condition, so Restrained is the single gate.
+    const isRestrained = (worldActor.statuses?.has?.("restrained"))
+      || (worldActor.items?.some(c => c.slug === "restrained"))
+      || (AFLP.system?.hasCondition?.(worldActor, "restrained") ?? false);
+    if (!isRestrained || stickyData.remaining <= 0) {
       await worldActor.unsetFlag(FLAG, "_stickyBombTurns");
       return;
     }
@@ -1378,7 +1763,7 @@ AFLP.Kinks = {
     if (savedCFLevel === undefined) return;
     await actor.unsetFlag(AFLP.FLAG_SCOPE, "puritySavedCFLevel");
     const cfItem = liveActor.items?.find(i =>
-      i.slug === "creature-fetish" || (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.kinks["creature-fetish"]?.uuid
+      i.slug === "creature-fetish" || (i.flags?.core?.sourceId ?? i.sourceId) === AFLP.system.contentUuid("creature-fetish")
     );
     if (!cfItem) return;
     const current = cfItem.system?.badge?.value ?? 1;
@@ -1483,12 +1868,12 @@ Object.assign(AFLP.Kinks, {
     if (!_skActorIsLarger(actorSize, targetSize, offset)) return;
     if (lvl >= 7) {
       await ChatMessage.create({
-        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Stretch King kink (L7): Coomer 10 should be active via Daily Prep.</p></div>`,
+        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Stretch King kink (L7): Loads should be raised to the cap (6) via Daily Prep.</p></div>`,
         speaker: { alias: "AFLP" },
       });
     } else if (lvl >= 3) {
       await ChatMessage.create({
-        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Stretch King kink (L3): cummed inside a smaller creature — ensure Coomer 3 is applied via Daily Prep.</p></div>`,
+        content: `<div class="aflp-chat-card"><p><strong>${liveActor.name}</strong>'s Stretch King kink (L3): cummed inside a smaller creature — ensure Loads 3 is applied via Daily Prep.</p></div>`,
         speaker: { alias: "AFLP" },
       });
     }
@@ -1561,9 +1946,8 @@ Object.assign(AFLP.Kinks, {
     const current = hsItem?.system?.badge?.value ?? 0;
 
     if (!hsItem) {
-      const hsDoc = await fromUuid("Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.naEmpTaaGI3qYAeC").catch(() => null);
-      if (!hsDoc) { console.error("AFLP | Hypno Slave: kink item not found."); return; }
-      const created = await liveActor.createEmbeddedDocuments("Item", [hsDoc.toObject()]);
+      const created = await AFLP.system.applyEffect(liveActor, "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.naEmpTaaGI3qYAeC");
+      if (created === null) { console.error("AFLP | Hypno Slave: kink item not found."); return; }
       hsItem = created[0];
     }
 
@@ -1612,21 +1996,30 @@ Object.assign(AFLP.Kinks, {
       }
     }
 
-    // Counter 3+: Stupefied 1 passive
+    // Counter 3+: mind-fog. PF2e applies Stupefied 1; DH has no Stupefied, so
+    // the conditioning fogs the mind into Bimbofied instead (spirit-ported - the
+    // same dazed, pliable state the Bimbomancer mapping uses).
     if (counters >= 3) {
-      const hasStup = liveActor.items?.some(i =>
-        i.slug === "stupefied" || (i.flags?.core?.sourceId ?? i.sourceId) === _HS_STUP_UUID
-      );
-      if (!hasStup) {
-        const stupDoc = await fromUuid(_HS_STUP_UUID).catch(() => null);
-        if (stupDoc) {
-          await liveActor.createEmbeddedDocuments("Item",
-            [{ ...stupDoc.toObject(), system: { ...stupDoc.toObject().system, value: 1 } }]
-          ).catch(() => {});
+      if (AFLP.system.id === "daggerheart") {
+        if ((AFLP.cond?.value?.(liveActor, "bimbofied") ?? 0) < 1) {
+          await AFLP.system.setBimbofied(liveActor, 1);
           await ChatMessage.create({
-            content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s conditioning (counter ${counters}): <strong>Stupefied 1</strong> reapplied.</p></div>`,
+            content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s conditioning (counter ${counters}): the fog sets in - <strong>Bimbofied 1</strong>.</p></div>`,
             speaker: { alias: "AFLP" },
           });
+        }
+      } else {
+        const hasStup = liveActor.items?.some(i =>
+          i.slug === "stupefied" || (i.flags?.core?.sourceId ?? i.sourceId) === _HS_STUP_UUID
+        );
+        if (!hasStup) {
+          const created = await AFLP.system.applyEffect(liveActor, _HS_STUP_UUID, { systemMerge: { value: 1 } }).catch(() => null);
+          if (created) {
+            await ChatMessage.create({
+              content: `<div class="aflp-chat-card"><p><strong>${worldActor.name}</strong>'s conditioning (counter ${counters}): <strong>Stupefied 1</strong> reapplied.</p></div>`,
+              speaker: { alias: "AFLP" },
+            });
+          }
         }
       }
     }
@@ -1652,11 +2045,13 @@ Object.assign(AFLP.Kinks, {
     const liveActor  = game.actors?.get(actor.id) ?? actor;
     const counters   = _hsCounters(actor);
     await worldActor.setFlag(FLAG, "_hypnoTriggerConsumed", true);
-    const fascDoc = await fromUuid(_HS_FASC_UUID).catch(() => null);
-    if (fascDoc) {
-      if (!liveActor.items?.some(i => i.slug === "fascinated")) {
-        await liveActor.createEmbeddedDocuments("Item", [fascDoc.toObject()]).catch(() => {});
+    if (AFLP.system.id === "daggerheart") {
+      // DH has no Fascinated; the captured-mind state is Entranced.
+      if ((AFLP.cond?.value?.(liveActor, "entranced") ?? 0) < 1) {
+        await AFLP.system.applyCondition(liveActor, "entranced", AFLP.system.contentUuid("entranced"), 1);
       }
+    } else if (!liveActor.items?.some(i => i.slug === "fascinated")) {
+      await AFLP.system.applyEffect(liveActor, _HS_FASC_UUID).catch(() => {});
     }
     await AFLP.ensureCoreFlags(liveActor);
     const gain = await AFLP_Arousal.increment(liveActor, 3, "Hypno Trigger Word", null);
@@ -1666,7 +2061,9 @@ Object.assign(AFLP.Kinks, {
         <p><strong>${worldActor.name}</strong>'s Hypno Slave conditioning (counter ${counters}): Trigger Word — moved away from ${condToken?.name ?? "conditioner"}!</p>
         <ul style="margin:4px 0 4px 16px">
           <li>Speed reduced to 0 for this move <em>(apply manually)</em></li>
-          <li>@UUID[${_HS_FASC_UUID}]{Fascinated} for 1 round</li>
+          <li>${AFLP.system.id === "daggerheart"
+                  ? `@UUID[${AFLP.system.contentUuid("entranced") ?? ""}]{Entranced}`
+                  : `@UUID[${_HS_FASC_UUID}]{Fascinated}`} for 1 round</li>
           <li>${AFLP_Arousal.gainBreakdownText(gain, 3)}</li>
         </ul>
         <p><em>Will Save DC 22 to resist. Trigger spent until next daily prep.</em></p>
@@ -1684,7 +2081,7 @@ Object.assign(AFLP.Kinks, {
     const liveActor  = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;
     if (worldActor.getFlag(FLAG, "_hypnoSlaveL3Used")) return;
     if (!liveActor.items?.some(i => i.slug === "fascinated")) return;
-    const afterglowUUID = AFLP.conditions?.["afterglow"]?.uuid ?? "";
+    const afterglowUUID = AFLP.system.contentUuid("afterglow") ?? "";
     const ag = liveActor.items?.find(i =>
       i.slug === "afterglow" || (i.flags?.core?.sourceId ?? i.sourceId) === afterglowUUID
     );

@@ -81,6 +81,9 @@ window.AFLP_SentientItems = {
 
   // -----------------------------------------------
   register() {
+    // PF2e-only: keys off PF2e armor item slugs/UUIDs and the PF2e Will-save roll
+    // context, none of which exist in other systems. No-ops on Daggerheart/5e.
+    if (AFLP.system?.id !== "pf2e") return;
     if (!game.user.isGM) return;
 
     // Equip / unequip + RollOption toggle sync
@@ -139,21 +142,20 @@ window.AFLP_SentientItems = {
     // Critical hit detection for Disposition shifts
     Hooks.on("createChatMessage", async (msg) => {
       if (!game.user.isGM) return;
-      const outcome  = msg.flags?.pf2e?.context?.outcome;
-      const actorId  = msg.flags?.pf2e?.context?.actor;
-      const targetId = msg.flags?.pf2e?.context?.target?.actor;
+      const ctx = AFLP.system.readMessageContext(msg);
+      if (!ctx) return;
 
       // Attacker crits: Disposition down for attacker
-      if (outcome === "criticalSuccess" && actorId) {
-        const actor = game.actors.get(actorId);
+      if (ctx.degree === "critSuccess" && ctx.actorId) {
+        const actor = game.actors.get(ctx.actorId);
         if (actor && this.getEquipped(actor)) {
           await actor.setFlag(AFLP.FLAG_SCOPE, "armorOfHandsStruckThisTurn", true);
           await this.shiftDisposition(actor, -1, "Critical hit landed");
         }
       }
       // Defender critted: Disposition up for defender
-      if (outcome === "criticalSuccess" && targetId) {
-        const target = game.actors.get(targetId);
+      if (ctx.degree === "critSuccess" && ctx.targetId) {
+        const target = game.actors.get(ctx.targetId);
         if (target && this.getEquipped(target)) {
           await this.shiftDisposition(target, +1, "Received critical hit");
         }
@@ -163,13 +165,13 @@ window.AFLP_SentientItems = {
     // Will save outcomes
     Hooks.on("createChatMessage", async (msg) => {
       if (!game.user.isGM) return;
-      const ctx = msg.flags?.pf2e?.context;
-      if (!ctx || ctx.type !== "saving-throw" || ctx.statistic !== "will") return;
-      const actor = game.actors.get(ctx.actor);
+      const ctx = AFLP.system.readMessageContext(msg);
+      if (!ctx || ctx.rollType !== "save" || ctx.statistic !== "will") return;
+      const actor = game.actors.get(ctx.actorId);
       if (!actor || !this.getEquipped(actor)) return;
-      if (ctx.outcome === "success" || ctx.outcome === "criticalSuccess") {
+      if (ctx.degree === "success" || ctx.degree === "critSuccess") {
         await this.shiftDisposition(actor, -1, "Will save success");
-      } else if (ctx.outcome === "failure" || ctx.outcome === "criticalFailure") {
+      } else if (ctx.degree === "fail" || ctx.degree === "critFail") {
         await this.shiftDisposition(actor, +1, "Will save failure");
       }
     });
@@ -334,11 +336,10 @@ window.AFLP_SentientItems = {
       if ((existing.system?.badge?.value ?? 0) < level) await existing.update({ "system.badge.value": level });
     } else {
       try {
-        const doc  = await fromUuid(this.UUID_EXPOSED);
-        const data = doc.toObject();
-        data.system.badge.value = level;
-        foundry.utils.setProperty(data, "flags.aflp.grantedByArmor", true);
-        await actor.createEmbeddedDocuments("Item", [data]);
+        await AFLP.system.applyEffect(actor, this.UUID_EXPOSED, {
+          badgeValue: level,
+          flagProps: { "flags.aflp.grantedByArmor": true },
+        });
       } catch (e) { console.warn("AFLP | AoH: could not apply Exposed:", e); }
     }
   },
@@ -349,10 +350,9 @@ window.AFLP_SentientItems = {
     );
     if (!existing) {
       try {
-        const doc  = await fromUuid(this.UUID_GRABBED);
-        const data = doc.toObject();
-        foundry.utils.setProperty(data, "flags.aflp.grantedByArmor", true);
-        await actor.createEmbeddedDocuments("Item", [data]);
+        await AFLP.system.applyEffect(actor, this.UUID_GRABBED, {
+          flagProps: { "flags.aflp.grantedByArmor": true },
+        });
       } catch (e) { console.warn("AFLP | AoH: could not apply Grabbed:", e); }
     }
   },
