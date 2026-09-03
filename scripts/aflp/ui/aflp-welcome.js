@@ -5,8 +5,68 @@
 // "Don't show again" unchecks the setting for this client.
 // A new version automatically re-enables the setting for all users (via flag check).
 
-const AFLP_WELCOME_VERSION = "8.0.0";
+// Bumped whenever the screen's CONTENT changes, not with the module version.
+// It only keys the per-user "seen" flag, so bumping it re-shows the screen once.
+// _aflpVersion() reads module.json for the version the heading prints, so the
+// two are deliberately independent.
+const AFLP_WELCOME_VERSION = "1.2.0";
 const AFLP_WELCOME_FLAG    = `aflp-welcome-seen-${AFLP_WELCOME_VERSION}`;
+
+// Module-agnostic identity: the same source ships as AFLR (this module id) and,
+// after the fork build rewrites the id, as AFLP. Read the display name and
+// version from the running module so neither audience sees the other's name.
+// (mod.title is the full "ArdisFoxx's Lewd RPG/PF2e ..." string; it is no longer
+// parsed for a display name - see _aflpName below.)
+function _aflpMod() {
+  return game.modules.get("ardisfoxxs-lewd-pf2e") ?? null;
+}
+// One name for both forks. AFLP is the PF2e fork of AFLR and the audience knows
+// it, so the screen says AFLR in the title and the body regardless of which fork
+// is installed. Only the VERSION differs, and that comes from the running module.
+// Each fork shows its own banner. The generator rewrites the module ID across
+// every file, but not an asset FILENAME - both banners ship in both forks, so the
+// choice has to happen at runtime.
+//
+// It has to key off WHICH MODULE THIS FILE BELONGS TO, not what is installed
+// alongside it. A first attempt asked game.modules.get("...-pf2e"), which returns
+// the module whether or not it is ENABLED - so a world with AFLP installed but
+// switched off still showed the AFLP banner while AFLR was the module running.
+// The id below is rewritten by the generator, so each fork asks about itself.
+const _MODULE_ID = "ardisfoxxs-lewd-pf2e";
+function _bannerFile() {
+  return _MODULE_ID === "ardisfoxxs-lewd-pf2e" ? "AFLP_Banner.webp" : "AFLR_Banner.webp";
+}
+
+function _aflpName() {
+  return "AFLR";
+}
+
+// System awareness. The same welcome ships to a PF2e world, a DH world and a 5e
+// world, so anything that is true of only one of them has to be gated - a DH
+// reader should never be told about archetypes, and a PF2e reader should never
+// be told about persona-classes or Tiers.
+function _aflpSys() {
+  return game.system?.id ?? "";
+}
+function _isPF2e() { return ["pf2e", "sf2e"].includes(_aflpSys()); }
+function _isDH()   { return _aflpSys() === "daggerheart"; }
+function _is5e()   { return _aflpSys() === "dnd5e"; }
+// Emit html only in the listed systems. `only(["pf2e"], "<li>...</li>")`
+function _only(systems, html) {
+  const sys = _aflpSys();
+  const match = systems.some(x => x === sys
+    || (x === "pf2e" && _isPF2e())
+    || (x === "dh" && _isDH())
+    || (x === "5e" && _is5e()));
+  return match ? html : "";
+}
+// The current system's own words, so shared prose does not have to hedge.
+function _sysName() { return _isDH() ? "Daggerheart" : _is5e() ? "D&D 5e" : "Pathfinder 2e"; }
+function _defeatWord() { return _isPF2e() ? "Defeated" : "Defeat"; }
+function _stageGate() { return _isDH() ? "Tiers 1, 3, and 4" : "levels 1, 5, and 8"; }
+function _aflpVersion() {
+  return _aflpMod()?.version || AFLP_WELCOME_VERSION;
+}
 
 Hooks.once("ready", async () => {
   const S = AFLP.Settings;
@@ -26,8 +86,7 @@ Hooks.once("ready", async () => {
 
 async function aflpShowWelcome() {
   const S = AFLP.Settings;
-  const spURL     = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
-  const spLiteURL = (window.AFLP && AFLP.SOUNDPACK_LITE_URL) || "";
+  const spURL = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
 
   const s = {
     wrap:    'font-family: "Helvetica Neue", Arial, sans-serif; width: 100%; color: #ddd;',
@@ -41,93 +100,138 @@ async function aflpShowWelcome() {
     note:    'background:rgba(201,169,110,0.08); border:1px solid rgba(201,169,110,0.25); border-radius:5px; padding:8px 12px; font-size:12px; line-height:1.65; color:#c9a96e; margin-bottom:14px;',
   };
 
+  const NAME   = _aflpName();
+  const VER    = _aflpVersion();
+  const SYS    = _sysName();
+  // DEFEAT and STAGES were the evergreen section's only consumers, and that
+  // section's climax-rule and kink-ladder bullets moved into the per-system
+  // release block on 11 Aug 2026, which states each system's own words directly.
+  // The helpers stay because they are the right way to say these things if a
+  // shared sentence ever needs them again - and because _defeatWord() answers
+  // "Defeat" on 5e, which is Daggerheart's word, so anything reusing it there
+  // needs fixing first.
+  const only   = _only;
   const content = `
 <div style="${s.wrap}">
+  <!-- Both banners are 1024x259. Sizing by ASPECT RATIO rather than a pixel
+       max-height means the whole image always shows, at any dialog width - a
+       fixed 130px box cropped the bottom ~8% and only happened to fit at one
+       particular width. contain over cover so it can never crop even if the
+       art proportions change later. -->
   <div style="text-align:center; margin-bottom:14px;">
-    <img src="modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/AFLP_Banner.jpg"
-         style="width:100%; max-height:130px; object-fit:cover; border-radius:6px; border:1px solid #c9a96e;" alt="AFLP"/>
+    <img src="modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/${_bannerFile()}"
+         style="width:100%; aspect-ratio:1024/259; object-fit:contain; display:block; border-radius:6px; border:1px solid #c9a96e;" alt="${NAME}"/>
   </div>
 
-  <h2 style="${s.h2}">What's New in AFLR 8.0.0</h2>
+  <h2 style="${s.h2}">Welcome to ${NAME} ${VER}</h2>
+
+  <div style="${s.note}">An adult (18+) supplement, expanding your game with sexual game mechanics: arousal, positions, cumflation, kinks, transformation, pregnancy, spells, creatures and loot, with built-in audio visuals for H-Scenes. Set your table's comfort level with the Lewd Levels dial in Session Zero.</div>
 
   <div style="${s.group}">
-    <div style="${s.label}">AFLR Now Runs on Daggerheart</div>
+    <div style="${s.label}">${_isDH() ? "How AFLR works" : _is5e() ? "Where 5e stands" : "What has changed since 7.0.0"}</div>
     <ul style="${s.ul}">
-      <li><strong>One module, two systems</strong> - The full Carnal H-Scene toolkit - arousal, positions, cumflation, kinks, pregnancy, voices, and live visuals - now runs natively on <strong>Daggerheart</strong> alongside Pathfinder 2e.</li>
-      <li><strong>Built for duality</strong> - Daggerheart-native Carnal actions resolve on Hope and Fear with the duality dice, and AFLR's conditions map to their Daggerheart equivalents so it feels like part of the system, not bolted on.</li>
-      <li><strong>Lewd Levels</strong> - A Session Zero dial sets how far your table takes it, from background flavour to a full Defeat-mod frame.</li>
+      ${only(["pf2e"], `<li><strong>The climax rule changed.</strong> Finish while <strong>Submitting</strong> and you are <strong>Defeated</strong>, no Dominator required - so anything that imposes Submitting, a spell included, can now put you down. Any other climax makes you <strong>Horny</strong> instead, max 3, and <strong>Horny no longer clears when you cum</strong> - it clears at daily preparations. Sexual Advance's default Arousal gain is lower than it was, so handing PCs Horny through effects, monster abilities and items is how a GM builds pressure across the adventuring day.</li>`)}
+      ${only(["pf2e"], `<li><strong>Submitting and Dominating grant no Arousal by themselves.</strong> They are scene roles now. Every point of Arousal comes from an action, a condition or an effect.</li>`)}
+      ${only(["pf2e"], `<li><strong>Cum Volume and Coomer are gone.</strong> The model is <strong>Cum Shot x Loads</strong>: Cum Shot is how much you release per climax, set by size and anatomy, and Loads is how many climaxes you have before a rest. At 0 loads you still climax but produce nothing.</li>`)}
+      ${only(["pf2e"], `<li><strong>A new anatomy system.</strong> Cocks, pussies, tits, throats and the ass are customisable parts, each with its own size, its own size gap and its own subtypes: knots, hemipenises, breeder types, ovidepositors, onahole tits, cumfinity ass and more.</li>`)}
+      ${only(["pf2e"], `<li><strong>Kinks rebuilt on three beats.</strong> Every kink unlocks Signature, Greater and Mastery at levels 1, 5 and 8, replacing the old per-level lists. New kinks: Bull, Pain Slut and Ouroboros. <strong>Bimbofied and Bullified changed meaning</strong>: Bimbofied used to be a masculine hunk transformation on male-presenting characters, and is now the feminine transformation for all genders, with Bullified as the masculine one for all genders.</li>`)}
+      ${only(["pf2e"], `<li><strong>Size Difference.</strong> Every hole has its own size training track on the sheet. A hole trains when something bigger than it fills it and the receiver climaxes: at scene close the track gains pips equal to the largest size gap that hole took during the scene, 1 for Stuffed, 2 for Stretched, 3 for Ruined. Six pips fills a track, granting a permanent body feature - Size Queen, Throat Goat, Gape Glutton - and stepping that hole up a size. Filling every applicable track earns the Size Difference kink.</li>`)}
+      ${only(["pf2e"], `<li><strong>Hypnosis.</strong> Entranced deepens to Hypnotized on a failed save against your entrancer or a climax at their hands, and enough conditioning locks in the Hypno Slave kink. The spell Control Release counteracts it and other mental control.</li>`)}
+      ${only(["pf2e"], `<li><strong>Exposed reworked.</strong> One token is clothes open or pulled aside; two is near enough naked, which also makes you easier to press.</li>`)}
+      ${only(["pf2e"], `<li><strong>The Alcumist, rebuilt.</strong> Versatile vials became <strong>Distillates</strong>, kept through the day rather than lost when the crafting window shuts, and the Cumcraft feats gate what you can make.</li>`)}
+      ${only(["pf2e"], `<li><strong>Living bondage.</strong> Restraints grown from mimic-stuff, some disguised as furniture. They fit themselves, cannot be removed without help, and reshape into something worse if the roll to free you critically fails.</li>`)}
+      ${only(["pf2e"], `<li><strong>A new interface.</strong> A draggable button bar opens the H-Scene window, the AFLR sheet and a floating status panel. The sheet has Body, Drives and History panes with click-to-set pip bars, and the status panel lists every condition, body feature, kink and training track on a creature.</li>`)}
+      ${only(["pf2e"], `<li><strong>Also:</strong> a full guide journal and GM screen, the Lewd Levels dial in Session Zero, and assets down from about 400MB to 40MB with the soundpack from 15GB to under 1GB.</li>`)}
+
+      ${only(["dh"], `<li><strong>This is the Daggerheart beta.</strong> Built from the ground up as a Daggerheart expansion rather than a port of the Pathfinder module. Where the two systems want different answers, AFLR gives different answers.</li>`)}
+      ${only(["dh"], `<li><strong>PCs and adversaries are built differently.</strong> The universal sexual actions of the Pathfinder module are replaced by a <strong>Carnal action system</strong> for adversaries, which is how Daggerheart runs an encounter.</li>`)}
+      ${only(["dh"], `<li><strong>Start in Session Zero.</strong> The <strong>Lewd Levels</strong> dial, 1 to 4, sets how much of the module is live at your table, from background flavour to full mid-combat mechanics.</li>`)}
+      ${only(["dh"], `<li><strong>The button bar.</strong> A small draggable bar with three buttons: the <strong>H-Scene window</strong>, the <strong>AFLR sheet</strong>, and a <strong>floating status panel</strong>. Drag it anywhere; it stays where you put it.</li>`)}
+      ${only(["dh"], `<li><strong>The AFLR sheet</strong> is where a character's lewd side lives: <strong>Body</strong> for anatomy and size training, <strong>Drives</strong> for kinks, conditions and titles, and <strong>History</strong> for what has happened to them. Arousal and Horny are click-to-set pip bars at the top.</li>`)}
+      ${only(["dh"], `<li><strong>The status panel</strong> reads any creature at a glance - conditions, body features, kinks, training, cumflation - grouped most-permanent-first and hideable band by band.</li>`)}
+      ${only(["dh"], `<li><strong>Arousal is the core track.</strong> Carnal actions mark it, and filling it is a climax. <strong>Carnal Press</strong> is the advance, resisted with a reaction roll against the presser's Difficulty; <strong>Carnal Escape</strong> is an action roll to get free.</li>`)}
+      ${only(["dh"], `<li><strong>The climax rule.</strong> Climax while <strong>Submitting</strong> and you mark <strong>Defeat</strong>. Any other climax makes you <strong>Horny</strong> instead, to a maximum of 3, and <strong>Horny does not clear when you cum</strong> - it clears on a rest. Submitting and Dominating are scene roles and grant no Arousal by themselves.</li>`)}
+      ${only(["dh"], `<li><strong>Anatomy is customisable.</strong> Cocks, pussies, tits, throats and the ass each have their own size, their own size gap and a long list of subtypes - knots, hemipenises, breeder types, ovidepositors, onahole tits, cumfinity ass and more.</li>`)}
+      ${only(["dh"], `<li><strong>Kinks unlock in three beats</strong> - Signature, Greater and Mastery - at Tiers 1, 3 and 4.</li>`)}
+      ${only(["dh"], `<li><strong>Six persona-classes</strong> with eighteen subclasses, native to Daggerheart and sitting on top of the SRD classes: The Devoted, Predator, Plaything, Seducer, Fiend and Feral.</li>`)}
+      ${only(["dh"], `<li><strong>129 lewd domain cards</strong> across every domain, including Dread and Blood from Hope and Fear.</li>`)}
+      ${only(["dh"], `<li><strong>Living bondage.</strong> Restraints grown from mimic-stuff, some disguised as furniture. The GM spends a Fear to have a piece take hold of someone, only another creature can get it off them, and a removal roll that fails with Fear reshapes it into something worse.</li>`)}
+      ${only(["dh"], `<li><strong>The milk economy.</strong> Rest in a milkmaid harness and it draws you off into one Bottled Milk; a milking station gives two, or three if your tits are Hyper. A station also catches what creatures finish into you, bottling it rather than leaving it on the floor.</li>`)}
+      ${only(["dh"], `<li><strong>Roll tables and a loot generator</strong>, plus tiered lewd armor: Bondage Bikini Armor and Carnal Knight Armor at all four tiers.</li>`)}
+      ${only(["dh"], `<li><strong>Read the guide journal.</strong> It carries the full rules with an example of play, and the GM screen is the quick reference for the table.</li>`)}
+
+      ${only(["5e"], `<li><strong>Spells, macros and the shared engine are in place.</strong> Conditions, kinks, anatomy and bondage content are still being built, so most of the module will not show up on a 5e sheet yet.</li>`)}
+      ${only(["5e"], `<li><strong>Exposed</strong> is expressed as an AC penalty rather than a roll modifier: -2 at one stage, -5 at two.</li>`)}
     </ul>
   </div>
 
   <div style="${s.group}">
-    <div style="${s.label}">The Carnal Action Set</div>
+    <div style="${s.label}">Systems</div>
     <ul style="${s.ul}">
-      <li><strong>Four clean actions</strong> - <strong>Carnal Press</strong>, <strong>Resist</strong>, <strong>Rescue</strong>, and <strong>Escape</strong> give both sides a clear turn structure with duality outcome tables and plain-language conditions, no system jargon to memorise.</li>
+      <li>This world is running <strong>${SYS}</strong>. AFLR speaks each system's own rules vocabulary, dice, and conditions rather than porting one ruleset over another.</li>
+      <li><strong>Lewd Levels:</strong> a Session Zero setting (1 to 4) that controls how much of the module is active, from background flavour to full mid-combat mechanics.</li>
+      <li><strong>Actions:</strong> ${SYS} has its own action set for PCs and adversaries, to kickstart lewd combat scenes.</li>
+	  <li><strong>Journal:</strong> A full guide journal details the expanded rules in their entirety, including an example of play.</li>
     </ul>
   </div>
 
+  ${only(["pf2e", "dh"], `
   <div style="${s.group}">
-    <div style="${s.label}">Cum, Loads &amp; the Flood</div>
+    <div style="${s.label}">Cum and Cumflation</div>
     <ul style="${s.ul}">
-      <li><strong>Two small numbers</strong> - Cum is how much you shoot per climax (set by size); Loads is how many times you can cum before a rest. No more unwieldy four-digit volumes.</li>
-      <li><strong>Big creatures shoot big</strong> - A hole holds 8; anything past that floods the floor. How far it spreads is set simply by the shooter's size, from a puddle at its feet to a gargantuan tide reaching Far range.</li>
-      <li><strong>Bottle the mess</strong> - Floor-cum mops up into Vials of Cum with the Cum Rag macro, and a big enough flood fills a whole stack.</li>
+      <li><strong>Cum Shot</strong> is how much a creature releases per climax, set by size. <strong>Loads</strong> is how many times it can climax before a rest. The sheet shows loads remaining out of capacity.</li>
+      <li>A climax spends no more loads than remain. At <strong>0 loads</strong> a creature still climaxes but produces nothing - no cumflation, no spill, no coating.</li>
+      <li>A hole holds 8 units before it overflows; excess spills onto the floor, spreading a distance set by the shooter's size. A Throat (Deepthroat) holds 9.</li>
+      <li>Spilled cum can be collected with the Cum Cleaner macro, bottling it as Bottled Cum.</li>
     </ul>
-  </div>
+  </div>`)}
+
+  ${only(["pf2e", "dh"], `
+  <div style="${s.group}">
+    <div style="${s.label}">Kinks, Conditions, and Transformation</div>
+    <ul style="${s.ul}">
+      <li><strong>Hypnosis:</strong> the Entranced condition deepens to Hypnotized, and enough conditioning locks in the Hypno Slave kink.${_only(["pf2e", "5e"], " The Control Release spell counteracts it and other mental control.")}</li>
+      <li><strong>Transformation:</strong> spells, consumables, and cursed gear that add or change genitalia, affect arousal, or apply the Bullified condition. Some creatures transform those they defeat.</li>
+      <li><strong>Size Training:</strong> a hole trains when something bigger than it fills it and the receiver climaxes, gaining pips equal to the size gap at scene close. Six pips earns a permanent Body Feature and steps the hole up a size; filling every applicable track earns the Size Difference kink. Tracked on the character sheet.</li>
+    </ul>
+  </div>`)}
+
+  ${only(["pf2e", "dh"], `
+  <div style="${s.group}">
+    <div style="${s.label}">Content</div>
+    <ul style="${s.ul}">
+      <li>Creatures across every tier, from swarms and imps up to gargantuan breeders.</li>
+      <li>Bondage gear, loot, and consumables that use the Cum and Loads rules, including living restraints and tonics.</li>
+      <li>A spell and item library: sexual spells, genital-type effects, kink items, and transformation gear.</li>
+    </ul>
+  </div>`)}
 
   <div style="${s.group}">
-    <div style="${s.label}">Transformation</div>
+    <div style="${s.label}">Audio (Free Soundpack)</div>
     <ul style="${s.ul}">
-      <li><strong>Reshape a body</strong> - New spells, consumables, and cursed gear swap or add genitalia, force a heat, or brand a bull - some voluntary, some very much not.</li>
-      <li><strong>Adversaries that remake you</strong> - New foes can transform those they defeat, with Bad Ends to match.</li>
+      <li>Voice and ambient-SFX audio ships in a separate free module, the <strong>AFLR Soundpack</strong>. ${NAME} runs fine without it; the module itself features a basic audio set, but the Soundpack module expands that audio massively.</li>
+      <li>Includes voice profiles (female, male, and monster) and the ambient SFX the engine uses, detected automatically once enabled. You can also add your own folder of custom profiles.</li>
+      <li>Audio is from the OpenNSFW Sound Pack (CC BY 4.0). Credits ship with the soundpack; contact @OpenNSFWSP rather than individual contributors.</li>
     </ul>
-  </div>
-
-  <div style="${s.group}">
-    <div style="${s.label}">New Content</div>
-    <ul style="${s.ul}">
-      <li><strong>Adversaries across every tier</strong>, topped by the gargantuan <strong>Brimstone Brood-Wyrm</strong>, a 24-per-shot apex that floods the battlefield.</li>
-      <li><strong>New bondage gear, loot, and consumables</strong> - living restraints, Cum boosters, and tonics that play directly off the new Cum and Loads rules.</li>
-      <li><strong>New domain cards</strong>, including the <strong>Skyclad</strong> and <strong>Bimbomancy</strong> archetypes.</li>
-    </ul>
-  </div>
-
-  <div style="${s.group}">
-    <div style="${s.label}">AFLR Soundpack Lite - Free Companion Module</div>
-    <ul style="${s.ul}">
-      <li><strong>Ships separately, free</strong> - Voice and SFX audio lives in its own module so the main download stays small. The recommended <strong>AFLR Soundpack Lite</strong> is a curated, lightweight pick that covers the full feature set. Install and enable it alongside AFLP to turn audio on. AFLP works fine without it.</li>
-      <li><strong>What is inside</strong> - A hand-picked set of voice profiles (female, male, and monster) plus the categorised ambient-SFX the engine uses, auto-detected by AFLP once enabled (no path setup). You can also point AFLP at your own extra folder to add custom profiles.</li>
-      <li><strong>Want more sounds?</strong> - The full <strong>AFLR Soundpack</strong> bundles every voice actor and the complete SFX library (a much larger download). Install it instead of Lite and AFLP uses it automatically.</li>
-      <li><strong>Credits</strong> - All audio is from the <strong>OpenNSFW Sound Pack</strong>, licensed CC BY 4.0. Full contributor credits ship with the soundpack; please contact @OpenNSFWSP rather than individual contributors.</li>
-    </ul>
-    ${spLiteURL ? `<div style="text-align:center; margin:8px 0 2px;"><a href="${spLiteURL}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; font-size:12px; border-radius:5px; text-decoration:none; letter-spacing:0.3px;">Get the AFLR Soundpack Lite</a>${spURL ? `<div style="font-size:10px; opacity:0.7; margin-top:6px;">Want everything? <a href="${spURL}" target="_blank" rel="noopener" style="color:#c9a96e;">Get the full AFLR Soundpack</a></div>` : ``}<div style="font-size:10px; opacity:0.7; margin-top:5px;">Unzip into your Foundry Data/modules folder, restart Foundry, and enable it.</div></div>` : ``}
-  </div>
-
-  <div style="${s.group}">
-    <div style="${s.label}">Also in 8.0</div>
-    <ul style="${s.ul}">
-      <li>Adversaries audited and stat-aligned to their tier and role across the bestiary.</li>
-      <li>Domain card library cleaned up and de-duplicated, with Pathfinder-isms scrubbed from the Daggerheart cards.</li>
-      <li>Assorted fixes and polish across the H-Scene card, cumflation, rest, and daily-prep flows.</li>
-    </ul>
+    ${spURL ? `<div style="text-align:center; margin:8px 0 2px;"><a href="${spURL}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; font-size:12px; border-radius:5px; text-decoration:none; letter-spacing:0.3px;">Get the AFLR Soundpack</a><div style="font-size:10px; opacity:0.7; margin-top:5px;">Unzip into your Foundry Data/modules folder, restart Foundry, and enable it.</div></div>` : ``}
   </div>
 
   <div style="${s.hr}"></div>
 
   <div style="${s.promo}">
-    <img src="modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/AFLP_Icon_Square.jpg"
-         style="width:58px; height:58px; object-fit:cover; border-radius:6px; border:1px solid #c9a96e; flex-shrink:0;" alt="AFLP Icon"/>
+    <img src="modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/AFLP_Icon_Square.webp"
+         style="width:58px; height:58px; object-fit:cover; border-radius:6px; border:1px solid #c9a96e; flex-shrink:0;" alt="${NAME} Icon"/>
     <div style="${s.promoTx}">
-      <strong style="color:#c9a96e;">Support AFLP on SubscribeStar</strong><br/>
-      The <strong>AFLP PDF</strong> - a full GM guide for running AFLP campaigns - is available to <strong>$15 Subscribers</strong> at
+      <strong style="color:#c9a96e;">Support development on SubscribeStar</strong><br/>
+      A full guide PDF for the PF2e version of the module is available to <strong>$15 Subscribers</strong> at
       <a href="https://subscribestar.adult/ardisfoxxart" target="_blank" style="color:#c9a96e;">ArdisFoxXx on SubscribeStar.adult</a>.
-      Your subscription also includes the <strong>AFLP Member Discord</strong> - join the community, share feedback, and help shape future development.
+      Your subscription also includes exclusive access to the <strong>Member Discord</strong> - join the community, share feedback, and help shape future development.
     </div>
   </div>
 </div>`;
 
   await foundry.applications.api.DialogV2.wait({
-    window: { title: "Welcome to AFLR!", resizable: true },
+    window: { title: `Welcome to ${NAME}!`, resizable: true },
     position: { top: 65, left: 493, width: 836 },
     content,
     render(ev, dlg) {
@@ -142,7 +246,7 @@ async function aflpShowWelcome() {
     buttons: [
       {
         action: "howto",
-        label: "📖 How to Use AFLP",
+        label: `📖 How to Use ${NAME}`,
         callback: async () => { aflpShowHowTo(); },
       },
       ...(game.user.isGM ? [{
@@ -185,17 +289,23 @@ function aflpShowHowTo() {
   const content = `
 <div style="font-family:'Helvetica Neue',Arial,sans-serif;color:#ddd;max-width:${maxW};width:${maxW};">
 
+  ${h("Full System Guide in the Journal")}
+  ${ul([
+    `<strong>Check out the journal "A Guide to AFLR in PF2e" in the compendium pack for full details on using this module. For a basic guide on core features, see below.</strong>`,
+  ])}
+
+  ${hr()}
   ${h("For GMs: First-Time Setup")}
   ${ul([
-    `<strong>Run Daily Preparations at the start of every in-game day.</strong> The ${code("AFLP Daily Preparations")} macro ticks pregnancies, resets daily stats, and applies overnight effects. Run it before your players join.`,
-    `<strong>Use AFLP monsters from the compendium where possible.</strong> The ${code("aflp-lewd-actors")} compendium has pre-configured monsters with AFLP stats already set. They work with all AFLP macros out of the box.`,
-    `<strong>For any other actor, run Token Initialize.</strong> If you drag a monster from the PF2e compendium or create a custom NPC, select its token on the canvas and run ${code("AFLP Token Initialize")} before using any AFLP macros on it.`,
-    `<strong>Set genitalia with Token Genital.</strong> After initializing, run ${code("AFLP Token Genital")} to configure what a token has. This affects available actions and cumflation calculations.`,
+    `The ${code("AFLP Daily Preparations")} macro ticks pregnancies, resets daily stats, and applies overnight effects. In the PF2e system this relates to the Daily Preparation activity. In Daggerheart and 5e is can be run after a long rest.`,
+    `<strong>Use the bundled monsters from the compendium where possible.</strong> The ${code("aflp-lewd-actors")} compendium has pre-configured monsters with their stats already set. They work with all ${_aflpName()} macros out of the box.`,
+    `<strong>For any other actor, run Token Initialize.</strong> If you drag a monster from the compendium or create a custom NPC, select its token on the canvas and run Token Initialize before using any ${_aflpName()} macros on it.`,
+    `<strong>Set genitalia with Token Genital macro.</strong> After initializing, run ${code("AFLP Token Genital")} to configure what body features a token has. This affects available actions and cumflation calculations.`,
     `<strong>Session Zero.</strong> Before your first session, agree on a Lewd Level (1 to 4) with your group. Use the <strong>Session Zero Setup</strong> button below to apply the matching Foundry settings in one click.`,
   ])}
 
   ${hr()}
-  ${h("H-Scene Position Picker (new in 6.0)")}
+  ${h("H-Scene Position Picker")}
   ${ul([
     `When an H-Scene starts, the GM is prompted to choose roles: who is Dominating, who is Submitting, or <strong>Consensual Sex</strong> (no conditions applied, equal control for all participants).`,
     `The position picker shows all valid positions for the current group size and the top's creature type. In a solo scene (1 top), it shows categorised individual positions. In a group scene (2+ tops), it shows group presets at the top followed by individual categories.`,
@@ -207,23 +317,11 @@ function aflpShowHowTo() {
   ${hr()}
   ${h("For Players: Your Character Sheet")}
   ${ul([
-    `Open your character sheet and click the <strong>AFLP tab</strong> (pink heart icon). This is where your arousal pip bar, kinks, pregnancy, sexual stats, and Lovense settings live.`,
+    `Open your character sheet and click the <strong>${_aflpName()} tab</strong> (pink heart icon). This is where your arousal pip bar, kinks, pregnancy, sexual stats, and Lovense settings live.`,
     `<strong>Arousal</strong> fills as sexual things happen during play. When it hits max, the Cum macro fires automatically if automation is on.`,
     `<strong>Kinks</strong> are enabled on your character by your GM via the sheet's Edit mode. In view mode, each active kink appears as a link you can click or hover to read its full description.`,
-    `<strong>Conditions</strong> like Exposed, Denied, Horny, and Mind Break are applied as items from the ${code("aflp-lewd-items")} compendium. Your GM applies them during play; some trigger automatically from actions and macros.`,
+    `<strong>Conditions</strong> like Exposed, Denied, Horny, and Mind Break are applied via the sheet condition manager. If you have condition effects from the ${code("aflp-lewd-items")} compendium applied to your token, running the Token Initialize macro will port them into the condition manager. Your GM can apply conditions to you during play, and some trigger automatically from actions and macros.`,
   ])}
-
-  ${hr()}
-  ${h("Key Macros")}
-  <table style="width:100%;border-collapse:collapse;">
-    ${row("AFLP Token Initialize", "First-time setup for any NPC token. Always run this before using other macros on a new actor.")}
-    ${row("AFLP Token Genital", "Set what genitalia a token has after initializing.")}
-    ${row("AFLP Daily Preparations", "Run at the start of each in-game day. Ticks pregnancies and resets daily stats.")}
-    ${row("AFLR Cum", "Manually trigger a cum for the selected token.")}
-    ${row("AFLR Carnal Press", "The main H-Scene action (advance arousal). Use this in encounters.")}
-    ${row("AFLP Struggle Snuggle", "Sexual grapple action for combat.")}
-    ${row("AFLP Purge Cumflation", "Reset cumflation levels on a token.")}
-  </table>
 
   ${hr()}
   ${h("Lovense Toy Integration")}
@@ -246,7 +344,7 @@ function aflpShowHowTo() {
 </div>`;
 
   foundry.applications.api.DialogV2.wait({
-    window: { title: "Getting Started with AFLP", resizable: true },
+    window: { title: `Getting Started with ${_aflpName()}`, resizable: true },
     position: { top: 65, left: 493, width: 836 },
     content,
     render(ev, dialog) {

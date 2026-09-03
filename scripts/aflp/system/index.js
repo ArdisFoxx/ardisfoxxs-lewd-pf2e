@@ -21,6 +21,7 @@ AFLP.resolveSystem = async function () {
   let adapter;
   switch (sysId) {
     case "pf2e":
+    case "sf2e":  // Starfinder 2e is a PF2e-system fork; same adapter.
       await import("./pf2e-adapter.js");
       adapter = new AFLP.PF2eAdapter();
       break;

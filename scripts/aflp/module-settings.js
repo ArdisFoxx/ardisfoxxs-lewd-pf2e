@@ -5,10 +5,18 @@
 // Called from index.js in the "init" hook.
 // Settings are ordered by the Lewd Level at which they become relevant.
 
-// Soundpack download links. The curated LITE pack is the default we push (a small
-// Git download); the full pack is the "want more sounds?" upsell. Update here only.
-AFLP.SOUNDPACK_LITE_URL = "https://github.com/ArdisFoxx/aflr-soundpack-lite/releases/latest";
-AFLP.SOUNDPACK_URL      = "https://mega.nz/file/1d5lxbZQ#_jH1AfpTqrP8rddGV94Wrr705RTnRzTtWBtSA6OF_i0";
+// Soundpack download link. The AFLR Soundpack is the single free audio companion
+// module (voices + ambient SFX). Update here only.
+AFLP.SOUNDPACK_URL = "https://github.com/ArdisFoxx/aflr-soundpack";
+
+// Module-agnostic display name: this codebase ships as AFLR (multi-system) and,
+// after the fork build rewrites the id, as AFLP (PF2e-only). Resolve the short
+// tag from the running module's title so user-facing strings name the right one.
+const _aflpModName = () => {
+  const t = game.modules?.get?.("ardisfoxxs-lewd-pf2e")?.title;
+  const m = t && t.match(/\(([^)]+)\)/);
+  return m ? m[1] : (t || "AFLR");
+};
 
 AFLP.Settings = {
 
@@ -16,7 +24,6 @@ AFLP.Settings = {
 
   KEYS: {
     AUTOMATION:          "arousalAutomation",
-    STRESS_AS_AROUSAL:   "dhStressAsArousal",
     CARNAL_FRAME:        "dhCarnalFrame",
     DUALITY_LABELS:      "dhDualityLabels",
     PROSE_FLAVOR:        "hsceneProseFlavorLines",
@@ -48,7 +55,6 @@ AFLP.Settings = {
     HSCENE_THEME_PC:     "hsceneThemePc",
     HSCENE_THEME_MON:    "hsceneThemeMon",
     HSCENE_PLAYER_PICK:  "hscenePlayerPick",
-    HSCENE_AROUSAL:      "hsceneArousalStyle",
     HSCENE_DOSSIER_FX:   "hsceneDossierAnimated",
     HSCENE_MESSAGES:     "hsceneCustomMessages",
     TITLES_CONFIG:       "titlesCustomConfig",
@@ -67,6 +73,10 @@ AFLP.Settings = {
     VOICE_MUTE_LOCAL:    "voiceMuteLocal",
     SFX_ENABLED:         "sfxEnabled",
     SFX_VOLUME:          "sfxVolume",
+    STATUS_PANEL_SHEET:  "statusPanelSheet",
+    STATUS_PANEL_HUD:    "statusPanelHud",
+    STATUS_HIDE_NATIVE:  "statusHideNative",
+    CUM_MEASURE:         "cumMeasure",
   },
 
   register() {
@@ -112,25 +122,25 @@ AFLP.Settings = {
     // ── AFLR Soundpack helpers (shared by the settings menu button, the
     // welcome screen link, and the "audio on but pack missing" notice) ────
     const aflpSoundpackActive = () =>
-      !!(game.modules?.get?.("aflp-soundpack")?.active || game.modules?.get?.("aflr-soundpack-lite")?.active);
+      !!(game.modules?.get?.("aflr-soundpack")?.active ||
+         game.modules?.get?.("aflr-soundpack-lite")?.active ||
+         game.modules?.get?.("aflp-soundpack")?.active); // legacy id
     const aflpShowSoundpackDialog = () => {
-      const liteUrl = (window.AFLP && AFLP.SOUNDPACK_LITE_URL) || "";
-      const fullUrl = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
+      const url = (window.AFLP && AFLP.SOUNDPACK_URL) || "";
+      const name = _aflpModName();
       foundry.applications.api.DialogV2.wait({
         window: { title: "AFLR Soundpack - Free Download" },
         content: `<div style="font-size:13px; line-height:1.6; max-width:480px;">
-          <p>AFLP's voice and ambient-SFX audio ships in a free companion module. AFLP runs fine without it - install it to turn audio on.</p>
-          <p>We recommend the <strong>AFLR Soundpack Lite</strong>: a curated pick of voices and SFX, a small download that covers the full feature set.</p>
+          <p>Voice and ambient-SFX audio ships in a free companion module, the <strong>AFLR Soundpack</strong>. ${name} runs fine without it - install it to turn audio on.</p>
           <p style="text-align:center; margin:14px 0;">
-            <a href="${liteUrl}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; border-radius:5px; text-decoration:none;">Get the AFLR Soundpack Lite</a>
+            <a href="${url}" target="_blank" rel="noopener" style="display:inline-block; padding:8px 18px; background:#c9a96e; color:#1b1b1b; font-weight:700; border-radius:5px; text-decoration:none;">Get the AFLR Soundpack</a>
           </p>
           <p style="margin:0 0 4px;"><strong>To install (one-time):</strong></p>
           <ol style="margin:0 0 10px; padding-left:18px;">
             <li>Download and unzip the file above.</li>
-            <li>Move the <code>aflr-soundpack-lite</code> folder into your Foundry <code>Data/modules</code> folder.</li>
-            <li>Restart Foundry, then enable <strong>AFLR Soundpack Lite</strong> under Manage Modules.</li>
+            <li>Move the <code>aflr-soundpack</code> folder into your Foundry <code>Data/modules</code> folder.</li>
+            <li>Restart Foundry, then enable <strong>AFLR Soundpack</strong> under Manage Modules.</li>
           </ol>
-          <p style="margin:12px 0 4px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.15);"><strong>Want more sounds?</strong> The full <a href="${fullUrl}" target="_blank" rel="noopener" style="color:#c9a96e; font-weight:700;">AFLR Soundpack</a> bundles every voice actor and the complete SFX library (a much larger download). Install it instead of Lite and AFLP uses it automatically.</p>
           <p style="font-size:11px; opacity:0.8;">Audio: OpenNSFW Sound Pack (CC BY 4.0). Full contributor credits ship with the soundpack.</p>
         </div>`,
         buttons: [{ action: "close", label: "Close", default: true }],
@@ -142,7 +152,7 @@ AFLP.Settings = {
     const aflpAudioNeedsSoundpack = (openDialog = false) => {
       if (aflpSoundpackActive()) return false;
       if (openDialog) aflpShowSoundpackDialog();
-      else ui.notifications?.warn("AFLP: Voice/Ambient SFX is enabled, but the AFLR Soundpack module is not installed or active - there is no audio to play. Open Module Settings and use 'Get the AFLR Soundpack' to download it.", { permanent: true });
+      else ui.notifications?.warn(`${_aflpModName()}: Voice/Ambient SFX is enabled, but the AFLR Soundpack module is not installed or active - there is no audio to play. Open Module Settings and use 'Get the AFLR Soundpack' to download it.`, { permanent: true });
       return true;
     };
 
@@ -159,7 +169,7 @@ AFLP.Settings = {
     game.settings.registerMenu(S.ID, "getSoundpack", {
       name:       "AFLR Soundpack (Audio)",
       label:      "Get the AFLR Soundpack",
-      hint:       "Download the free AFLR Soundpack companion module - the voice profiles and ambient SFX used by AFLP's audio. Install and enable it alongside AFLP.",
+      hint:       "Download the free AFLR Soundpack companion module - the voice profiles and ambient SFX used by this module's audio. Install and enable it alongside this module.",
       icon:       "fas fa-download",
       type:       SoundpackLink,
       restricted: true,
@@ -282,7 +292,7 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.SHOW_WELCOME, {
       name:    "Show Welcome Message on Load",
-      hint:    "Show the AFLP welcome message when the world loads. Uncheck to suppress it. A new version's message will re-enable this automatically.",
+      hint:    `Show the ${_aflpModName()} welcome message when the world loads. Uncheck to suppress it. A new version's message will re-enable this automatically.`,
       scope:   "client",
       config:  true,
       type:    Boolean,
@@ -308,9 +318,9 @@ AFLP.Settings = {
     // silently lose their Lewd 3-4 content.
     game.settings.register(S.ID, S.KEYS.LEWD_LEVEL, {
       name:    "Lewd Level",
-      hint:    "The group's agreed content level (set during Session Zero). Gates which AFLR content and automation is available: 1 self-affecting only, 2 consensual humanoid, 3 arousal/kinks/magic-caused acts, 4 monster sexual defeat and CNC. Prefer setting this via the Session Zero Setup button on the welcome screen.",
+      hint:    "The group's agreed content level. Set it with the Lewd Level buttons at the top of these settings, or via Session Zero Setup.",
       scope:   "world",
-      config:  true,
+      config:  false,
       type:    Number,
       choices: { 1: "Lewd 1 - Typical Anime", 2: "Lewd 2 - The Witcher III", 3: "Lewd 3 - Skyrim (Sexy Mods)", 4: "Lewd 4 - Skyrim (Defeat Mods)" },
       default: 2,
@@ -476,20 +486,6 @@ AFLP.Settings = {
       },
     });
 
-    game.settings.register(S.ID, S.KEYS.HSCENE_AROUSAL, {
-      name:    "H Scene Arousal Display",
-      hint:    "Bars or pips for arousal. Per-user.",
-      scope:   "client",
-      config:  false,
-      type:    String,
-      choices: {
-        "auto": "Theme default",
-        "bars": "Bars",
-        "pips": "Pips",
-      },
-      default: "auto",
-    });
-
     // ── 4. Positions ───────────────────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.POSITION_TRACKING, {
@@ -503,11 +499,11 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.CUM_HOLE_FROM_POSITION, {
       name:    "Positions - Auto-Choose Cum Hole from Position",
-      hint:    "When enabled, the Cum macro skips its hole-selection dialog and uses the hole implied by each cock-having performer's tracked position (e.g. a vaginal position cums in the pussy). When disabled (default), the hole dialog always appears so you can choose freely. Requires Position Tracking.",
+      hint:    "When enabled (default), the Cum macro skips its hole-selection dialog and uses the hole implied by each cock-having performer's tracked position (e.g. a vaginal position cums in the pussy). When disabled, the hole dialog always appears so you can choose freely. Requires Position Tracking.",
       scope:   "world",
       config:  true,
       type:    Boolean,
-      default: false,
+      default: true,
     });
 
     game.settings.register(S.ID, S.KEYS.GANGBANG_AUTO_ASSIGN, {
@@ -519,29 +515,11 @@ AFLP.Settings = {
       default: false,
     });
 
-    // Custom Positions manager (menu) + its data store
-    const PositionManagerStub = class extends foundry.applications.api.ApplicationV2 {
-      static DEFAULT_OPTIONS = {
-        id: "aflp-position-manager-stub",
-        window: { title: "Custom Positions" },
-      };
-      async _renderHTML() { return document.createElement("div"); }
-      _replaceHTML(result, content) { content.replaceChildren(result); }
-      async _onRender() {
-        setTimeout(() => this.close(), 0);
-        const { AFLPPositionManager } = await import("./ui/aflp-position-manager.js");
-        new AFLPPositionManager().render(true);
-      }
+    // Custom Positions manager launcher (used by the Customization hub below).
+    AFLP.Settings._openPositionManager = async () => {
+      const { AFLPPositionManager } = await import("./ui/aflp-position-manager.js");
+      new AFLPPositionManager().render(true);
     };
-
-    game.settings.registerMenu(S.ID, "customPositionsMenu", {
-      name:       "Custom Positions",
-      hint:       "Add your own positions to the H Scene position picker. Stored as world data.",
-      label:      "Manage Custom Positions",
-      icon:       "fas fa-plus-circle",
-      type:       PositionManagerStub,
-      restricted: true,
-    });
 
     game.settings.register(S.ID, S.KEYS.CUSTOM_POSITIONS, {
       name:    "Custom Positions Data",
@@ -555,7 +533,7 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.TITLES_SHOW, {
       name:    "Titles - Show on Character Sheet",
-      hint:    "[Lewd 2+] Show the Titles section on the AFLP character sheet tab (view and edit mode).",
+      hint:    `[Lewd 2+] Show the Titles section on the ${_aflpModName()} character sheet tab (view and edit mode).`,
       scope:   "world",
       config:  true,
       type:    Boolean,
@@ -580,15 +558,6 @@ AFLP.Settings = {
       config:  true,
       type:    Boolean,
       default: true,
-    });
-
-    game.settings.register(S.ID, S.KEYS.STRESS_AS_AROUSAL, {
-      name:    "Daggerheart: Stress as Arousal",
-      hint:    "[Daggerheart only] When on, a creature's Stress track doubles as its Arousal: arousal reads and writes Stress directly, and cumming clears marked Stress. Off (the default) keeps the two separate - Stress is the will to resist (draining toward Mind Break) and Arousal is its own scene track owned by the Carnal resolution layer. Leave this OFF unless you specifically want Stress and Arousal to be one and the same track. No effect on other game systems.",
-      scope:   "world",
-      config:  dhOnly,
-      type:    Boolean,
-      default: false,
     });
 
     game.settings.register(S.ID, S.KEYS.CARNAL_FRAME, {
@@ -648,8 +617,8 @@ AFLP.Settings = {
     // ── 7. Cum & Cumflation ────────────────────────────────────────────────
 
     game.settings.register(S.ID, S.KEYS.CUM_VOLUME_MODE, {
-      name:    "Cum Volume - Unit Size",
-      hint:    "[Lewd 3+] Fantasy: each unit of cum is 250 ml (suitable for Cumflation). Realistic: each unit is 4 ml (anatomically grounded, Cumflation less meaningful).",
+      name:    "Cum Shot - Unit Size",
+      hint:    "[Lewd 3+] Sets how much fluid one Cum Shot is. Fantasy: 250 ml per shot (drives Cumflation). Realistic: 4 ml per shot (grounded, Cumflation less pronounced). A creature's Loads is how many shots it can fire before running dry.",
       scope:   "world",
       config:  true,
       type:    String,
@@ -670,8 +639,8 @@ AFLP.Settings = {
     });
 
     game.settings.register(S.ID, S.KEYS.INFINITE_CUM, {
-      name:    "Cum Volume - Infinite (Monsters)",
-      hint:    "When enabled, monsters' cum volume is not reduced when they cum. It stays at maximum. Useful for high-intensity encounters where tracking depletion is not desired.",
+      name:    "Cum Shot - Infinite Loads (NPCs)",
+      hint:    "When on, an NPC's Loads never deplete - they can keep firing Cum Shots without running dry. Useful for high-intensity encounters where tracking depletion is a chore.",
       scope:   "world",
       config:  true,
       type:    Boolean,
@@ -698,7 +667,7 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.CUMFLATION_TRACKING, {
       name:    "Cumflation - Show Cumflation Section in Sheet",
-      hint:    "[Lewd 3+] Show the Cumflation pip bars and tier links on the AFLP character sheet tab.",
+      hint:    `[Lewd 3+] Show the Cumflation pip bars and tier links on the ${_aflpModName()} character sheet tab.`,
       scope:   "world",
       config:  true,
       type:    Boolean,
@@ -707,7 +676,7 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.CUMFLATION_ML, {
       name:    "Cumflation - Show Cum Given/Received Lifetime Totals",
-      hint:    "[Lewd 3+] Show the Cum Given (ml) and Cum Received (ml) columns in the Lifetime Totals table on the AFLP sheet tab. Requires Cumflation master toggle to be on.",
+      hint:    `[Lewd 3+] Show the Cum Given (ml) and Cum Received (ml) columns in the Lifetime Totals table on the ${_aflpModName()} sheet tab. Requires Cumflation master toggle to be on.`,
       scope:   "world",
       config:  true,
       type:    Boolean,
@@ -793,6 +762,119 @@ AFLP.Settings = {
       onChange: () => window.AFLP_Splatter?.refreshAll?.(),
     });
 
+    game.settings.register(S.ID, "statusPanelEnabled", {
+      name:    "Status Effects - Enable (world)",
+      hint:    `GM master switch for the ${_aflpModName()} status effect displays (sheet docks, floating HUD, H-scene stacks, and the hide-from-Foundry option). Turn off if another module conflicts with it; everything returns to stock behavior.`,
+      scope:   "world",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      requiresReload: true,
+    });
+
+    game.settings.register(S.ID, S.KEYS.STATUS_PANEL_SHEET, {
+      name:    "Status Effects - Hover Beside Character Sheets",
+      hint:    `Per-user: cascade the ${_aflpModName()} status effect stack (afflictions, carnal states, drives, roles) down the right side of every open character sheet, floating just outside the window edge, in the hex-tile style.`,
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: () => AFLP.StatusPanel?.refreshHud?.(),
+    });
+
+    game.settings.register(S.ID, S.KEYS.STATUS_PANEL_HUD, {
+      name:    "Status Effects - Floating HUD",
+      hint:    "Toggled from the AFLR toolbar's status button. Per-user; drag the window by its handle - position is remembered.",
+      scope:   "client",
+      config:  false,
+      type:    String,
+      choices: { off: "Off", on: "Floating window" },
+      default: "off",
+      onChange: () => AFLP.StatusPanel?.refreshHud?.(),
+    });
+
+    game.settings.register(S.ID, "hsceneStatusDock", {
+      name:   "H Scene Status Stack (toggle lives on the card)",
+      scope:  "client",
+      config: false,
+      type:   Boolean,
+      default: true,
+    });
+
+    game.settings.register(S.ID, "statusCustomDefs", {
+      name:   "Custom Status Effects (data)",
+      scope:  "world",
+      config: false,
+      type:   Array,
+      default: [],
+      onChange: () => { AFLP.StatusPanel?.refreshHud?.(); },
+    });
+
+    // ── Customization hub ────────────────────────────────────────────────
+    // One menu button opening a hub dialog with a row per editor (Positions,
+    // Statuses, ...), de-cluttering the settings list. Each row launches the
+    // relevant editor.
+    game.settings.registerMenu(S.ID, "customizationHub", {
+      name:       "Customization",
+      label:      "Open Customization",
+      hint:       "Custom H-Scene positions, custom status effects, and other editors in one place.",
+      icon:       "fa-solid fa-sliders",
+      type:       class extends foundry.applications.api.ApplicationV2 {
+        render() { AFLP.Settings._openCustomizationHub(); return this; }
+      },
+      restricted: true,
+    });
+
+    game.settings.register(S.ID, "statusGlyphIcons", {
+      name:    "Status Effects - Use Glyph Icons",
+      hint:    `Per-user: draw the ${_aflpModName()} status panel with its clean built-in colored glyph placeholders (default) instead of each status's compendium art. A consistent, tidy look that also sidesteps missing or placeholder art. Turn off to use the mapped item artwork.`,
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      default: true,
+      onChange: () => {
+        try {
+          AFLP.StatusPanel?.refreshHud?.();
+          AFLP.StatusPanel?.refreshSceneDocks?.();
+          AFLP.StatusPanel?.refreshSheetDocks?.();
+        } catch (_) {}
+        for (const app of foundry.applications.instances?.values?.() ?? []) {
+          if (app?.actor?.documentName === "Actor") app.render?.(false);
+        }
+      },
+    });
+
+    game.settings.register(S.ID, "statusHudPos", {
+      name:   "Status HUD Position (persist)",
+      scope:  "client",
+      config: false,
+      type:   Object,
+      default: null,
+    });
+
+    game.settings.register(S.ID, S.KEYS.CUM_MEASURE, {
+      name:    "Lifetime Stats - Cum Measure",
+      hint:    "How Cum Shot volume is shown in lifetime stats and history. Cum Shots is the underlying unit and never changes; the others are converted for flavour and shift with the Realistic/Fantasy cum volume setting.",
+      scope:   "client",
+      config:  true,
+      type:    String,
+      choices: { units: "Cum Shots (units)", ml: "Millilitres", floz: "Fluid Ounces", gal: "Gallons" },
+      default: "units",
+    });
+
+    game.settings.register(S.ID, S.KEYS.STATUS_HIDE_NATIVE, {
+      name:    "Status Effects - Hide From Foundry's Own Displays",
+      hint:    `Per-user: stop ${_aflpModName()} conditions and effects (Mind Break, Afterglow, Exposed, Potion of Breeding, Cumflation and the rest) from also appearing in Foundry's native token icons and the system effects panel, so statuses only show in the ${_aflpModName()} displays you enabled above. System-native conditions are untouched. Note: due to how the Daggerheart system handles effects, enabling this in a Daggerheart world hides the native effect-icon panel completely.`,
+      scope:   "client",
+      config:  true,
+      type:    Boolean,
+      // Enabled by default: the module ships its own status displays, so showing
+      // the same conditions again in Foundry's token icons and effects panel is
+      // duplication. Users who want the native displays back can untick it.
+      default: true,
+      requiresReload: true,
+    });
+
     game.settings.register(S.ID, S.KEYS.CARD_FONT_BOOST, {
       name:    "H Scene Card - Larger Font (+2)",
       hint:    "Increase the H Scene card text by +2pt across all themes for readability. Layout and card sizing are unchanged.",
@@ -836,7 +918,7 @@ AFLP.Settings = {
     // ── Voice profiles ─────────────────────────────────────────────────────
     game.settings.register(S.ID, S.KEYS.VOICE_ENABLED, {
       name:    "Voice Profiles - Enable",
-      hint:    "Play per-actor voice clips on climax, Sexual Advance, Struggle Snuggle and cumflation milestones. Assign a profile per actor from the dropdown on their AFLP sheet tab. Voices load from the free AFLR Soundpack module. (No audio plays until the soundpack is installed and a profile is assigned, so leaving this on is harmless if unconfigured.)",
+      hint:    `Play per-actor voice clips on climax, Sexual Advance, Struggle Snuggle and cumflation milestones. Assign a profile per actor from the dropdown on their ${_aflpModName()} sheet tab. Voices load from the free AFLR Soundpack module. (No audio plays until the soundpack is installed and a profile is assigned, so leaving this on is harmless if unconfigured.)`,
       scope:   "world",
       config:  true,
       type:    Boolean,
@@ -846,7 +928,7 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.VOICE_FOLDER, {
       name:    "Voice Profiles - Extra Custom Folder",
-      hint:    "Optional. The shipped soundpack's voice profiles load automatically from the AFLR Soundpack module (modules/aflp-soundpack/aflp-voices). Use this only to add your OWN extra profiles kept in a separate folder. Each subfolder is one profile, with per-event subfolders inside it: <Profile>/climax, <Profile>/advance, <Profile>/struggle, <Profile>/cumflation, plus <Profile>/moan/1..6. A profile here with the same name as a bundled one overrides it.",
+      hint:    "Optional. The shipped soundpack's voice profiles load automatically from the AFLR Soundpack module (modules/aflr-soundpack/aflp-voices; the Lite pack is detected as a fallback). Use this only to add your OWN extra profiles kept in a separate folder. Each subfolder is one profile, with per-event subfolders inside it: <Profile>/climax, <Profile>/advance, <Profile>/struggle, <Profile>/cumflation, plus <Profile>/moan/1..6. A profile here with the same name as a bundled one overrides it.",
       scope:   "world",
       config:  true,
       type:    String,
@@ -867,7 +949,7 @@ AFLP.Settings = {
 
     game.settings.register(S.ID, S.KEYS.VOICE_MUTE_LOCAL, {
       name:    "Voice Profiles - Mute On My Client",
-      hint:    "Per-user: silence all AFLP voice clips for yourself only.",
+      hint:    `Per-user: silence all ${_aflpModName()} voice clips for yourself only.`,
       scope:   "client",
       config:  true,
       type:    Boolean,
@@ -894,9 +976,217 @@ AFLP.Settings = {
       default: 0.7,
     });
 
+    // Enhance the Configure Settings window: group AFLR settings under section
+    // banners, inject the interactive Lewd Level chooser, and hide the
+    // Daggerheart block off-DH. Purely presentational - it reorders and labels
+    // the existing rendered controls, it does not change what is registered.
+    AFLP.Settings._registerConfigEnhancer(dhOnly, pf2eOnly, dnd5eOnly);
   },
 
-  // ── Convenience getters ──────────────────────────────────────────────────
+  // ── Configure-Settings UI enhancer ─────────────────────────────────────────
+  // Section map: setting KEY -> the section it belongs under, in display order.
+  // Keys not listed stay where Foundry places them (should be none for AFLR).
+  SECTION_ORDER: [
+    ["general",   "General"],
+    ["hscene",    "H-Scene"],
+    ["positions", "Positions"],
+    ["arousal",   "Arousal & Edging"],
+    ["cum",       "Cum & Cumflation"],
+    ["splatter",  "Cum Splatter"],
+    ["pregnancy", "Pregnancy"],
+    ["titles",    "Titles"],
+    ["status",    "Status Effects"],
+    ["voice",     "Audio - Voice"],
+    ["sfx",       "Audio - Ambient SFX"],
+    ["dh",        "Daggerheart"],
+  ],
+  _sectionOf(key) {
+    const K = AFLP.Settings.KEYS;
+    const map = {
+      [K.SHOW_WELCOME]: "general", [K.TOOLBAR_MODE]: "general", [K.LEWD_LEVEL]: "general",
+      [K.HSCENE_ENABLED]: "hscene", [K.PROSE_FLAVOR]: "hscene", [K.HSCENE_LOG_TO_CHAT]: "hscene",
+      [K.SCENE_REPORT_VIS]: "hscene", [K.HSCENE_THEME_PC]: "hscene", [K.HSCENE_THEME_MON]: "hscene",
+      [K.HSCENE_PLAYER_PICK]: "hscene", [K.HSCENE_DOSSIER_FX]: "hscene", [K.CARD_FONT_BOOST]: "hscene",
+      [K.POSITION_TRACKING]: "positions", [K.CUM_HOLE_FROM_POSITION]: "positions", [K.GANGBANG_AUTO_ASSIGN]: "positions",
+      [K.AUTOMATION]: "arousal", [K.EDGE_AUTO]: "arousal", [K.EDGE_INCLUDE_NPC]: "arousal", [K.EDGE_SKIP_DIALOG]: "arousal",
+      [K.CUM_VOLUME_MODE]: "cum", [K.INFINITE_CUM]: "cum", [K.CUMFLATION_ENABLED]: "cum",
+      [K.CUMFLATION_HSCENE]: "cum", [K.CUMFLATION_TRACKING]: "cum", [K.CUMFLATION_ML]: "cum",
+      [K.SPLATTER_ENABLED]: "splatter", [K.SPLATTER_QUALITY]: "splatter", [K.SPLATTER_INTENSITY]: "splatter",
+      [K.SPLATTER_INCLUDE_NPC]: "splatter", [K.SPLATTER_COLOR]: "splatter", [K.SPLATTER_HIDE_LOCAL]: "splatter",
+      [K.PREGNANCY_STACKING]: "pregnancy",
+      [K.TITLES_SHOW]: "titles", [K.TITLES_AUTOMATION]: "titles",
+      "statusPanelEnabled": "status", [K.STATUS_PANEL_SHEET]: "status", "statusGlyphIcons": "status", [K.STATUS_HIDE_NATIVE]: "status",
+      [K.VOICE_ENABLED]: "voice", [K.VOICE_FOLDER]: "voice", [K.VOICE_VOLUME]: "voice", [K.VOICE_MUTE_LOCAL]: "voice",
+      [K.SFX_ENABLED]: "sfx", [K.SFX_VOLUME]: "sfx",
+      [K.CARNAL_FRAME]: "dh", [K.DUALITY_LABELS]: "dh",
+    };
+    return map[key] ?? null;
+  },
+
+  // Recommended defaults each Lewd Level applies (content AND presentation).
+  // Clicking a level in the chooser writes these as recommended defaults - even
+  // settings the user turned off come back on - then the user is free to
+  // customize before saving. Presentation (splatter/audio/cumflation) is seeded
+  // as a recommended default per level, not a hard content gate. `true`/`false`
+  // are booleans; strings are select values.
+  LEWD_PRESETS: {
+    1: { hsceneEnabled:false, arousalAutomation:false, positionTracking:false,
+         cumflationEnabled:false, splatterEnabled:false, voiceEnabled:false, sfxEnabled:false,
+         edgeAuto:false },
+    2: { hsceneEnabled:true, arousalAutomation:false, positionTracking:false,
+         cumflationEnabled:false, splatterEnabled:false, voiceEnabled:true, sfxEnabled:true,
+         edgeAuto:false },
+    3: { hsceneEnabled:true, arousalAutomation:true, positionTracking:true,
+         cumflationEnabled:true, splatterEnabled:true, voiceEnabled:true, sfxEnabled:true,
+         edgeAuto:true },
+    4: { hsceneEnabled:true, arousalAutomation:true, positionTracking:true,
+         cumflationEnabled:true, splatterEnabled:true, voiceEnabled:true, sfxEnabled:true,
+         edgeAuto:true },
+  },
+
+  _registerConfigEnhancer(dhOnly, pf2eOnly, dnd5eOnly) {
+    const S = AFLP.Settings;
+    const NS = S.ID;
+    Hooks.on("renderSettingsConfig", (app, html) => {
+      const root = html instanceof HTMLElement ? html : html?.[0];
+      if (!root) return;
+      // v14: each setting is a .form-group holding an input named "ns.key";
+      // all of a module's settings share one SECTION.tab container. Find our
+      // form-groups by the input name prefix.
+      const inputs = [...root.querySelectorAll(`[name^="${NS}."]`)];
+      if (!inputs.length) return;
+      const groups = [];
+      const seen = new Set();
+      for (const inp of inputs) {
+        const g = inp.closest(".form-group");
+        if (g && !seen.has(g)) { seen.add(g); groups.push(g); }
+      }
+      if (!groups.length) return;
+      const parent = groups[0].parentElement;
+      if (!parent || parent.dataset.aflpEnhanced) return;
+      parent.dataset.aflpEnhanced = "1";
+
+      const keyOfGroup = (g) => {
+        const inp = g.querySelector(`[name^="${NS}."]`);
+        return inp ? inp.getAttribute("name").slice(NS.length + 1) : null;
+      };
+
+      // Group rows by section.
+      const bySection = new Map();
+      for (const g of groups) {
+        const key = keyOfGroup(g);
+        const sec = key ? S._sectionOf(key) : null;
+        if (!sec) continue;
+        if (!bySection.has(sec)) bySection.set(sec, []);
+        bySection.get(sec).push(g);
+      }
+
+      // Rebuild in section order with banner headers. Insert a placeholder at
+      // the first group's position FIRST, then move groups into the fragment
+      // (moving them out of the DOM would invalidate a live anchor).
+      const placeholder = document.createComment("aflp-settings-anchor");
+      parent.insertBefore(placeholder, groups[0]);
+      const frag = document.createDocumentFragment();
+      for (const [secId, title] of S.SECTION_ORDER) {
+        const secRows = bySection.get(secId);
+        if (!secRows || !secRows.length) continue;
+        if (secId === "dh" && !dhOnly) { secRows.forEach(r => r.style.display = "none"); continue; }
+        const h = document.createElement("h3");
+        h.className = "aflp-settings-banner";
+        h.textContent = title;
+        h.style.cssText = "margin:14px 0 6px;padding:4px 0 3px;border-bottom:1px solid rgba(200,160,80,0.4);color:#c8a24a;font-size:13px;letter-spacing:0.06em;text-transform:uppercase;";
+        frag.append(h);
+        if (secId === "general") frag.append(S._buildLewdChooser());
+        for (const r of secRows) frag.append(r);
+      }
+      parent.insertBefore(frag, placeholder);
+      placeholder.remove();
+    });
+  },
+
+  _buildLewdChooser() {
+    const S = AFLP.Settings;
+    const wrap = document.createElement("div");
+    wrap.className = "aflp-lewd-chooser";
+    wrap.style.cssText = "margin:6px 0 12px;padding:10px;border:1px solid rgba(200,160,80,0.3);border-radius:6px;background:rgba(40,28,50,0.35);";
+    const cur = S.lewdLevel;
+    const LABELS = { 1: "Typical Anime", 2: "Witcher III", 3: "Skyrim (Sexy)", 4: "Skyrim (Defeat)" };
+    const btns = [1,2,3,4].map(n =>
+      `<button type="button" class="aflp-lewd-btn" data-level="${n}" style="flex:1;min-width:0;padding:7px 4px;border:1px solid ${n===cur?"#c8a24a":"rgba(200,160,80,0.3)"};border-radius:5px;background:${n===cur?"rgba(200,160,80,0.22)":"rgba(255,255,255,0.04)"};color:${n===cur?"#f0d68a":"#cabfa6"};cursor:pointer;font-size:11px;line-height:1.25;">
+        <strong style="display:block;font-size:15px;">${n}</strong>${LABELS[n]}</button>`).join("");
+    wrap.innerHTML = `
+      <div style="font-size:11px;color:#a892c0;margin-bottom:7px;">Pick a Lewd Level to apply its recommended defaults to the settings below - toggles update live so you can customize before saving. Content is gated by the level; presentation (splatter, audio, cumflation) is a recommended default you can override.</div>
+      <div style="display:flex;gap:6px;">${btns}</div>`;
+    // Click applies the preset to the OTHER controls in this open form (no save
+    // until the user clicks Save), and sets the Lewd Level select.
+    wrap.querySelectorAll(".aflp-lewd-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const lvl = Number(btn.dataset.level);
+        S._applyLewdPresetToForm(lvl, wrap.closest("form") ?? document);
+        // Repaint button highlight.
+        wrap.querySelectorAll(".aflp-lewd-btn").forEach(b => {
+          const on = Number(b.dataset.level) === lvl;
+          b.style.borderColor = on ? "#c8a24a" : "rgba(200,160,80,0.3)";
+          b.style.background = on ? "rgba(200,160,80,0.22)" : "rgba(255,255,255,0.04)";
+          b.style.color = on ? "#f0d68a" : "#cabfa6";
+        });
+      });
+    });
+    return wrap;
+  },
+
+  // Write a level's recommended defaults into the OPEN settings form's controls
+  // (does not persist; the user still clicks Save). Also sets the Lewd Level
+  // select so the number matches.
+  _applyLewdPresetToForm(level, formEl) {
+    const S = AFLP.Settings;
+    const NS = S.ID;
+    const preset = S.LEWD_PRESETS[level] ?? {};
+    const setControl = (key, value) => {
+      const el = formEl.querySelector(`[name="${NS}.${key}"]`);
+      if (!el) return;
+      if (el.type === "checkbox") { el.checked = !!value; }
+      else { el.value = String(value); }
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    for (const [key, value] of Object.entries(preset)) setControl(key, value);
+    // The Lewd Level number has no form control anymore (the chooser replaced
+    // its dropdown), so persist it directly - it is a world setting that gates
+    // features at runtime and is safe to apply immediately. The recommended
+    // toggle defaults above stay unsaved in the form for the user to tweak.
+    try {
+      game.settings.set(NS, S.KEYS.LEWD_LEVEL, level);
+      game.settings.set(NS, S.KEYS.LEWD_LEVEL_CONFIGURED, true);
+    } catch (_) {}
+  },
+
+  // Customization hub: a small dialog with a launcher per editor.
+  async _openCustomizationHub() {
+    const rows = [
+      { label: "Custom Positions", hint: "Add your own positions to the H-Scene position picker.",
+        run: () => AFLP.Settings._openPositionManager?.() },
+      { label: "Custom Status Effects", hint: "Map your own effect or condition items to status-panel rows by UUID.",
+        run: () => AFLP.StatusPanel?.openCustomEditor?.() },
+    ];
+    const body = rows.map((r, i) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid rgba(200,160,80,0.2);">
+        <div><div style="color:#e8c46a;font-size:13px;">${r.label}</div>
+          <div style="color:#8f7fb0;font-size:11px;margin-top:1px;">${r.hint}</div></div>
+        <button type="button" class="aflp-hub-open" data-idx="${i}" style="flex:0 0 auto;padding:5px 12px;">Open</button>
+      </div>`).join("");
+    await foundry.applications.api.DialogV2.wait({
+      window: { title: "AFLR Customization" },
+      position: { width: 460 },
+      content: `<div style="padding:2px 2px 6px;">${body}</div>`,
+      buttons: [{ action: "close", label: "Close", default: true }],
+      render: (ev, dlg) => {
+        dlg.element.querySelectorAll(".aflp-hub-open").forEach(b => {
+          b.addEventListener("click", () => { rows[Number(b.dataset.idx)]?.run?.(); dlg.close(); });
+        });
+      },
+    }, { classes: ["aflp-dialog"] });
+  },
+
 
   get automation()           { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.AUTOMATION); },
   get toolbarMode()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.TOOLBAR_MODE) ?? "floating"; },
@@ -922,7 +1212,6 @@ AFLP.Settings = {
   allows(feature) {
     return this.lewdLevel >= (this.LEWD_GATE[feature] ?? 0);
   },
-  get stressAsArousal()      { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.STRESS_AS_AROUSAL) ?? false; },
   get carnalFrame()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CARNAL_FRAME) ?? "default"; },
   get dualityLabels()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.DUALITY_LABELS) ?? "hope-fear"; },
   get proseFlavor()          { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.PROSE_FLAVOR); },
@@ -930,12 +1219,13 @@ AFLP.Settings = {
   get hsceneLogToChat()      { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_LOG_TO_CHAT); },
   get sceneReportVisibility(){ return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SCENE_REPORT_VIS) ?? "public"; },
   get positionTracking()     { return AFLP.Settings.allows("position") && game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.POSITION_TRACKING); },
-  get cumHoleFromPosition()  { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_HOLE_FROM_POSITION) ?? false; },
+  get cumHoleFromPosition()  { try { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_HOLE_FROM_POSITION) !== false; } catch { return true; } },
   get gangbangAutoAssign()   { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.GANGBANG_AUTO_ASSIGN); },
 
   get cumVolumeMode()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_VOLUME_MODE); },
   get pregnancyStacking()    { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.PREGNANCY_STACKING) === true; },
   /** ml per unit of cum — 250 (fantasy) or 4 (realistic) */
+  get cumMeasureMode()       { try { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_MEASURE) ?? "units"; } catch { return "units"; } },
   get cumUnitMl()            {
     return AFLP.Settings.cumVolumeMode === "realistic" ? 4 : 250;
   },
@@ -960,6 +1250,9 @@ AFLP.Settings = {
   get voiceMuteLocal()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.VOICE_MUTE_LOCAL) ?? false; },
   get sfxEnabled()           { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SFX_ENABLED) === true; },
   get sfxVolume()            { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.SFX_VOLUME) ?? 0.7; },
+  get statusPanelSheet()     { try { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.STATUS_PANEL_SHEET) !== false; } catch { return true; } },
+  get statusPanelHud()       { try { const v = game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.STATUS_PANEL_HUD) ?? "off"; return v === "off" ? "off" : "on"; } catch { return "off"; } },
+  get statusHideNative()     { try { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.STATUS_HIDE_NATIVE) === true; } catch { return false; } },
   get titlesAutomation()     { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.TITLES_AUTOMATION); },
   get titlesShow()           { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.TITLES_SHOW); },
   get edgeAuto()             { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.EDGE_AUTO); },
@@ -971,7 +1264,6 @@ AFLP.Settings = {
   get hsceneThemePc()        { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME_PC) ?? "aflp-classic"; },
   get hsceneThemeMon()       { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_THEME_MON) ?? "fuckamons"; },
   get hscenePlayerPick()     { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_PLAYER_PICK) ?? true; },
-  get hsceneArousalStyle()   { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_AROUSAL) ?? "auto"; },
   get hsceneDossierFx()      { return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.HSCENE_DOSSIER_FX) ?? false; },
 };
 
@@ -980,20 +1272,38 @@ AFLP.Settings = {
 // When dhDualityLabels is "virtue-lust" in a Daggerheart world, override the
 // SYSTEM's own i18n labels so the Fear tracker, sheet headings, settings, and
 // duality roll readout read Virtue / Lust. The system is fully i18n-driven for
-// these labels, so this is a clean, supported override. Runs at i18nInit before
-// any UI renders; this file is imported during the "init" hook, so the handler
-// registers in time. Display-only and reversible by reload. Scoped to exact
+// these labels, so this is a clean, supported override. Runs at i18nInit if the
+// settings have registered by then and at setup/ready if they have not - see the
+// hook wiring at the bottom. Display-only and reversible by reload. Scoped to exact
 // "Hope"/"Fear" labels plus a small allowlist of multi-word labels, so ability
 // and rules PROSE that merely mentions Hope/Fear is left untouched. Compendium
 // content (feature names/descriptions) is system data, not i18n, and is out of
 // scope by design.
+// Reads the setting only if it has actually been REGISTERED on this client.
+// `game.settings.get` throws "is not a registered game setting" otherwise, and
+// that is a race we lose on some seats - see the hook wiring at the bottom.
+// Returns null for "cannot know yet", which is not the same as "hope-fear".
+function _aflpDualityMode() {
+  const key = `${AFLP.Settings.ID}.${AFLP.Settings.KEYS.DUALITY_LABELS}`;
+  if (!game.settings?.settings?.has(key)) return null;
+  return game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.DUALITY_LABELS);
+}
+
+let _aflpDualityDone = false;
+
+// Returns TRUE when the question is settled (relabelled, or decided not to) and
+// FALSE when it could not be answered yet, so the caller can retry later.
 function _aflpApplyDualityI18n() {
   try {
-    if (game.system?.id !== "daggerheart") return;
-    if (game.settings.get(AFLP.Settings.ID, AFLP.Settings.KEYS.DUALITY_LABELS) !== "virtue-lust") return;
+    if (_aflpDualityDone) return true;
+    if (game.system?.id !== "daggerheart") { _aflpDualityDone = true; return true; }
+    const mode = _aflpDualityMode();
+    if (mode === null) return false;                       // registration has not run here yet
+    _aflpDualityDone = true;
+    if (mode !== "virtue-lust") return true;
     const tr = game.i18n?.translations;
     const D  = tr?.DAGGERHEART;
-    if (!D) return;
+    if (!D) return true;
 
     // 1) Exact-label pass: a value that is exactly "Hope"/"Fear" (the resource
     //    name, the in-chat roll outcome, countdown/automation labels, and the
@@ -1029,6 +1339,26 @@ function _aflpApplyDualityI18n() {
       if (foundry.utils.getProperty(tr, key) !== undefined) foundry.utils.setProperty(tr, key, val);
     }
     console.log("AFLP | Daggerheart duality labels relabeled to Virtue/Lust");
-  } catch (e) { console.warn("AFLP | duality i18n relabel failed", e); }
+    return true;
+  } catch (e) { console.warn("AFLP | duality i18n relabel failed", e); return true; }
 }
-Hooks.once("i18nInit", _aflpApplyDualityI18n);
+
+// AFLR registers its settings inside an ASYNC `init` handler - index.js does
+// `await import("./schema.js")` and two more imports before calling
+// `AFLP.Settings.register()` - and Foundry does not await hook handlers. So on a
+// client where those imports resolve slowly, i18nInit wins the race and the
+// setting does not exist yet. That threw "ardisfoxxs-lewd-pf2e.dhDualityLabels is
+// not a registered game setting" on every player login (31 Aug 2026) and the
+// relabel then never happened at all. Retry at setup, then ready; both are
+// before any sheet or tracker renders, and the translations table is read
+// lazily by game.i18n.localize at render time.
+// STALE IF: settings registration moves onto a synchronous init path (then the
+// first call always wins and the retries are dead code), or Foundry starts
+// awaiting async hook handlers.
+Hooks.once("i18nInit", () => {
+  if (_aflpApplyDualityI18n()) return;
+  Hooks.once("setup", () => {
+    if (_aflpApplyDualityI18n()) return;
+    Hooks.once("ready", _aflpApplyDualityI18n);
+  });
+});

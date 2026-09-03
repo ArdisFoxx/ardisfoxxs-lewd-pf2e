@@ -29,8 +29,9 @@ Hooks.once("init", async () => {
 // traits. We patch the prototype AFTER PF2e's init (in setup) to re-inject
 // AFLP custom traits after PF2e's computation completes.
 Hooks.once("setup", () => {
-  // PF2e-only: the trait recompute this patches exists only in the PF2e weapon class.
-  if (game.system?.id !== "pf2e") return;
+  // PF2e-family only: the trait recompute this patches exists only in the
+  // PF2e weapon class (which the sf2e fork shares).
+  if (!["pf2e", "sf2e"].includes(game.system?.id)) return;
   const WeaponClass = CONFIG.PF2E?.Item?.documentClasses?.weapon;
   if (!WeaponClass) return;
 
@@ -59,31 +60,65 @@ Hooks.once("setup", () => {
     "aphrodisiac-charge-greater",
   ]);
 
-  const _origPrepareBASEData = WeaponClass.prototype.prepareBASEData;
-  // Guard: if PF2e renames or removes this internal method in a future system
-  // version, skip patching rather than throwing on every weapon data prep.
-  if (typeof _origPrepareBASEData !== "function") {
-    console.warn("AFLP | WeaponClass.prepareBASEData not found; skipping Alcumical trait injection patch.");
+  // PF2e renamed prepareBASEData -> prepareBaseData in 8.x; patch whichever
+  // exists. (The old exact-name guard silently disabled this whole patch on
+  // 8.x, which also dropped the Alcumical bomb traits.)
+  const _pbdName = ["prepareBASEData", "prepareBaseData"]
+    .find(n => typeof WeaponClass.prototype[n] === "function");
+  if (!_pbdName) {
+    console.warn("AFLP | weapon prepareBaseData not found; skipping trait injection patch.");
     return;
   }
-  WeaponClass.prototype.prepareBASEData = function () {
+  const _origPrepareBASEData = WeaponClass.prototype[_pbdName];
+  WeaponClass.prototype[_pbdName] = function () {
     _origPrepareBASEData.call(this);
-
-    const slug = this.system?.slug ?? this._source?.system?.slug ?? "";
-    if (!ALCUMICAL_WEAPON_SLUGS.has(slug)) return;
 
     const traits = this.system?.traits?.value;
     if (!Array.isArray(traits)) return;
+    const toAdd = [];
 
-    const toAdd = ["alcumical", "sexual"];
-    if (APHRODISIAC_WEAPON_SLUGS.has(slug)) toAdd.push("aphrodisiac");
+    const slug = this.system?.slug ?? this._source?.system?.slug ?? "";
+    if (ALCUMICAL_WEAPON_SLUGS.has(slug)) {
+      toAdd.push("alcumical", "sexual");
+      if (APHRODISIAC_WEAPON_SLUGS.has(slug)) toAdd.push("aphrodisiac");
+    }
+
+    // AFLR etched runes: a weapon carrying etched AFLR runes gains each rune's
+    // traits (e.g. Sadomasochistic -> sexual). The etch/un-etch flow lives in
+    // the rune item sheet integration below; this is the mechanical half.
+    const etched = this.flags?.["ardisfoxxs-lewd-pf2e"]?.etchedRunes;
+    if (Array.isArray(etched)) {
+      for (const r of etched) {
+        for (const t of (window.AFLP?.RUNES?.[r]?.traits ?? [])) toAdd.push(t);
+      }
+    }
 
     for (const t of toAdd) {
       if (!traits.includes(t)) traits.push(t);
     }
   };
 
-  console.log("AFLP | Weapon trait injection registered for Alcumical items.");
+  // Armor: same recompute pattern for etched armor runes (e.g. Nude).
+  const ArmorClass = CONFIG.PF2E?.Item?.documentClasses?.armor;
+  const _armorPbdName = ["prepareBASEData", "prepareBaseData"]
+    .find(n => typeof ArmorClass?.prototype?.[n] === "function");
+  const _origArmorPBD = _armorPbdName ? ArmorClass.prototype[_armorPbdName] : null;
+  if (typeof _origArmorPBD === "function") {
+    ArmorClass.prototype[_armorPbdName] = function () {
+      _origArmorPBD.call(this);
+      const etched = this.flags?.["ardisfoxxs-lewd-pf2e"]?.etchedRunes;
+      if (!Array.isArray(etched) || !etched.length) return;
+      const traits = this.system?.traits?.value;
+      if (!Array.isArray(traits)) return;
+      for (const r of etched) {
+        for (const t of (window.AFLP?.RUNES?.[r]?.traits ?? [])) {
+          if (!traits.includes(t)) traits.push(t);
+        }
+      }
+    };
+  }
+
+  console.log("AFLP | Weapon trait injection registered for Alcumical items and etched runes.");
 });
 
 
@@ -158,6 +193,35 @@ Hooks.once("ready", async () => {
     Hooks.on("deleteItem", onGear);
   }
 
+  // ── Potion of Breeding effect -> Fertility condition binding ─────────────
+  // The PF2e effect items drive the cross-system "breeding" flag so the
+  // pregnancy code, condition manager, and status panel all read one truth.
+  // Under the staged model both potion effects mean Fertility 3 (no Brood
+  // Roll, it just takes) - they differ in duration, not stage. Deleting an
+  // effect recomputes from what remains; a manager-set value with no effect
+  // items on the actor is left alone (these hooks only fire for the two
+  // potion effects).
+  if (game.user.isGM) {
+    const _pobTemp = AFLP.items?.["potion-of-breeding-effect"]?.uuid ?? null;
+    const _pobPerm = AFLP.items?.["potion-of-breeding-effect-permanent"]?.uuid ?? null;
+    const _srcOf = (item) => String(item?.flags?.core?.sourceId ?? item?._stats?.compendiumSource ?? item?.sourceId ?? "");
+    const _isPobEffect = (item) => { const src = _srcOf(item); return src === _pobTemp || src === _pobPerm; };
+    const _syncBreeding = async (item) => {
+      const actor = item?.parent;
+      if (!actor || actor.documentName !== "Actor" || !_isPobEffect(item)) return;
+      const hasPerm = actor.items.some(i => _srcOf(i) === _pobPerm);
+      const hasTemp = actor.items.some(i => _srcOf(i) === _pobTemp);
+      const target = (hasPerm || hasTemp) ? 3 : 0;
+      try {
+        const current = AFLP.cond.value(actor, "breeding");
+        if (target > 0 && current !== target) await AFLP.cond.apply(actor, "breeding", target);
+        else if (target === 0 && (current > 0 || AFLP.cond.has(actor, "breeding"))) await AFLP.cond.remove(actor, "breeding");
+      } catch (e) { console.warn("AFLP | breeding sync failed:", e?.message); }
+    };
+    Hooks.on("createItem", _syncBreeding);
+    Hooks.on("deleteItem", _syncBreeding);
+  }
+
   // Cache-bust dynamic imports by module version. Browsers cache import() URLs
   // and will not re-fetch an unchanged URL across reloads, so without this an
   // updated UI script keeps running the stale cached copy until the version
@@ -180,11 +244,23 @@ Hooks.once("ready", async () => {
   await import("./ui/aflp-messages.js" + _v);
   await import("./ui/aflp-kinks.js" + _v);
   await import("./ui/aflp-bitchsuit.js" + _v);
+  // Living gear: ONE engine, and a table file per system that never sees the
+  // other's rows. Split 27 Aug 2026 - the single shared table was the direct
+  // cause of a DH plug that sealed nothing, a DH cage that nearly got a PF2e
+  // Denied floor its card never promised, and a header comment claiming DH had
+  // no living bondage at all. Core FIRST: both table files extend it.
+  await import("./ui/aflp-living-gear-core.js" + _v);
+  await import("./ui/aflp-living-gear-pf2e.js" + _v);
+  await import("./ui/aflp-living-gear-dh.js" + _v);
+  await import("./ui/aflp-deepthroat.js" + _v);
   await import("./ui/aflp-sentient-items.js" + _v);
   await import("./ui/aflp-alcumist.js" + _v);
   await import("./ui/aflp-splatter.js" + _v);
   await import("./ui/aflp-voice.js" + _v);
   await import("./ui/aflp-toolbar.js" + _v);
+  await import("./ui/aflp-status-panel.js" + _v);
+  await import("./ui/aflp-exposure-art.js" + _v);
+  if (["pf2e", "sf2e"].includes(game.system.id)) await import("./ui/aflp-runes.js" + _v);
 
   // Register the AFLP sheet opener (header button -> self-contained popout).
   // Replaces the old in-sheet tab so it works across PF2e, D&D 5e, and Daggerheart.
@@ -202,6 +278,24 @@ Hooks.once("ready", async () => {
 
   // Register bitchsuit automation hooks
   if (window.AFLP_Bitchsuit) AFLP_Bitchsuit.register();
+  // Each gates itself on its own system id, so exactly one of these binds hooks
+  // in any given world. Calling both is intentional - the gate belongs next to
+  // the rows it protects, not here.
+  window.AFLP_LivingGear_PF?.register();
+  window.AFLP_LivingGear_DH?.register();
+  // BACK-COMPAT ALIAS, pointing at whichever file this world actually runs.
+  // `aflp-feminizer-trap.js` and the simulation harness still say
+  // `AFLP_LivingGear`. It resolves to ONE system's object - it is not a merged
+  // view, and nothing may be added to it.
+  // STALE WHEN: the last consumer is moved onto the explicit name; then delete it.
+  window.AFLP_LivingGear = AFLP.system?.id === "daggerheart"
+    ? window.AFLP_LivingGear_DH
+    : window.AFLP_LivingGear_PF;
+  // The while-worn Denied floor for chastity gear. SEPARATE from living gear's
+  // register() above: it runs on every system, because the cards promise it on
+  // every system, and it is gated per-card rather than per-system. 27 Aug 2026.
+  AFLP.chastityGear?.registerDeniedFloor?.();
+  if (window.AFLP_Deepthroat) AFLP_Deepthroat.register();
 
   // Register sentient item (Armor of Hands) hooks
   if (window.AFLP_SentientItems) AFLP_SentientItems.register();
@@ -267,17 +361,45 @@ Hooks.once("ready", async () => {
     }
   });
 
-  // ── Register AFLP homebrew traits ───────────────────────────────────────
-  // Ensures Sexual, Bondage, and Aphrodisiac traits are present in all
-  // relevant PF2e trait categories. Safe to call on every load — only adds
-  // entries that are not already present.
-  if (game.user.isGM) {
-    const AFLP_TRAITS = [
-      { id: "sexual",      value: "Sexual" },
-      { id: "bondage",     value: "Bondage" },
-      { id: "aphrodisiac", value: "Aphrodisiac" },
-      { id: "alcumical",   value: "Alcumical" },
-    ];
+  // ── SF2e content-UUID remap ──────────────────────────────────────────────
+  // In an sf2e world the pf2e-tagged packs (and the pf2e system packs) do not
+  // exist; the module ships sf2e twins and AFLP.sysUuid redirects UUIDs to
+  // them. Wrapping fromUuid/fromUuidSync at this one chokepoint covers the
+  // schema UUID registries, every direct fromUuid call in module code and
+  // macros, and @UUID links embedded in shipped item descriptions. sysUuid is
+  // a strict passthrough for anything that is not a pf2e-family or module
+  // content UUID, and only ever rewrites in sf2e worlds.
+  if (game.system?.id === "sf2e") {
+    const _wrapFrom = (name) => {
+      const target = `${name}`;
+      if (globalThis.libWrapper?.register) {
+        libWrapper.register("ardisfoxxs-lewd-pf2e", target,
+          function (wrapped, uuid, ...args) { return wrapped(AFLP.sysUuid?.(uuid) ?? uuid, ...args); },
+          "WRAPPER");
+      } else {
+        const orig = globalThis[name];
+        if (typeof orig === "function") {
+          globalThis[name] = function (uuid, ...args) { return orig.call(this, AFLP.sysUuid?.(uuid) ?? uuid, ...args); };
+        }
+      }
+    };
+    try { _wrapFrom("fromUuid"); _wrapFrom("fromUuidSync"); }
+    catch (e) { console.warn("AFLP | sf2e uuid remap wrapper failed:", e?.message); }
+    console.log("AFLP | sf2e content-uuid remap active");
+  }
+
+  // ── Scrub AFLP traits from the pf2e homebrew world settings ─────────────
+  // The module now provides Sexual/Bondage/Aphrodisiac/Alcumical by direct
+  // CONFIG.PF2E injection at init (scripts/module.js), which makes those slugs
+  // RESERVED TERMS to the pf2e Homebrew Elements manager. Any copy of them
+  // left in the homebrew world settings - written by earlier module editions,
+  // or added manually by users following old setup instructions - is filtered
+  // out by pf2e at registration AND error-spammed as "X is a reserved term"
+  // whenever the settings menu renders. This one-time scrub removes our four
+  // ids from every homebrew trait category so the settings hold no dead
+  // copies. Self-extinguishing: once clean, nothing is written again.
+  if (game.user.isGM && ["pf2e", "sf2e"].includes(game.system?.id)) {
+    const AFLP_TRAIT_IDS = new Set(["sexual", "bondage", "aphrodisiac", "alcumical"]);
     const TRAIT_CATEGORIES = [
       "homebrew.creatureTraits",
       "homebrew.featTraits",
@@ -289,12 +411,16 @@ Hooks.once("ready", async () => {
     ];
     for (const category of TRAIT_CATEGORIES) {
       let current;
-      try { current = game.settings.get("pf2e", category) ?? []; }
-      catch { continue; }
-      const existing = new Set(current.map(t => t.id));
-      const toAdd = AFLP_TRAITS.filter(t => !existing.has(t.id));
-      if (toAdd.length) {
-        await game.settings.set("pf2e", category, [...current, ...toAdd]);
+      try { current = game.settings.get(game.system.id, category) ?? []; }
+      catch { continue; } // category not registered on this pf2e version
+      const cleaned = current.filter(t => !AFLP_TRAIT_IDS.has(t?.id));
+      if (cleaned.length !== current.length) {
+        try {
+          await game.settings.set(game.system.id, category, cleaned);
+          console.log(`AFLP | scrubbed module traits from pf2e ${category}`);
+        } catch (e) {
+          console.warn(`AFLP | could not scrub ${category}:`, e?.message);
+        }
       }
     }
   }

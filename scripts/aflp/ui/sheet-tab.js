@@ -12,7 +12,19 @@ const _aflpTabWasActive = new Map();
 // Staged pregnancy additions survive panel rebuilds by living here rather than on the DOM node
 const _aflpPregAdditions = new Map(); // actorId → Array of newPreg objects
 // Active AFLP sub-tab per actor, so it persists across panel rebuilds/refreshes.
-const _aflpActiveSubtab = new Map(); // actorId → "status" | "pregnancy" | "history"
+const _aflpActiveSubtab = new Map(); // actorId → "body" | "drives" | "breeding" | "history"
+const _aflpShowLocked = new Map();   // actorId → bool: display-view "Show Locked" titles toggle
+
+// Compact number formatter for progress values: whole numbers plain, fractions
+// to one decimal (downing-unit thresholds like 0.5 read cleanly), thousands with
+// a k suffix.
+const _fmtNum = (n) => {
+  const v = Number(n) || 0;
+  if (v >= 1000) return (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + "k";
+  if (Number.isInteger(v)) return String(v);
+  return v.toFixed(1);
+};
+
 
 AFLP.UI.SheetTab = {
 
@@ -23,6 +35,9 @@ AFLP.UI.SheetTab = {
     // "renderApplication" as a catch-all for any AppV2 sheet we miss.
     const _handler = (sheet, html, data) => {
       if (!sheet.actor) return;
+      // Never inject into a token config / prototype-token config (they carry an
+      // .actor and share the .tabs DOM the injector targets).
+      if (AFLP.UI.SheetTab._isNonSheetActorApp(sheet)) return;
       console.log("AFLP | render hook fired:", sheet.constructor.name, sheet.actor.name);
       if (!sheet.actor.isOwner && !game.user?.isGM) return;
       AFLP.UI.SheetTab._inject(sheet, html);
@@ -47,6 +62,7 @@ AFLP.UI.SheetTab = {
     // prevented inside _inject via the .aflp-tab-btn / _aflpInjecting guards.
     Hooks.on("renderApplicationV2", (app, html, data) => {
       if (!app.actor) return;
+      if (AFLP.UI.SheetTab._isNonSheetActorApp(app)) return;
       // Only inject into the actor's OWN sheet. Other ApplicationV2 windows also
       // expose an .actor (notably TokenConfig / PrototypeTokenConfig), and those
       // were getting the AFLP tab injected over their Appearance tab. The actor's
@@ -58,10 +74,37 @@ AFLP.UI.SheetTab = {
     // Legacy fallbacks for any non-AppV2 sheets (harmless no-ops under v14).
     Hooks.on("renderApplication", (app, html, data) => {
       if (!app.actor) return;
+      if (AFLP.UI.SheetTab._isNonSheetActorApp(app)) return;
       if (app.actor.sheet !== app) return; // same scope guard as the AppV2 path
       _handler(app, html, data);
     });
     Hooks.on("renderActorSheet", _handler);
+  },
+
+  // True for ApplicationV2 windows that carry an .actor but are NOT the actor's
+  // record sheet - notably TokenConfig / PrototypeTokenConfig (and any system
+  // subclass like DhTokenConfig / TokenConfigPF2e). These share the generic
+  // .tabs / .sheet-navigation DOM the injector looks for, so without this guard
+  // the AFLP tab lands over the config's Appearance tab. Checked by the config's
+  // own markers rather than actor.sheet identity, since some system token-config
+  // subclasses do not reliably satisfy actor.sheet !== app.
+  _isNonSheetActorApp(app) {
+    try {
+      // The config edits a Token document; a real actor sheet edits an Actor.
+      if (app?.document?.documentName === "Token") return true;
+      if (app?.token || app?.isPrototype) return true;
+      const classes = app?.options?.classes ?? [];
+      if (Array.isArray(classes) && classes.includes("token-config")) return true;
+      // Walk the prototype chain for any *TokenConfig* / *TokenApplication*.
+      let p = Object.getPrototypeOf(app);
+      let hops = 0;
+      while (p && p.constructor && hops++ < 12) {
+        const n = p.constructor.name || "";
+        if (/TokenConfig|TokenApplication|PlaceableConfig/.test(n)) return true;
+        p = Object.getPrototypeOf(p);
+      }
+    } catch (_) {}
+    return false;
   },
 
   // -----------------------------------------------
@@ -84,6 +127,11 @@ AFLP.UI.SheetTab = {
         "sheet.element:", sheet.element?.constructor?.name);
       return;
     }
+
+    // Hard stop: never inject into a token/prototype config even if some path
+    // reached _inject directly. The config shares the .tabs DOM the injector
+    // targets, so this is the last line of defense for the Appearance-tab bug.
+    if (AFLP.UI.SheetTab._isNonSheetActorApp(sheet)) return;
 
     // Guard against re-entrant injection BEFORE any awaits.
     // ensureCoreFlags calls setFlag which triggers a re-render, which fires the hook
@@ -212,6 +260,11 @@ AFLP.UI.SheetTab = {
     if (!html._aflpTabListenerAttached) {
       html._aflpTabListenerAttached = true;
       html.addEventListener("click", (ev) => {
+        // Cum Measure cycling is handled inside _aflpBtnHandler (the panel
+        // dispatcher), NOT here. The measure button lives inside .aflp-panel and
+        // the dispatcher stopPropagation()s it before it reaches this root
+        // listener - a branch here would be dead code. Tab-switch buttons below
+        // live OUTSIDE the panel (in the sheet nav), so those DO reach here.
         if (ev.target.closest(".aflp-tab-btn")) {
           _aflpTabWasActive.set(actor.uuid, true);
           // Hide primary tab panels using display:none only — do NOT remove .active.
@@ -252,6 +305,14 @@ AFLP.UI.SheetTab = {
     if (voiceOpen) html.querySelector(".aflp-panel")?.classList.add("aflp-voice-open");
     AFLP.UI.SheetTab._applyPanelHeight(html);
     AFLP.UI.SheetTab._activateListeners(html, actor, null);
+    // Re-fit the auto-height window: edit mode stacks all panes (tall), view mode
+    // shows one pane (short), so a refresh that flips mode changes height a lot.
+    try {
+      const appEl = html.closest?.(".application");
+      const app = [...(foundry.applications.instances?.values?.() ?? [])]
+        .find(a => a.constructor?.name === "AFLPSheetApp" && a.element === appEl);
+      if (app?.setPosition) requestAnimationFrame(() => app.setPosition({ height: "auto" }));
+    } catch (_) {}
   },
 
   // Ensure the sheet body can scroll when our tab is active.
@@ -280,17 +341,28 @@ AFLP.UI.SheetTab = {
     const cum          = actor.getFlag(FLAG, "cum")                         ?? AFLP.cumDefaults;
     const coomer       = actor.getFlag(FLAG, "coomer")                      ?? AFLP.coomerDefaults;
     const perShot      = AFLP.cumPerShot?.(actor) ?? 2;
+    // The pill used to print effectiveLoads, which is CAPACITY (base + gear) and
+    // never moves - so loads appeared not to spend even though the pool was
+    // draining. Remaining is the cum pool: cum.current counts load-units, so
+    // remaining loads = current / perShot. Clamped in case cum.max is stale
+    // relative to gear that changed capacity since the last recalculateCum.
+    const cumPool      = actor.getFlag(FLAG, "cum") ?? { current: 0, max: 0 };
+    const loadsCap     = AFLP.effectiveLoads(actor);
+    const loadsLeft    = Math.max(0, Math.min(loadsCap,
+      perShot > 0 ? Math.floor((cumPool.current ?? 0) / perShot) : 0));
     const cumShotBonus = Number(actor.getFlag(FLAG, "cumShotBonus")) || 0;
     const arousal      = actor.getFlag(FLAG, "arousal")     ?? AFLP.arousalDefaults;
     const arousalMax   = AFLP.HScene.calcArousalMax(actor);
     const arousalBase  = arousal.maxBase ?? 6;
-    const denied       = actor.getFlag(FLAG, "denied")      ?? AFLP.deniedDefaults;
+    const denied       = { ...(actor.getFlag(FLAG, "denied") ?? AFLP.deniedDefaults),
+                           value: AFLP.denied.total(actor) };   // the store differs per system
     const deniedValue  = denied.value ?? 0;
-    const horny        = actor.getFlag(FLAG, "horny")        ?? AFLP.hornyDefaults;
+    const horny        = { ...(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults),
+                           total: AFLP.horny.total(actor) };   // the store differs per system
     const hasPussy     = !!actor.getFlag(FLAG, "pussy");
     const hasCock      = !!actor.getFlag(FLAG, "cock");
     const cumflation   = actor.getFlag(FLAG, "cumflation")                  ?? AFLP.cumflationDefaults;
-    const genitalTypes = actor.getFlag(FLAG, "genitalTypes")                ?? {};
+    const genitalTypes = actor.getFlag(FLAG, "anatomyFeatures")                ?? {};
     const kinks        = sexual.kinks                                        ?? {};
     const kinkNotes    = sexual.kinkNotes                                    ?? {};
     const pregnancy    = structuredClone(actor.getFlag(FLAG, "pregnancy")   ?? {});
@@ -302,8 +374,12 @@ AFLP.UI.SheetTab = {
     const heldTitleIds = (sexual.titles ?? []).filter(id => AFLP_Titles.resolveTitle(id));
     // The title the player has chosen to display, falling back to most recent.
     const mostRecentTitleId = heldTitleIds.length ? heldTitleIds[heldTitleIds.length - 1] : null;
-    let displayTitleId = sexual.displayTitle ?? null;
-    if (!displayTitleId || !titlesHeld.has(displayTitleId)) displayTitleId = mostRecentTitleId;
+    const rawDisplay = sexual.displayTitle ?? null;
+    const noneChosen = rawDisplay === "__none__";
+    let displayTitleId = noneChosen ? null : rawDisplay;
+    // Fall back to most recent ONLY when nothing is chosen (not when None is the
+    // deliberate choice).
+    if (!noneChosen && (!displayTitleId || !titlesHeld.has(displayTitleId))) displayTitleId = mostRecentTitleId;
     const displayTitle = displayTitleId ? AFLP_Titles.resolveTitle(displayTitleId) : null;
 
     // Voice profile options (rendered into the panel so the control survives a
@@ -312,6 +388,56 @@ AFLP.UI.SheetTab = {
     const curVoice   = actor.getFlag(FLAG, "voiceProfile") || "";
     const voiceOpts  = ['<option value="">(none)</option>']
       .concat(voiceNames.map(n => `<option value="${n}"${n === curVoice ? " selected" : ""}>${n}</option>`))
+      .join("");
+
+    // ── BODY TYPE ───────────────────────────────────────────────────────────
+    //
+    // The position picker offers a different pool per body type, and 25 of the
+    // 86 positions are reachable ONLY through a non-biped one - both beast
+    // rides, the coils, the talon grips, the tentacle fills, the vine wraps, the
+    // phantom set and the massive carries.
+    //
+    // WHY THIS CONTROL HAD TO EXIST. `AFLP._detectPositionTrait` reads
+    // `actor.system.traits.value`, which is PF2e's creature-trait array.
+    // Daggerheart actors have NO `system.traits` at all, so `?? []` makes every
+    // branch false and the detection silently answers "biped". Measured 16 Aug
+    // 2026 across all 32 adversaries in `aflr-dh-actors`: 30 read biped and the
+    // only 2 that did not - Clutch-Wyrm and Brimstone Harem Drake - got there
+    // through the NAME list, not a trait. The Knotting Warhound is a biped to
+    // the position system, so it cannot be offered its own Mounted position.
+    // 5e is expected to be the same (it stores creature type at
+    // `system.details.type.value`) but was not measured - `dnd-test` was not up.
+    //
+    // `getActorPositions` already prefers `flags.world.positionTrait` over
+    // detection, so this control is the whole mechanism - no new plumbing. The
+    // ONLY other writer is `aflp-token-initialize.js`, which stores the detected
+    // value once if the flag is absent and whose comment has always called it an
+    // override a GM can set. This is that override.
+    //
+    // "Auto" writes NOTHING and clears the flag, so detection stays live and the
+    // label reports what it currently answers. Showing the detected value is
+    // half the point: a wrong body type is invisible otherwise, which is how 30
+    // adversaries sat mis-typed without anyone noticing.
+    //
+    // WHAT WOULD MAKE THIS STALE: `_detectPositionTrait` gaining a per-adapter
+    // branch. It would still want the override; it would stop being the only way
+    // a Daggerheart creature can be anything but a biped.
+    const BODY_TYPES = [
+      ["biped",       "Biped (humanoid)"],
+      ["massive",     "Massive (large humanoid)"],
+      ["quadruped",   "Quadruped (beast)"],
+      ["serpentine",  "Serpentine"],
+      ["winged",      "Winged"],
+      ["tentacled",   "Tentacled / Aberration"],
+      ["plant",       "Plant"],
+      ["incorporeal", "Incorporeal"],
+    ];
+    const curBodyType = actor.getFlag(FLAG, "positionTrait") || "";
+    let detectedBodyType = "biped";
+    try { detectedBodyType = AFLP._detectPositionTrait?.(actor) ?? "biped"; } catch (e) { /* bare rig */ }
+    const detectedLabel = BODY_TYPES.find(([v]) => v === detectedBodyType)?.[1] ?? detectedBodyType;
+    const bodyTypeOpts = [`<option value=""${curBodyType ? "" : " selected"}>Auto (${detectedLabel})</option>`]
+      .concat(BODY_TYPES.map(([v, l]) => `<option value="${v}"${v === curBodyType ? " selected" : ""}>${l}</option>`))
       .join("");
 
     if (!sexual.lifetime.mlGiven)    sexual.lifetime.mlGiven    = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 };
@@ -330,29 +456,44 @@ AFLP.UI.SheetTab = {
       ? `<input class="aflp-input" type="number" name="${name}" value="${value}" style="width:44px;text-align:center"/>`
       : `<span>${value}</span>`;
 
-    const actRows = ["oral", "vaginal", "anal", "facial", "gangbang"].map(act => {
+    // Lifetime acts, in Cum Shot UNITS and LOADS - the canonical stats. ml is a
+    // presentation of units and is applied at render via AFLP.cumMeasure, so a
+    // Fantasy/Realistic switch never rewrites history.
+    const _measure = AFLP.Settings.cumMeasureMode ?? "units";
+    const _uHole = (bucket, hole) => AFLP.unitsForHole(sexual.lifetime, bucket, hole);
+    const _fmt = (units) => AFLP.cumMeasure(units, _measure);
+
+    const ACT_HOLES = ["oral", "vaginal", "anal", "facial", "gangbang"];
+    let _totLoadsR = 0, _totLoadsG = 0, _totUnitsR = 0, _totUnitsG = 0;
+    const actRows = ACT_HOLES.map(act => {
       if (act === "vaginal" && !hasPussy) return "";
-      const tReceived = sexual.lifetime[act]              ?? 0;
-      const tGiven    = act === "gangbang" ? null : (sexual.lifetime.given?.[act] ?? 0);
-      const mlR       = sexual.lifetime.mlReceived?.[act] ?? 0;
-      const mlG       = sexual.lifetime.mlGiven?.[act]    ?? 0;
+      const loadsR = sexual.lifetime[act] ?? 0;
+      const loadsG = act === "gangbang" ? null : (sexual.lifetime.given?.[act] ?? 0);
+      const unitsR = _uHole("unitsReceived", act);
+      const unitsG = act === "gangbang" ? null : _uHole("unitsGiven", act);
 
-      const givenCell   = act === "gangbang"
-        ? `<td class="aflp-num">-</td>`
-        : `<td class="aflp-num">${cell(tGiven, `given.${act}`)}</td>`;
-      const recCell     = `<td class="aflp-num">${cell(tReceived, `lifetime.${act}`)}</td>`;
-      const mlGivenCell = `<td class="aflp-num">${cell(mlG, `mlGiven.${act}`)}</td>`;
-      const mlRecCell   = `<td class="aflp-num">${cell(mlR, `mlReceived.${act}`)}</td>`;
+      _totLoadsR += loadsR; _totUnitsR += unitsR;
+      if (act !== "gangbang") { _totLoadsG += (loadsG ?? 0); _totUnitsG += (unitsG ?? 0); }
 
+      const dash = `<td class="aflp-num">-</td>`;
       return `
         <tr>
           <td class="aflp-act-label">${act}</td>
-          ${hasCock ? givenCell : ""}
-          ${recCell}
-          ${hasCock && AFLP.Settings.cumflationMl ? mlGivenCell : ""}
-          ${AFLP.Settings.cumflationMl ? mlRecCell : ""}
+          ${hasCock ? (act === "gangbang" ? dash : `<td class="aflp-num">${cell(loadsG, `given.${act}`)}</td>`) : ""}
+          <td class="aflp-num">${cell(loadsR, `lifetime.${act}`)}</td>
+          ${hasCock ? (act === "gangbang" ? dash : `<td class="aflp-num aflp-units">${_fmt(unitsG)}</td>`) : ""}
+          <td class="aflp-num aflp-units">${_fmt(unitsR)}</td>
         </tr>`;
     }).join("");
+
+    const actTotalRow = `
+      <tr class="aflp-total-row">
+        <td class="aflp-act-label"><strong>Total</strong></td>
+        ${hasCock ? `<td class="aflp-num"><strong>${_totLoadsG}</strong></td>` : ""}
+        <td class="aflp-num"><strong>${_totLoadsR}</strong></td>
+        ${hasCock ? `<td class="aflp-num aflp-units"><strong>${_fmt(_totUnitsG)}</strong></td>` : ""}
+        <td class="aflp-num aflp-units"><strong>${_fmt(_totUnitsR)}</strong></td>
+      </tr>`;
 
     if (titlesMode) {
       return `
@@ -373,8 +514,8 @@ AFLP.UI.SheetTab = {
             ${!editMode && heldTitleIds.length ? `<div class="aflp-title-hint" style="margin-bottom:6px;">\u2605 sets your displayed title</div>` : ""}
             <div style="border-bottom:1px solid var(--aflr-border-gold);margin-bottom:8px;"></div>
             ${editMode
-              ? AFLP.UI.SheetTab._renderTitlesEdit(titlesHeld)
-              : AFLP.UI.SheetTab._renderTitlesView(titlesHeld, displayTitleId)}
+              ? AFLP.UI.SheetTab._renderTitlesEdit(titlesHeld, actor, sexual)
+              : AFLP.UI.SheetTab._renderTitlesView(titlesHeld, displayTitleId, actor, sexual)}
           </div>
         </section>
       </div>`;
@@ -385,54 +526,34 @@ AFLP.UI.SheetTab = {
 
       ${AFLP.UI.SheetTab._css()}
 
-      <!-- Title banner (always visible, above sub-tabs) -->
-      ${AFLP.Settings.titlesShow ? AFLP.UI.SheetTab._renderTitleBanner(displayTitle, heldTitleIds.length) : ""}
-
-      <!-- Active AFLR condition badges (dom/sub/exposed/mind-break/defeated), fed from AFLP.cond -->
-      ${AFLP.UI.SheetTab._renderConditionBadges(actor)}
-
-      <!-- Sub-tab navigation -->
-      <nav class="aflp-subtabs">
-        <a class="aflp-subtab" data-subtab="status">Sexual Status</a>
-        ${hasPussy ? `<a class="aflp-subtab" data-subtab="pregnancy">Pregnancy</a>` : ""}
-        <a class="aflp-subtab" data-subtab="history">Partner History${history.length ? ` <span class="aflp-subtab-count">${history.length}</span>` : ""}</a>
-      </nav>
-
-      <!-- ═══ Sexual Status pane ═══ -->
-      <section class="aflp-subtab-pane" data-subtab-pane="status">
-
-      <!-- Header row: Cum / Coomer / Edit button -->
-      <div class="aflp-header">
+      <!-- ═══ B: Compact masthead (red title + Cum Shot pill + icon buttons) ═══ -->
+      <div class="aflp-masthead">
+        ${AFLP.Settings.titlesShow && displayTitle
+          ? `<span class="aflp-mast-title" data-title-id="${displayTitle.id}" title="${displayTitle.desc}">\u2605 ${displayTitle.name}</span>`
+          : `<span class="aflp-mast-title aflp-mast-title-empty">\u2605 ${AFLP.Settings.titlesShow ? "No Title" : ""}</span>`}
         ${editMode ? `
-        <div class="aflp-cum-edit" style="display:flex;flex-direction:column;gap:4px;background:rgba(0,0,0,.18);border:1px solid #c9a96e55;border-radius:6px;padding:6px 9px;min-width:230px;">
-          <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:600;white-space:nowrap;">
-            <span>Cum Shot Bonus</span>${inlineEdit(cumShotBonus, "cumShotBonus")}<span style="opacity:.6;">&times;</span>${inlineEdit(coomer.level, "coomer.level")}<span>Loads</span>
-          </div>
-          <div style="font-size:11px;font-style:italic;opacity:.6;">Cum Shot value ${perShot} &middot; about ${perShot * (AFLP.CUM_UNIT_ML ?? 250)} ml (a value of 1 is about ${AFLP.CUM_UNIT_ML ?? 250} ml)</div>
+        <div class="aflp-cum-edit aflp-mast-cum-edit">
+          <span>Cum Shot Bonus</span>${inlineEdit(cumShotBonus, "cumShotBonus")}<span style="opacity:.6;">|</span><span>Loads Bonus</span>${inlineEdit(Number(coomer.bonus) || 0, "coomer.bonus")}<span style="opacity:.55;font-size:11px;" title="Base ${coomer.level ?? AFLP.COOMER_DEFAULT} plus your bonus and any worn gear">= ${perShot} &times; ${loadsCap}</span>
         </div>` : `
-        <div class="aflp-cum-pill">
-          <span class="aflp-label">Cum Shot</span>
-          <span>${perShot}</span>
-          <span class="aflp-cum-sep">&times;</span>
-          <span>${AFLP.effectiveLoads(actor)}</span>
+        <div class="aflp-cum-pill aflp-mast-cum">
+          <span class="aflp-label">Cum Shot</span><span>${perShot}</span>
+          <span class="aflp-cum-sep">&times;</span><span class="aflp-cum-left${loadsLeft <= 0 ? " aflp-cum-empty" : ""}" title="${loadsLeft} of ${loadsCap} loads left - rest to refill">${loadsLeft}</span><span class="aflp-cum-sep">/</span><span>${loadsCap}</span>
           <span class="aflp-cum-sep">loads</span>
         </div>`}
-        <div class="aflp-header-btns aflp-btn-block">
+        <div class="aflp-mast-btns">
           ${editMode
-            ? `<button type="button" class="aflp-btn aflp-save-btn aflp-btn-wide">💾 Save</button>
-               <button type="button" class="aflp-btn aflp-cancel-btn aflp-btn-wide">✕ Cancel</button>`
-            : `<button type="button" class="aflp-btn aflp-edit-btn aflp-btn-wide">✏ Edit</button>
-               <div class="aflp-btn-row">
-                 <button type="button" class="aflp-btn aflp-lovense-btn aflp-btn-sq" title="Lovense Integration Settings">🖤</button>
-                 <button type="button" class="aflp-btn aflp-voice-btn aflp-btn-sq" title="Voice profile">🔊</button>
-               </div>`
+            ? `<button type="button" class="aflp-btn aflp-save-btn">💾 Save</button>
+               <button type="button" class="aflp-btn aflp-cancel-btn">✕ Cancel</button>`
+            : `${game.user?.isGM ? `<button type="button" class="aflp-btn aflp-status-btn aflp-cond-manage" title="Status & conditions (GM)">＋ Status</button>` : ""}
+               <button type="button" class="aflp-btn aflp-icon-btn aflp-edit-btn" title="Edit stats"><i class="fa-solid fa-pen-to-square"></i></button>
+               <button type="button" class="aflp-btn aflp-icon-btn aflp-voice-btn" title="Voice profile">🔊</button>
+               <button type="button" class="aflp-btn aflp-icon-btn aflp-lovense-btn" title="Lovense Integration">🖤</button>`
           }
         </div>
       </div>
 
-      <!-- Voice profile control: toggled by the speaker button above; hidden
-           until the panel carries .aflp-voice-open. Lives in the panel so it
-           survives refreshes and shows on the docked sheet. -->
+      <!-- Voice profile control: popover toggled by the speaker icon. Hidden
+           until the panel carries .aflp-voice-open. -->
       <div class="aflp-voice-ctl" title="AFLP voice profile for this actor. Test steps through the pack; Rescan re-reads the voice folder set in module settings.">
         <span class="aflp-voice-label">Voice</span>
         <select class="aflp-voice-select">${voiceOpts}</select>
@@ -440,7 +561,27 @@ AFLP.UI.SheetTab = {
         <button type="button" class="aflp-btn aflp-voice-rescan">Rescan</button>
       </div>
 
-      <!-- Arousal + Horny pip bars -->
+      <!-- Body type: which position pool this creature is offered. Shares the
+           voice popover so it does not cost the panel a permanent row; both are
+           set-once settings rather than things read at a glance. -->
+      <div class="aflp-voice-ctl" title="Which H-Scene position pool this creature is offered. Auto reads the system's own creature traits, which only Pathfinder populates - set it by hand for a beast, ooze, serpent or giant on Daggerheart or 5e.">
+        <span class="aflp-voice-label">Body</span>
+        <select class="aflp-voice-select aflp-bodytype-select">${bodyTypeOpts}</select>
+      </div>
+
+      <!-- Condition badges: ONLY when the status window is disabled (otherwise
+           the status panel beside the sheet already shows these). -->
+      ${game.settings.get(AFLP.Settings.ID, "statusPanelEnabled") === false
+        ? AFLP.UI.SheetTab._renderConditionBadges(actor) : ""}
+
+      <!-- ═══ C: Re-themed sub-tab navigation ═══ -->
+      <nav class="aflp-subtabs">
+        <a class="aflp-subtab" data-subtab="body">Body</a>
+        <a class="aflp-subtab" data-subtab="drives">Drives</a>
+        <a class="aflp-subtab" data-subtab="history">History${history.length ? ` <span class="aflp-subtab-count">${history.length}</span>` : ""}</a>
+      </nav>
+
+      <!-- Arousal + Horny pip bars (shared, above the panes) -->
       <div class="aflp-bars-section">
         <!-- Arousal bar -->
         <div class="aflp-bar-row">
@@ -463,14 +604,20 @@ AFLP.UI.SheetTab = {
             : ""}
           <span class="aflp-denied-btns" style="display:flex;align-items:center;gap:3px;margin-left:6px;">
             <button class="aflp-denied-dec aflp-btn-tiny" title="Remove Denied" ${deniedValue <= 0 ? "disabled" : ""}>-</button>
-            <button class="aflp-denied-inc aflp-btn-tiny" title="Add Denied" ${deniedValue >= 6 ? "disabled" : ""}>+</button>
+            <button class="aflp-denied-inc aflp-btn-tiny" title="Add Denied" ${deniedValue >= AFLP.denied.cap(actor) ? "disabled" : ""}>+</button>
           </span>
         </div>
         <!-- Horny bar -->
         ${(() => {
-          const hp = horny.permanent ?? 0;
-          const ht = horny.temp ?? 0;
-          const total = hp + ht;
+          // The TOTAL comes from AFLP.horny, which knows which store this system
+          // keeps it in; only the permanent/temporary SPLIT comes from the bag.
+          // Reading `temp + permanent` here showed 0/3 on Daggerheart for a
+          // character the scene card and the status panel both showed as Horny 3,
+          // because on DH the total lives in the valued condition and the bag
+          // carries only the floor.
+          const total = AFLP.horny.total(actor);
+          const hp = Math.min(Number(horny.permanent) || 0, total);
+          const ht = Math.max(0, total - hp);
           // In edit mode, pips are visual-only; permanent is staged via hidden input.
           // staged-perm class: lighter pink + red border, opacity 0.75 — visually distinct from committed perm.
           const pips = Array.from({length: 3}, (_, i) => {
@@ -517,66 +664,128 @@ AFLP.UI.SheetTab = {
         <label class="aflp-reset-check"><input type="checkbox" name="reset-titles"/> Titles</label>
       </div>` : ""}
 
-      <!-- Two-column: Lifetime | Genitalia & Kinks -->
-      <div class="aflp-two-col">
-        <div class="aflp-col aflp-col-left">
-          <h3 class="aflp-section-header">Lifetime Totals</h3>
-          <table class="aflp-table">
-            <thead>
-              <tr>
-                <th>Sex Act</th>
-                ${hasCock ? `<th>Times Given</th>` : ""}
-                <th>Times Received</th>
-                ${hasCock && AFLP.Settings.cumflationMl ? `<th>Cum Given (ml)</th>` : ""}
-                ${AFLP.Settings.cumflationMl ? `<th>Cum Received (ml)</th>` : ""}
-              </tr>
-            </thead>
-            <tbody>${actRows}</tbody>
-          </table>
+      <!-- ═══ BODY pane: doll-driven region layout (lower body / torso / head) ═══ -->
+      <section class="aflp-subtab-pane" data-subtab-pane="body">
+        <h3 class="aflp-section-header">Anatomy</h3>
+        <div class="aflp-genitalia">
+          ${await (async () => {
+            try {
+              const ST = AFLP.UI.SheetTab;
+              // Silhouette: explicit per-actor flag wins (the doll-assignment pass
+              // sets it); otherwise characters derive from anatomy and everything
+              // else defaults to the Monster doll (horse/wolf/dragon/goblin stack).
+              const silh = actor.getFlag(FLAG, "dollSilhouette")
+                ?? (actor.type !== "character" ? "Monster"
+                : ((hasCock && !hasPussy) ? "Male" : "Female"));
+              const ct = AFLP.Settings.cumflationTracking;
+              const regions = await ST._renderGenitaliaRegions(hasPussy, hasCock, genitalTypes, editMode, actor.getFlag(FLAG, "bodyFeatures") ?? {});
+              // Cumflated = cum INSIDE a hole; Coated = cum ON a surface. Torso and
+              // Head each hold one of each, and the Torso's two are BOTH called
+              // Tits - the reservoir and the chest coat. That distinction now rides
+              // on each row's label (HOLE_KIND) rather than a heading above the
+              // group, because the heading rendered above the row's ICON instead of
+              // above its pips. Never merge these into one call - the order of the
+              // two calls is what puts filled above coated.
+              const cumSection = async (holes) => {
+                if (!ct) return "";
+                const rows = await ST._renderCumflationRows(cumflation, totalTier, actor, { holeFilter: holes });
+                return /aflp-cum-row/.test(rows) ? rows : "";
+              };
+              const lowerBody = regions.lowerBody
+                + await cumSection(["vaginal", "anal"])
+                + await ST._renderSizeTraining(actor, hasPussy, ["pussy", "anal"])
+                + ST._renderSizeReadout(actor, ["cock", "vaginal", "anal"]);
+              const torso = regions.torso
+                + ST._renderSizeReadout(actor, ["tits"])
+                + await cumSection(["onahole"])
+                + await cumSection(["bodyCoat"])
+                + await ST._renderSizeTraining(actor, hasPussy, ["onahole"])
+                + await ST._renderMilk(actor, editMode)
+                + ST._renderActivePregnancy(actor, pregnancy, editMode, hasPussy);
+              const head = regions.head
+                + await cumSection(["oral"])
+                + await cumSection(["facial"])
+                + await ST._renderSizeTraining(actor, hasPussy, ["oral"])
+                + ST._renderSizeReadout(actor, ["oral"]);
+              const doll = ST._dollShell(silh, lowerBody, torso, head, ST._activeRegion?.[actor.id] ?? "lower-body");
+              const footer = ct
+                ? `<button type="button" class="aflp-coat-toggle" title="Cycle the cumflation token coat: Portrait (flat face/bust image, no ring) - Bust (cropped portrait inside a dynamic ring)." style="margin-top:8px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;background:#2a261f;color:#c9a96e;border:1px solid #3a342b;border-radius:4px;padding:3px 8px;cursor:pointer;">Token coat: ${actor.getFlag(AFLP.FLAG_SCOPE, "coatBust") ? "Bust" : "Portrait"}</button>`
+                : "";
+              return doll + footer;
+            } catch (e) {
+              console.warn("AFLP | Body region layout failed:", e?.stack ?? e?.message);
+              return `<div class="aflp-none" style="padding:8px">Body layout error: ${e?.message ?? "unknown"}. Other tabs still work.</div>`;
+            }
+          })()}
         </div>
+      </section>
 
-        <div class="aflp-col aflp-col-right">
-          <h3 class="aflp-section-header">Genitalia</h3>
-          <div class="aflp-genitalia">
-            ${editMode
-              ? await AFLP.UI.SheetTab._renderGenitaliaEdit(hasPussy, hasCock, genitalTypes)
-              : await AFLP.UI.SheetTab._renderGenitalia(hasPussy, hasCock, genitalTypes)}
-          </div>
-          <h3 class="aflp-section-header" style="margin-top:10px">Kinks</h3>
-          <div class="aflp-kinks">
+      <!-- ═══ DRIVES pane: Kinks + Titles ═══ -->
+      <!-- Lifetime Totals moved to History, where the stats belong and where they
+           have room to expand. Kinks take the full width they always needed - they
+           were cramped into half a column with notes truncated. The kink list uses a
+           nested grid so it flows two-up when wide and one-up in the H-Scene
+           sidecar, handled entirely by the existing @container query. -->
+      <section class="aflp-subtab-pane" data-subtab-pane="drives">
+        ${AFLP.Settings.titlesShow ? AFLP.UI.SheetTab._renderTrackedTitle(actor, sexual) : ""}
+
+        <div class="aflp-section">
+          <h3 class="aflp-section-header">Kinks</h3>
+          <div class="aflp-kinks aflp-kinks-wide">
             ${editMode
               ? AFLP.UI.SheetTab._renderKinksEdit(kinks, kinkNotes)
               : await AFLP.UI.SheetTab._renderKinks(kinks, kinkNotes)}
           </div>
         </div>
-      </div>
-
-      <!-- Cumflation -->
-      ${AFLP.Settings.cumflationTracking ? `
-      <div class="aflp-section">
-        <h3 class="aflp-section-header">Cumflation</h3>
-        <div class="aflp-cumflation-grid">
-          ${await AFLP.UI.SheetTab._renderCumflationRows(cumflation, totalTier, actor)}
-        </div>
-        <button type="button" class="aflp-coat-toggle" title="Cycle the cumflation token coat: Portrait (flat face/bust image, no ring) - Bust (cropped portrait inside a dynamic ring)." style="margin-top:6px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;background:#2a261f;color:#c9a96e;border:1px solid #3a342b;border-radius:4px;padding:3px 8px;cursor:pointer;">Token coat: ${actor.getFlag(AFLP.FLAG_SCOPE, "coatBust") ? "Bust" : "Portrait"}</button>
-      </div>` : ""}
-
+        ${AFLP.Settings.titlesShow ? `
+        <div class="aflp-titles-section">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <h3 class="aflp-section-header" style="margin:10px 0 6px;border:none;">Titles</h3>
+            ${!editMode ? `
+            <label class="aflp-showlocked" title="Show titles you haven't earned yet, with progress toward each">
+              <input type="checkbox" class="aflp-showlocked-check" ${_aflpShowLocked.get(actor.id) ? "checked" : ""}/>
+              <span>Show Locked</span>
+            </label>` : ""}
+          </div>
+          ${editMode
+            ? AFLP.UI.SheetTab._renderTitlesEdit(titlesHeld, actor, sexual)
+            : AFLP.UI.SheetTab._renderTitlesView(titlesHeld, displayTitleId, actor, sexual)}
+        </div>` : ""}
       </section>
 
-      <!-- ═══ Pregnancy pane ═══ -->
-      ${hasPussy ? `
-      <section class="aflp-subtab-pane" data-subtab-pane="pregnancy">
-        <div class="aflp-section">
-          <h3 class="aflp-section-header">Pregnancy</h3>
-          ${AFLP.UI.SheetTab._renderPregnancy(pregnancy, editMode)}
-          <button type="button" class="aflp-btn aflp-process-preg-btn" style="margin-top:6px">
-            Advance Gestation Day
-          </button>
-        </div>
-      </section>` : ""}
-
-      <!-- ═══ Partner History pane ═══ -->
+      <!-- ═══ HISTORY pane ═══ -->
       <section class="aflp-subtab-pane" data-subtab-pane="history">
+
+        <!-- ── Sexual Acts: loads + Cum Shot units, per hole ── -->
+        <div class="aflp-section">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+            <h3 class="aflp-section-header" style="margin:0;border-bottom:none;">Sexual Acts</h3>
+            <button type="button" class="aflp-measure-note aflp-measure-cycle"
+              title="Click to change measure. Cum Shots are the underlying unit and never change - the others convert from them and shift with the Realistic/Fantasy setting.">${
+              { units: "Cum Shots", ml: "millilitres", floz: "fluid ounces", gal: "gallons" }[AFLP.Settings.cumMeasureMode ?? "units"]
+            } &#8635;</button>
+          </div>
+          <div style="border-bottom:1px solid var(--color-border-dark-tertiary,#c9a96e);margin-bottom:6px;"></div>
+          <table class="aflp-table aflp-table-compact">
+            <thead>
+              <tr>
+                <th>Act</th>
+                ${hasCock ? `<th>Loads Given</th>` : ""}
+                <th>Loads Taken</th>
+                ${hasCock ? `<th>Given</th>` : ""}
+                <th>Taken</th>
+              </tr>
+            </thead>
+            <tbody>${actRows}${actTotalRow}</tbody>
+          </table>
+        </div>
+
+        <!-- ── Milestones ── -->
+        <div class="aflp-section">
+          <h3 class="aflp-section-header">Milestones</h3>
+          ${AFLP.UI.SheetTab._renderMilestones(actor, sexual, history)}
+        </div>
+
         <div class="aflp-section">
           <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
             <h3 class="aflp-section-header" style="margin:0;border-bottom:none;">Partner History</h3>
@@ -585,11 +794,9 @@ AFLP.UI.SheetTab = {
               : `<span></span>`}
           </div>
           <div style="border-bottom:1px solid var(--color-border-dark-tertiary,#c9a96e);margin-bottom:6px;"></div>
-          ${AFLP.UI.SheetTab._renderHistory(history, editMode)}
+          ${AFLP.UI.SheetTab._renderHistory(history, editMode, pregnancy)}
         </div>
       </section>
-
-      <!-- Titles now live in titles-mode, reached from the banner button -->
 
     </div>`;
   },
@@ -607,6 +814,133 @@ AFLP.UI.SheetTab = {
         color: var(--aflr-text);
         font-size: 13px;
       }
+
+      /* ── B: Compact masthead ── */
+      .aflp-masthead {
+        display: flex; align-items: center; gap: 10px;
+        padding: 7px 10px; margin-bottom: 8px;
+        background: var(--aflr-header-bg, #1c1228);
+        border: 1px solid var(--aflr-border-gold, rgba(244,183,76,0.35));
+        border-radius: 6px;
+      }
+      .aflp-mast-title {
+        color: #e0607a; font-weight: 700; font-size: 14px; flex: 0 1 auto;
+        cursor: default; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .aflp-mast-title-empty { color: rgba(224,96,122,0.5); font-weight: 500; }
+      .aflp-mast-cum {
+        display: flex; align-items: center; gap: 5px; margin-left: auto;
+        font-size: 12px; white-space: nowrap;
+      }
+      .aflp-mast-cum-edit { margin-left: auto; display: flex; align-items: center; gap: 6px;
+        font-size: 12px; font-weight: 600; white-space: nowrap;
+        background: rgba(0,0,0,.18); border: 1px solid #c9a96e55; border-radius: 6px; padding: 4px 8px; }
+      .aflp-mast-btns { display: flex; gap: 5px; flex: 0 0 auto; }
+      .aflp-icon-btn {
+        width: 28px; height: 28px; padding: 0; display: inline-flex;
+        align-items: center; justify-content: center; font-size: 14px;
+      }
+      /* The Status button leads the masthead - labelled, plus-glyphed, and tinted
+         to match the status panel header so players recognise the same menu. */
+      .aflp-status-btn {
+        font-weight: 600; padding: 3px 10px; letter-spacing: 0.3px;
+        background: rgba(201,169,110,0.18); border-color: rgba(201,169,110,0.5);
+        color: #e8c46a;
+      }
+      .aflp-status-btn:hover { background: rgba(201,169,110,0.32); }
+
+      /* ── C: grid + panes ── */
+      .aflp-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 10px; }
+      .aflp-grid2 > .aflp-col { min-width: 0; }
+      /* ── D: responsive collapse for the narrow H-scene sidecar ── */
+      @container (max-width: 400px) { .aflp-grid2 { grid-template-columns: 1fr; } }
+      .aflp-panel { container-type: inline-size; }
+      .aflp-edit-mode .aflp-grid2 { grid-template-columns: 1fr; }
+
+      .aflp-table-compact th, .aflp-table-compact td { padding: 2px 5px; font-size: 11px; }
+
+      /* ── History: totals row, unit cells, measure note ── */
+      .aflp-total-row td { border-top: 1px solid rgba(201,169,110,0.5); }
+      .aflp-units { color: #e8c46a; }
+      .aflp-measure-note { font-size: 10px; color: #7a7264; font-style: italic; text-transform: lowercase; }
+      button.aflp-measure-cycle {
+        background: none; border: none; padding: 0 2px; cursor: pointer; line-height: 1;
+        width: auto; height: auto;
+      }
+      button.aflp-measure-cycle:hover { color: #e8c46a; text-shadow: 0 0 4px rgba(232,196,106,0.4); }
+
+      /* ── Milestones: key/value pairs, two-up when wide, one-up in the sidecar ── */
+      .aflp-milestones { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; }
+      @container (max-width: 400px) { .aflp-milestones { grid-template-columns: 1fr; } }
+      .aflp-ms-row {
+        display: flex; justify-content: space-between; align-items: baseline;
+        padding: 2px 4px; border-bottom: 1px dotted rgba(201,169,110,0.18); font-size: 11px;
+      }
+      .aflp-ms-label { color: #c9a96e; }
+      .aflp-ms-val { color: #e8d9b8; font-weight: 600; }
+      /* Zeroes stay visible but recede: they read as goals, not noise. */
+      .aflp-ms-zero .aflp-ms-label, .aflp-ms-zero .aflp-ms-val { color: #6b6459; font-weight: 400; }
+      /* Group headers span both columns so the pane reads as a trophy case. */
+      .aflp-ms-group {
+        grid-column: 1 / -1; margin: 9px 0 1px; padding-bottom: 2px;
+        color: #e0607a; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+        border-bottom: 1px solid rgba(224,96,122,0.25);
+      }
+      .aflp-ms-group:first-child { margin-top: 0; }
+      /* Bottom/Top role toggle: a compact segmented control. */
+      .aflp-ms-toggle { display: inline-flex; gap: 2px; margin: 12px 0 4px; padding: 2px;
+        border: 1px solid rgba(224,96,122,0.35); border-radius: 999px; }
+      .aflp-ms-role-btn { border: none; background: transparent; cursor: pointer;
+        font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+        color: #8a827a; padding: 3px 14px; border-radius: 999px; line-height: 1.4; }
+      .aflp-ms-role-btn[aria-pressed="true"] { background: rgba(224,96,122,0.18); color: #e0607a; }
+      .aflp-ms-role-btn:hover { color: #e0607a; }
+
+      /* ── Drives: kinks now own the pane, so flow them two-up when there is room ── */
+      .aflp-kinks-wide { column-count: 2; column-gap: 16px; }
+      @container (max-width: 400px) { .aflp-kinks-wide { column-count: 1; } }
+      .aflp-kinks-wide > * { break-inside: avoid; }
+      .aflp-table-compact th { white-space: normal; line-height: 1.15; font-size: 10px; vertical-align: bottom; }
+
+      /* Tracked-title banner (Drives) */
+      .aflp-tracked {
+        margin-bottom: 10px; padding: 7px 9px;
+        background: rgba(224,96,122,0.08);
+        border: 1px solid rgba(224,96,122,0.35); border-radius: 6px;
+      }
+      .aflp-tracked-head { display: flex; align-items: baseline; gap: 7px; font-size: 12px; margin-bottom: 5px; }
+      .aflp-tracked-label { color: #e0607a; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; }
+      .aflp-tracked-name { color: var(--aflr-text); }
+      .aflp-tracked-val { margin-left: auto; color: var(--aflr-text-muted); font-size: 11px; }
+
+      /* Progress bars */
+      .aflp-progbar { height: 6px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+      .aflp-progbar-fill { height: 100%; background: linear-gradient(90deg, #d4557a, #e0607a); border-radius: 3px; }
+
+      /* Titles edit list with progress */
+      .aflp-title-elist { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; padding-right: 4px; }
+      .aflp-title-erow { padding: 4px 6px; border: 1px solid rgba(200,160,80,0.15); border-radius: 5px; background: rgba(255,255,255,0.02); }
+      .aflp-title-erow.earned { border-color: rgba(244,183,76,0.4); background: rgba(244,183,76,0.06); }
+      .aflp-title-erow-head { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
+      .aflp-title-ename { flex: 1 1 auto; }
+      .aflp-title-erow-prog { display: flex; align-items: center; gap: 7px; margin-top: 3px; padding-left: 22px; }
+      .aflp-title-erow-prog .aflp-progbar { flex: 1 1 auto; }
+      .aflp-prog-val { font-size: 10px; color: var(--aflr-text-muted); flex: 0 0 auto; }
+      .aflp-prog-binary { font-size: 10px; color: var(--aflr-text-muted); font-style: italic; }
+      .aflp-title-track { background: none; border: none; cursor: pointer; color: rgba(224,96,122,0.5); font-size: 13px; padding: 0 2px; }
+      .aflp-title-track:hover { color: #e0607a; }
+      .aflp-title-track.active { color: #e0607a; text-shadow: 0 0 5px rgba(224,96,122,0.6); }
+      .aflp-title-hint { font-size: 10px; color: var(--aflr-text-muted); }
+      .aflp-showlocked { display: inline-flex; align-items: center; gap: 6px; font-size: 11px;
+        color: var(--aflr-text-muted); cursor: pointer; user-select: none; }
+      .aflp-showlocked input { cursor: pointer; }
+      .aflp-locked-list { margin-top: 4px; }
+      .aflp-locked-list .aflp-title-erow-head { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+      .aflp-locked-list .aflp-title-ename { flex: 1 1 auto; }
+      .aflp-title-ereq { font-size: 10px; color: var(--aflr-text-muted); font-style: italic;
+        margin: 1px 0 3px 22px; line-height: 1.3; }
+      .aflp-tracked-req { font-size: 10px; color: var(--aflr-text-muted); font-style: italic;
+        margin: 0 0 5px; line-height: 1.3; }
 
       /* Header */
       .aflp-header {
@@ -656,6 +990,9 @@ AFLP.UI.SheetTab = {
       }
       .aflp-cum-pill { display: flex; align-items: center; gap: 3px; }
       .aflp-cum-sep  { color: var(--aflr-text-dim); }
+      .aflp-cum-left { font-weight: 600; }
+      /* Spent dry: the pool refills on a rest, so flag it rather than hide it. */
+      .aflp-cum-empty { color: #e0607a; }
       .aflp-coomer       { display: flex; align-items: center; }
 
       /* Pip bars — Arousal + Horny */
@@ -722,6 +1059,31 @@ AFLP.UI.SheetTab = {
       }
       .aflp-panel .aflp-cumflation-pip.filled:hover {
         opacity: 0.7;
+      }
+      /* Size Training pips - warm/gold, escalating fill */
+      .aflp-sizetrain { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+      .aflp-sizetrain-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+      .aflp-sizetrain-label { width: 92px; text-align: right; flex-shrink: 0; opacity: 0.75; align-self: center; }
+      /* Big enough to read at a glance - the tier art is the point of the row.
+         Measured: at 50px the widest row (8 pips) needs about 436px inside a
+         582px panel, so this fits without squeezing the pips. */
+      .aflp-panel .aflp-track-icon { width: 50px; height: 50px; object-fit: contain; vertical-align: middle; margin-right: 8px; border: none; flex-shrink: 0; }
+      .aflp-panel .aflp-sizetrain-row .aflp-pip-bar { min-width: 0; }
+      .aflp-panel .aflp-sizetrain-row .aflp-pip { max-width: 22px; }
+      .aflp-panel .aflp-sizetrain-featline { margin: 0 0 4px 26px; font-size: 12px; }
+      .aflp-panel .aflp-sizetrain-pip { cursor: pointer; }
+      .aflp-panel .aflp-sizetrain-pip.filled {
+        background: linear-gradient(135deg, #e0a850, #c8781e) !important;
+        border-color: rgba(220,140,50,0.8) !important;
+      }
+      .aflp-panel .aflp-sizetrain-pip:not(.filled):hover {
+        background: rgba(220,140,50,0.25) !important;
+        border-color: rgba(220,140,50,0.6) !important;
+      }
+      .aflp-panel .aflp-sizetrain-pip.filled:hover { opacity: 0.7; }
+      .aflp-sizetrain-feat {
+        font-size: 10px; font-weight: 600; color: #e0a850;
+        text-shadow: 0 0 4px rgba(220,140,50,0.4); margin-left: 2px;
       }
       /* Horny pips — pink temp, pink+thick-red-border permanent, lighter staged-perm */
       .aflp-panel .aflp-horny-pip { background: var(--aflr-track) !important; border-color: var(--aflr-track-border) !important; }
@@ -800,6 +1162,51 @@ AFLP.UI.SheetTab = {
       .aflp-check-list label input[type="checkbox"] { flex-shrink: 0; margin-left: auto; }
       .aflp-cock-subtypes { margin-top: 2px; }
       .aflp-pussy-subtypes { margin-top: 2px; }
+      .aflp-tits-subtypes { margin-top: 2px; }
+      /* Top-aligned: the doll column must not stretch to the height of a tall
+         pane, or the flip button and token-coat badge drift far below the doll. */
+      .aflp-doll-wrap { display: flex; gap: 10px; align-items: flex-start; }
+      .aflp-doll-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; }
+      /* Doll art is standardized at 836x1908; aspect-ratio locks the box to the
+         art so contain-fit fills it edge to edge with no letterboxing. */
+      .aflp-doll { position: relative; width: 132px; aspect-ratio: 836 / 1908; height: auto; flex: none; background-size: contain; background-repeat: no-repeat; background-position: center top; }
+      /* The doll IS the region selector, so the three hotspots have to look like
+         three buttons the moment the pane opens - not only once you hover one.
+         The text rail that used to duplicate them has been removed. */
+      .aflp-doll-hot { position: absolute; left: 50%; transform: translateX(-50%); width: 44px; height: 38px; padding: 0; border: 2px solid rgba(214,120,150,.55); border-radius: 50%; background: rgba(214,120,150,.10); cursor: pointer; box-shadow: 0 0 6px 1px rgba(214,120,150,.18); transition: box-shadow .18s ease, background .18s ease, border-color .18s ease; }
+      .aflp-doll-hot:hover { background: rgba(214,120,150,.18); box-shadow: 0 0 10px 2px rgba(214,120,150,.4); }
+      .aflp-doll-hot.aflp-doll-active { border-style: solid; border-color: var(--aflr-accent,#d67896); background: rgba(214,120,150,.28); box-shadow: 0 0 16px 5px rgba(214,120,150,.6), inset 0 0 12px rgba(214,120,150,.45); }
+      .aflp-doll-flip { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); border: none; border-radius: 4px; background: rgba(0,0,0,.22); color: inherit; cursor: pointer; font-size: 13px; padding: 1px 7px; }
+      .aflp-doll-slots { flex: 1; min-width: 0; padding-left: 10px; }
+      /* Anatomy chips in one tidy wrapping row rather than staggered one per line. */
+      /* Anatomy chips are a UL, and subtypes are a NESTED UL - which is why they
+         used to stagger further right with each one. Flatten every level into one
+         wrapping row so Tits / Lactating / Onahole sit as a tidy group. */
+      .aflp-doll-panel ul { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; list-style: none; margin: 0 0 4px 0; padding: 0; }
+      .aflp-doll-panel ul ul { margin: 0; padding: 0; }
+      .aflp-doll-panel ul li { margin: 0; padding: 0; }
+      .aflp-doll-panel .aflp-none { opacity: .5; font-size: 11px; font-style: italic; margin-bottom: 4px; }
+      /* Vertical, so the tabs read down the body the way the doll does:
+         Head at the top, Torso in the middle, Lower body at the bottom. */
+      /* A narrow rail against the doll, so Head / Torso / Lower body sit beside
+         the body part they select. Full-width buttons read as a menu and squeezed
+         the content into a strip on the right. */
+      .aflp-doll-caption { text-align: center; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .7; margin-top: 2px; }
+
+      .aflp-doll-panel-h { font-weight: 700; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid var(--aflr-border,rgba(150,150,150,.25)); }
+      .aflp-doll-empty { color: var(--aflr-text-muted,#888); font-style: italic; }
+      .aflp-anatomy-flat .aflp-doll-panel-h { margin-top: 6px; }
+      .aflp-anatomy-flat .aflp-doll-panel-h:first-child { margin-top: 0; }
+      .aflp-size-readout { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--aflr-text,inherit); opacity: .9; }
+      .aflp-size-readout .aflp-size-band { color: var(--aflr-accent,#d67896); font-weight: 700; }
+      .aflp-size-readout strong { color: var(--aflr-text,#e8e0ee); font-weight: 600; }
+      .aflp-size-word { font-style: normal; margin-left: 4px; opacity: .8; }
+      /* Tier-coloured content links: keep the link + its book icon, take the colour. */
+      .aflp-cf-tint a.content-link { color: inherit !important; font-weight: 600; }
+      .aflp-cf-tint a.content-link i { color: inherit; opacity: .65; }
+      .aflp-milk-bar { position: relative; height: 18px; border-radius: 4px; overflow: hidden; background: var(--aflr-track-bg,rgba(120,120,140,.22)); }
+      .aflp-milk-fill { height: 100%; background: linear-gradient(90deg,#efe9f4,#cbb8e0); transition: width .2s ease; }
+      .aflp-milk-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--aflr-text,#efe9f4); text-shadow: 0 1px 2px rgba(0,0,0,.5); }
       .aflp-kinknote { margin-left: 0; margin-top: 2px; }
       .aflp-kinknote input { width: 100%; font-size: 11px; }
       .aflp-section { margin-bottom: 12px; }
@@ -820,6 +1227,22 @@ AFLP.UI.SheetTab = {
       .aflp-reset-check input { cursor: pointer; }
 
       /* Section headers */
+      /* Level 2. Anatomy's subsections - Cumflated, Coated, Size Training, Milk,
+         Pregnancy - used to share aflp-section-header with Anatomy itself, so six
+         headings shouted at one volume and nothing showed what contained what.
+         Quieter, no rule, and more space above than below so it binds to the rows
+         beneath it rather than floating between blocks. */
+      .aflp-subsection-header {
+        font-family: var(--font-primary, serif);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.10em;
+        opacity: .62;
+        border: none;
+        margin: 12px 0 3px 0;
+        padding: 0;
+      }
       .aflp-section-header {
         font-family: var(--font-primary, serif);
         font-size: 13px;
@@ -879,7 +1302,9 @@ AFLP.UI.SheetTab = {
       .aflp-cumflation-grid { display: flex; flex-direction: column; gap: 8px; }
       .aflp-cum-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; }
       .aflp-cum-row-label {
-        width: 54px; text-align: right; font-weight: 500;
+        /* Wide enough for the longest label plus its qualifier ("Vaginal - filled").
+           At 54px the qualifier was clipped mid-word. */
+        width: 92px; text-align: right; font-weight: 500; align-self: center;
         text-transform: capitalize;
         color: var(--aflr-text-muted);
         flex-shrink: 0;
@@ -898,6 +1323,8 @@ AFLP.UI.SheetTab = {
         border-color: var(--aflr-cum);
         box-shadow: inset 0 1px 3px rgba(255,255,255,0.25);
       }
+      .aflp-cum-row-kind { font-weight: 400; font-size: 10px; opacity: .5; margin-left: 4px; text-transform: lowercase; letter-spacing: .02em; }
+      .aflp-cum-row-label { white-space: nowrap; }
       .aflp-cum-row-tier { font-size: 11px; color: var(--aflr-text-dim); min-width: 36px; }
       .aflp-cum-row-link { font-size: 12px; line-height: 1.25; }
       .aflp-cum-row-overall .aflp-cum-row-label { font-weight: bold; }
@@ -996,6 +1423,12 @@ AFLP.UI.SheetTab = {
       }
       .aflp-subtab-pane { display: none; }
       .aflp-subtab-pane.active { display: block; }
+      /* Edit mode: reveal every pane at once as one scrolling form (editing is a
+         deliberate full-record task; tab-hopping mid-edit is friction). Each
+         pane keeps its section headers as dividers, and the subtab nav hides. */
+      .aflp-edit-mode .aflp-subtab-pane { display: block; }
+      .aflp-edit-mode .aflp-subtabs { display: none; }
+      .aflp-edit-mode .aflp-subtab-pane + .aflp-subtab-pane { border-top: 1px solid rgba(244,183,76,0.18); margin-top: 12px; padding-top: 10px; }
 
       /* Titles */
       .aflp-title-banner {
@@ -1086,43 +1519,138 @@ AFLP.UI.SheetTab = {
   // the canonical PF2e uuid only on PF2e. Never emit a link to another system's
   // uuid - that renders as a broken link - return plain text instead.
   async _contentLink(slug, fallbackUuid, label) {
+    // RESOLUTION, not system name. contentUuid falls through to the canonical
+    // PF2e uuid when this system's index has no entry, so it can hand back a
+    // TRUTHY string pointing into an unloaded pack - the documented trap. Both
+    // candidates are therefore tested with uuidIsReal, and the label falls back
+    // to plain text. Measured 11 Aug 2026 on Daggerheart: 16 of the 67 anatomy
+    // rows carry a hardcoded PF2e uuid that is dead there, and every one is
+    // saved by the system index. On a world with no anatomy items at all the
+    // index cannot save them, and the old `system.id !== "daggerheart"` gate
+    // would have rendered a broken link rather than the name.
     const enrich = (u) =>
       foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${u}]{${label}}`);
     const sysUuid = (slug ? AFLP.system?.contentUuid?.(slug) : null) ?? null;
-    if (sysUuid) return await enrich(sysUuid);
-    if (game.system?.id !== "daggerheart" && fallbackUuid) return await enrich(fallbackUuid);
+    const live = [sysUuid, fallbackUuid].find(u => u && AFLP.uuidIsReal?.(u)) ?? null;
+    if (live) return await enrich(live);
     return `<span>${label}</span>`;
   },
 
   // -----------------------------------------------
   // Render genitalia
   // -----------------------------------------------
-  async _renderGenitalia(hasPussy, hasCock, genitalTypes) {
-    if (!hasPussy && !hasCock) return `<div class="aflp-none">None</div>`;
-    // Each type links to this system's pack item; subtypes without an item (e.g.
-    // litter subtypes) render as plain text so the link is never broken.
+  async _renderGenitalia(hasPussy, hasCock, genitalTypes, silh = "Female", isPC = true) {
+    const hasTits = genitalTypes["tits"] === true;
+    // Each type links to this system's pack item; subtypes without an item render
+    // as plain text so the link is never broken.
     const lbl = async (slug, d) => AFLP.UI.SheetTab._contentLink(slug, d?.uuid, d?.name);
     const subtypesOf = async (parent) => (await Promise.all(
-      Object.entries(AFLP.genitalTypes)
+      Object.entries(AFLP.anatomyFeatures)
         .filter(([slug, d]) => d.parent === parent && genitalTypes[slug])
         .sort((a, b) => a[1].name.localeCompare(b[1].name))
         .map(async ([slug, d]) => `<li class="aflp-subtype">${await lbl(slug, d)}</li>`)
     )).filter(Boolean);
-    const items = [];
-    if (hasPussy) {
-      items.push(`<li>${await lbl("pussy", AFLP.genitalTypes["pussy"])}</li>`);
-      items.push(...await subtypesOf("pussy"));
-    }
-    if (hasCock) {
-      items.push(`<li>${await lbl("cock", AFLP.genitalTypes["cock"])}</li>`);
-      items.push(...await subtypesOf("cock"));
-    }
-    return `<ul>${items.join("")}</ul>`;
+    const listOr = (items) => items.length ? `<ul>${items.join("")}</ul>` : `<div class="aflp-none">None</div>`;
+
+    const crotchItems = [];
+    if (hasPussy) { crotchItems.push(`<li>${await lbl("pussy", AFLP.anatomyFeatures["pussy"])}</li>`); crotchItems.push(...await subtypesOf("pussy")); }
+    if (hasCock)  { crotchItems.push(`<li>${await lbl("cock",  AFLP.anatomyFeatures["cock"])}</li>`);  crotchItems.push(...await subtypesOf("cock")); }
+    // Same default-on rule as the throat: everyone has one unless a GM removed it.
+    if (genitalTypes["ass"] !== false) { crotchItems.push(`<li>${await lbl("ass", AFLP.anatomyFeatures["ass"])}</li>`); crotchItems.push(...await subtypesOf("ass")); }
+    const chestItems = [];
+    // TITS OVERRIDE THE CHEST, so only one of the two is ever listed. That is the
+    // `Chest` card's own rule - "If you have tits, that anatomy overrides this
+    // one" - and it is the reason the coat pools merged into `bodyCoat`.
+    if (hasTits)  { chestItems.push(`<li>${await lbl("tits", AFLP.anatomyFeatures["tits"])}</li>`); chestItems.push(...await subtypesOf("tits")); }
+    else if (genitalTypes["chest"] !== false) { chestItems.push(`<li>${await lbl("chest", AFLP.anatomyFeatures["chest"])}</li>`); chestItems.push(...await subtypesOf("chest")); }
+    const throatItems = [];
+    // Every body has a throat, so it is present unless a GM has explicitly turned
+    // it off. Requiring the flag meant NO actor had one - the Head pane read
+    // "None" on every character - and a migration would still have missed every
+    // actor created afterwards.
+    if (genitalTypes["throat"] !== false) { throatItems.push(`<li>${await lbl("throat", AFLP.anatomyFeatures["throat"])}</li>`); throatItems.push(...await subtypesOf("throat")); }
+
+    const crotch = listOr(crotchItems);
+    const chest  = listOr(chestItems);
+    const mouth  = listOr(throatItems);
+    return { lowerBody: crotch, torso: chest, head: mouth };
+  },
+
+  // Returns the three region anatomy pieces { lowerBody, torso, head } for the
+  // region-based Body layout, in edit or display form.
+  async _renderGenitaliaRegions(hasPussy, hasCock, genitalTypes, editMode, bodyFeatures = {}) {
+    return editMode
+      ? await AFLP.UI.SheetTab._renderGenitaliaEdit(hasPussy, hasCock, genitalTypes, bodyFeatures)
+      : await AFLP.UI.SheetTab._renderGenitalia(hasPussy, hasCock, genitalTypes);
   },
 
   // -----------------------------------------------
   // Render kinks
   // -----------------------------------------------
+  // Milk track - shown only for a lactating actor. stored / capacity, with an
+  // Express button (display mode) that drains the pool into units.
+  _renderMilk(actor, editMode) {
+    // The pool is a PF2e/5e concept. Without this the bar appeared in Daggerheart
+    // the moment DH gained a Tits (Lactating) item, showing a capacity its rules
+    // never mention and an Express button with nothing behind it.
+    if (AFLP.system?.usesMilkPool?.() === false) return "";
+    if (!AFLP.milk?.isLactating?.(actor)) return "";
+    const stored = AFLP.milk.stored(actor);
+    const cap = AFLP.milk.capacity(actor);
+    const pct = cap > 0 ? Math.max(0, Math.min(100, Math.round((stored / cap) * 100))) : 0;
+    return `
+      <h3 class="aflp-subsection-header">Milk</h3>
+      <div class="aflp-milk">
+        <div class="aflp-milk-bar" title="${stored} / ${cap} stored">
+          <div class="aflp-milk-fill" style="width:${pct}%"></div>
+          <span class="aflp-milk-label">${stored} / ${cap}</span>
+        </div>
+        ${!editMode && stored > 0 ? `<button type="button" class="aflp-btn aflp-milk-express" style="margin-top:5px;font-size:11px">Express</button>` : ""}
+      </div>`;
+  },
+
+  // Active pregnancies live in Body > Torso (this is their only home - the old
+  // Breeding tab is gone). Completed ones are filtered out here and listed under
+  // History instead. The edit-mode save is dirty-diff based, so omitting the
+  // completed rows from this table never drops their data.
+  _renderActivePregnancy(actor, pregnancy, editMode, hasPussy) {
+    try {
+      if (!hasPussy) return "";
+      const all = pregnancy ?? {};
+      const active = {};
+      for (const [id, p] of Object.entries(all)) {
+        if (p && typeof p === "object" && !AFLP.UI.SheetTab._pregComplete(p)) active[id] = p;
+      }
+      return `<div class="aflp-section" style="margin-top:10px">
+          <h3 class="aflp-subsection-header">Pregnancy</h3>
+          ${AFLP.UI.SheetTab._renderPregnancy(active, editMode)}
+          <button type="button" class="aflp-btn aflp-process-preg-btn" style="margin-top:6px">Advance Gestation Day</button>
+        </div>`;
+    } catch (e) { return ""; }
+  },
+
+  // A pregnancy is finished once recordBirth marks it. That marker is
+  // gestationRemaining === "Complete" (or <= 0) - there is no born/delivered
+  // flag on the record.
+  _pregComplete(p) {
+    const g = p?.gestationRemaining;
+    return g === "Complete" || (typeof g === "number" && g <= 0);
+  },
+
+  // "On your Spotlight" was a read-only panel here until 30 Aug 2026. REMOVED at
+  // Ardis's instruction: *"why is that spotlight reminder even there? we shouldn't
+  // have that on the sheet. even for player characters it doesn't belong in an AFLR
+  // sheet."*
+  //
+  // It quoted any card mentioning the Spotlight back at the reader and applied
+  // nothing. On an adversary it was quoting Daggerheart's OWN statblock - the
+  // Brimstone Harem Drake tripped it with `Relentless (3)`, and that actor carries
+  // no AFLR items at all. `AFLP.spotlightNotes` went with it; it had no other
+  // caller. The Spotlight stays what it always was at the table: manual, and the
+  // GM's and player's own business.
+  // DO NOT REINSTATE without asking - this panel has now been removed by name.
+
+
   async _renderKinks(kinks, kinkNotes) {
     const enabled = Object.entries(AFLP.kinks)
       .filter(([slug]) => kinks[slug])
@@ -1140,8 +1668,21 @@ AFLP.UI.SheetTab = {
   // -----------------------------------------------
   // Render genitalia as checkboxes (edit mode)
   // -----------------------------------------------
-  async _renderGenitaliaEdit(hasPussy, hasCock, genitalTypes) {
-    const subtypeChecks = (parent) => Object.entries(AFLP.genitalTypes)
+  async _renderGenitaliaEdit(hasPussy, hasCock, genitalTypes, bodyFeatures = {}, silh = "Female", isPC = true) {
+    // Body Feature toggles: manual grant/removal per the journal's optional-shed
+    // rule (routes through the bodyFeatures flag on save - "the tracker is the
+    // truth" governs the PIPS; the feature toggle IS the unlock state).
+    const bfCheck = (hole) => {
+      const meta = AFLP.BODY_FEATURES[hole];
+      return `
+        <li class="aflp-subtype">
+          <label>
+            <span>${meta.name} <em style="opacity:.7">(Body Feature)</em></span>
+            <input type="checkbox" class="aflp-genitalia-check" name="bodyFeature-${hole}" ${bodyFeatures[hole] ? "checked" : ""}/>
+          </label>
+        </li>`;
+    };
+    const subtypeChecks = (parent) => Object.entries(AFLP.anatomyFeatures)
       .filter(([, d]) => d.parent === parent)
       .sort((a, b) => a[1].name.localeCompare(b[1].name))
       .map(([slug, d]) => `
@@ -1152,30 +1693,79 @@ AFLP.UI.SheetTab = {
           </label>
         </li>`)
       .join("");
-    const pussySubtypes = subtypeChecks("pussy");
-    const cockSubtypes  = subtypeChecks("cock");
+    const pussySubtypes  = subtypeChecks("pussy");
+    const cockSubtypes   = subtypeChecks("cock");
+    const titsSubtypes   = subtypeChecks("tits");
+    const throatSubtypes = subtypeChecks("throat");
+    const assSubtypes    = subtypeChecks("ass");
+    const hasTits = genitalTypes["tits"] === true;
 
-    return `
+    const crotch = `
       <ul class="aflp-check-list">
-        <li>
-          <label>
-            <span><strong>Pussy</strong></span>
-            <input type="checkbox" class="aflp-genitalia-check aflp-pussy-toggle" name="genitalia-pussy" ${hasPussy ? "checked" : ""}/>
-          </label>
-        </li>
-        <ul class="aflp-check-list aflp-pussy-subtypes" style="${hasPussy ? "" : "display:none"}">
-          ${pussySubtypes}
-        </ul>
-        <li>
-          <label>
-            <span><strong>Cock</strong></span>
-            <input type="checkbox" class="aflp-genitalia-check aflp-cock-toggle" name="genitalia-cock" ${hasCock ? "checked" : ""}/>
-          </label>
-        </li>
-        <ul class="aflp-check-list aflp-cock-subtypes" style="${hasCock ? "" : "display:none"}">
-          ${cockSubtypes}
-        </ul>
+        <li><label><span><strong>Pussy</strong></span><input type="checkbox" class="aflp-genitalia-check aflp-pussy-toggle" name="genitalia-pussy" ${hasPussy ? "checked" : ""}/></label></li>
+        <ul class="aflp-check-list aflp-pussy-subtypes" style="${hasPussy ? "" : "display:none"}">${pussySubtypes}${bfCheck("pussy")}</ul>
+        <li><label><span><strong>Cock</strong></span><input type="checkbox" class="aflp-genitalia-check aflp-cock-toggle" name="genitalia-cock" ${hasCock ? "checked" : ""}/></label></li>
+        <ul class="aflp-check-list aflp-cock-subtypes" style="${hasCock ? "" : "display:none"}">${cockSubtypes}</ul>
+      </ul>
+      <ul class="aflp-check-list aflp-anatomy-group">
+        <li><label><span><strong>Ass</strong></span><input type="checkbox" class="aflp-genitalia-check aflp-ass-toggle" name="genitalia-ass" ${genitalTypes["ass"] !== false ? "checked" : ""}/></label></li>
+        <ul class="aflp-check-list aflp-ass-subtypes" style="${genitalTypes["ass"] !== false ? "" : "display:none"}">${assSubtypes}${bfCheck("anal")}</ul>
       </ul>`;
+    // CHEST HAD NO CHECKBOX AT ALL until 30 Aug 2026. It was added to
+    // `AFLP.anatomyFeatures` on 29 Aug as a base part and this panel was not
+    // updated, so the torso pane offered Tits and nothing else - which is what
+    // Ardis hit while editing the Brimstone Harem Drake.
+    //
+    // Default-ON like `ass` and `throat` (`!== false`), because every body has a
+    // chest unless a GM turns it off. Rendered ABOVE Tits because Tits OVERRIDE
+    // it - `Chest`'s own card says "If you have tits, that anatomy overrides this
+    // one" - so the reading order matches the rule.
+    const chestSubtypes = subtypeChecks("chest");   // none today; a future one lands here for free
+    const chest = `
+      <ul class="aflp-check-list">
+        <li><label><span><strong>Chest</strong>${hasTits ? ` <em style="opacity:.7">(overridden by Tits)</em>` : ""}</span><input type="checkbox" class="aflp-genitalia-check aflp-chest-toggle" name="genitalia-chest" ${genitalTypes["chest"] !== false ? "checked" : ""}/></label></li>
+        <ul class="aflp-check-list aflp-chest-subtypes" style="${genitalTypes["chest"] !== false ? "" : "display:none"}">${chestSubtypes}</ul>
+        <li><label><span><strong>Tits</strong></span><input type="checkbox" class="aflp-genitalia-check aflp-tits-toggle" name="genitalia-tits" ${hasTits ? "checked" : ""}/></label></li>
+        <ul class="aflp-check-list aflp-tits-subtypes" style="${hasTits ? "" : "display:none"}">${titsSubtypes}${bfCheck("onahole")}</ul>
+      </ul>`;
+    const mouth = `
+      <ul class="aflp-check-list">
+        <li><label><span><strong>Throat</strong></span><input type="checkbox" class="aflp-genitalia-check aflp-throat-toggle" name="genitalia-throat" ${genitalTypes["throat"] !== false ? "checked" : ""}/></label></li>
+        <ul class="aflp-check-list aflp-throat-subtypes" style="${genitalTypes["throat"] !== false ? "" : "display:none"}">${throatSubtypes}${bfCheck("oral")}</ul>
+      </ul>`;
+    return { lowerBody: crotch, torso: chest, head: mouth };
+  },
+
+  // Shared doll frame - silhouette + region hotspots. Content per region is passed
+  // in so edit (checkboxes) and display (read-only lists) share one layout. Regions:
+  // lower-body (genitals), torso (tits + belly), head (mouth + face).
+  _dollShell(silh, lowerBodyHtml, torsoHtml, headHtml, activeRegion = "lower-body") {
+    const SIL = (g) => `modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/Silhouette${g}.png`;
+    const act = (r) => activeRegion === r ? " aflp-doll-active" : "";
+    // Hotspot heights per silhouette: the humanoid dolls put head/torso/crotch
+    // at the usual places; the Monster stack hovers head over the goblin and
+    // dragon heads, torso over the wolf, lower body over the horse's tummy.
+    const HOT = silh === "Monster"
+      ? { head: "12%", torso: "48%", lower: "75%" }
+      : { head: "8%",  torso: "26%", lower: "46%" };
+    const show = (r) => activeRegion === r ? "" : "display:none";
+    return `
+      <div class="aflp-doll-wrap">
+        <div class="aflp-doll-col">
+          <div class="aflp-doll" data-silh="${silh}" style="background-image:url('${SIL(silh)}')">
+          <button type="button" class="aflp-doll-hot${act("head")}"  data-region="head"  style="top:${HOT.head}"  title="Head - mouth & face"></button>
+          <button type="button" class="aflp-doll-hot${act("torso")}" data-region="torso" style="top:${HOT.torso}" title="Torso - tits & belly"></button>
+          <button type="button" class="aflp-doll-hot${act("lower-body")}" data-region="lower-body" style="top:${HOT.lower}" title="Lower body"></button>
+          <button type="button" class="aflp-doll-flip" title="Flip silhouette">&#8646;</button>
+          </div>
+          <div class="aflp-doll-caption">${ {head:"Head", torso:"Torso", "lower-body":"Lower body"}[activeRegion] ?? "" }</div>
+        </div>
+        <div class="aflp-doll-slots">
+          <div class="aflp-doll-panel" data-region="lower-body" style="${show("lower-body")}">${lowerBodyHtml}</div>
+          <div class="aflp-doll-panel" data-region="torso" style="${show("torso")}">${torsoHtml}</div>
+          <div class="aflp-doll-panel" data-region="head" style="${show("head")}">${headHtml}</div>
+        </div>
+      </div>`;
   },
 
   // -----------------------------------------------
@@ -1208,23 +1798,175 @@ AFLP.UI.SheetTab = {
   // -----------------------------------------------
   // Render cumflation bars
   // -----------------------------------------------
-  async _renderCumflationRows(cumflation, totalTier, actor) {
-    const DAZZLED_UUID = "Compendium.pf2e.conditionitems.Item.TkIyaNPgTZFBCCuh";
-    const BLINDED_UUID = "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2";
+  // Size Training: three 6-pip tracks (pussy/throat/ass). A hole's row only
+  // renders once it has 1+ pips (untouched sheets show nothing new). Click a pip
+  // to set that hole's training; at 6 the hole's Body Feature unlocks, at 18
+  // total the Size Difference kink unlocks. GM/owner clickable in view mode.
+  async _renderSizeTraining(actor, hasPussy, holeFilter = null) {
+    const train = AFLP.sizeTrainingOf(actor);
+    const bf    = actor.getFlag(AFLP.FLAG_SCOPE, "bodyFeatures") ?? {};
+    const MAX   = AFLP.SIZE_TRAIN_MAX;
+    // pussy row only for actors with a pussy; throat/ass always trainable.
+    const holes = [
+      hasPussy ? { key: "pussy", label: "Pussy", feat: "Size Queen" }   : null,
+      { key: "oral", label: "Throat", feat: "Throat Goat" },
+      { key: "anal", label: "Ass",    feat: "Gape Glutton" },
+      // Nipple training, only for an actor whose tits can actually be fucked.
+      (actor.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits-onahole"]
+        ? { key: "onahole", label: "Tits", feat: "Paizuri Slut" } : null,
+    ].filter(Boolean).filter(h => !holeFilter || holeFilter.includes(h.key));
+    if (!holes.length) return "";
+
+    const ICON = { pussy: "SizePussy", oral: "SizeThroat", anal: "SizeAss", onahole: "SizeTits" };
+    const rows = await Promise.all(holes.map(async h => {
+      const pips = Math.max(0, Math.min(MAX, train[h.key] ?? 0));
+      // Always render, even at 0 pips: the guide (design-authoritative) says the
+      // tracks are shown on the sheet, and click-to-set is the GM's manual entry
+      // path - an untrained actor must still have pips to click. (Originally
+      // hidden at 0 to keep sheets clean; that read as "not built" and blocked
+      // manual training entry entirely.)
+      const unlocked = !!bf[h.key];
+      const dots = Array.from({ length: MAX }, (_, i) =>
+        `<span class="aflp-pip aflp-sizetrain-pip${i < pips ? " filled" : ""}"
+               data-pip-type="sizetrain" data-hole="${h.key}" data-pip-index="${i}"
+               title="${h.label} training ${i+1}/${MAX} - click to set"></span>`
+      ).join("");
+      const bfMeta = AFLP.BODY_FEATURES[h.key] ?? {};
+      // Unlocked Body Features render under the pips as a content link (resolves
+      // via aflrKey once the pack items exist; plain label until then) so the
+      // player can read what the feature does.
+      const featLine = unlocked
+        ? `<div class="aflp-sizetrain-featline" title="Body Feature unlocked (hole size +1)">${await AFLP.UI.SheetTab._contentLink(bfMeta.slug, bfMeta.uuid, bfMeta.name ?? h.feat)}</div>`
+        : "";
+      const icon = `<img class="aflp-track-icon" src="${AFLP.lewdTokenPath(ICON[h.key] + Math.max(0, Math.min(6, pips)) + ".webp")}" alt="" onerror="this.style.display='none'"/>`;
+      return `<div class="aflp-sizetrain-row">
+      ${icon}<span class="aflp-sizetrain-label">${h.label}</span>
+      <span class="aflp-pip-bar" data-bar-type="sizetrain">${dots}</span>
+    </div>${featLine}`;
+    }));
+    const rowsHtml = rows.join("");
+
+    return `<h3 class="aflp-subsection-header">Size Training</h3>
+      <div class="aflp-sizetrain">${rowsHtml}</div>`;
+  },
+
+  // Read-only size readout: the cock and hole sizes that feed the size-gap bonus
+  // (gap = cock size - hole size). Derived from body size + training, so not editable.
+  _renderSizeReadout(actor, show = null) {
+    try {
+      const hasCock  = actor?.getFlag(AFLP.FLAG_SCOPE, "cock") === true;
+      const hasPussy = actor?.getFlag(AFLP.FLAG_SCOPE, "pussy") === true;
+      const all = [
+        hasCock  ? { k: "cock",    label: "Cock",   v: AFLP.cockSizeOf(actor) }              : null,
+        hasPussy ? { k: "vaginal", label: "Pussy",  v: AFLP.holeSizeOf(actor, "vaginal") }   : null,
+        { k: "anal", label: "Ass",    v: AFLP.holeSizeOf(actor, "anal") },
+        { k: "oral", label: "Throat", v: AFLP.holeSizeOf(actor, "oral") },
+        // Tits size is the container: what sets milk capacity, and the onahole's
+        // hole size for size difference. Swell (what is sloshing in them) is shown
+        // beside it, not folded into it.
+        // Tits use CUP bands rather than the creature-size words: "Gargantuan" reads
+        // wrong on a chest, and the number still carries the mechanics.
+        AFLP.titsSize(actor) > 0 ? { k: "tits", label: "Tits", v: AFLP.titsSize(actor), swell: AFLP.titsSwell(actor), word: AFLP.titsCupWord(AFLP.titsSize(actor)) } : null,
+      ].filter(Boolean).filter(x => !show || show.includes(x.k));
+      if (!all.length) return "";
+      const parts = all.map(x => {
+        const w = x.word ?? AFLP.sizeWord?.(x.v) ?? "";
+        // A WORD, not a number. Swell is size plus fluid tiers, which are two
+        // different scales, so its sum sits on no ladder - "swollen to 10" on a
+        // 1-6 size row is nonsense. How swollen is already legible in the
+        // Cumflated pips and the token art right below.
+        const sw = (x.swell > x.v) ? `<em class="aflp-size-word">swollen</em>` : "";
+        return `<span>${x.label} <strong>${x.v}</strong>${w ? `<em class="aflp-size-word">${w}</em>` : ""}${sw}</span>`;
+      });
+      // Tits are measured in CUP bands, not creature sizes, and size difference
+      // only means anything on a body with Tits (Onahole) - describing it on every
+      // chest was telling most players about a hole they do not have.
+      const _hasOna = (actor.getFlag?.(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits-onahole"] === true;
+      const _tip = "Cock and hole sizes sit on the creature size ladder - Tiny 1, Small 2, Medium 3, Large 4, Huge 5, Gargantuan 6. "
+        + "Tits are measured in cup bands instead: 1 A-C, 2 D-F, 3 G-I, 4 J-L, 5 M-O, 6 P-R, 7 S-U, 8 V-Z, and they set how much milk you hold."
+        + (_hasOna ? " A cock bigger than the hole it fills is a size difference: Stuffed, Stretched, or Ruined." : "");
+      return `<div class="aflp-size-readout" title="${_tip}" style="margin-top:6px">${parts.join("")}</div>`;
+    } catch (e) { return ""; }
+  },
+
+  // -----------------------------------------------
+  async _renderCumflationRows(cumflation, totalTier, actor, opts = {}) {
+    const { holeFilter = null } = opts;   // overall/Belly row retired
+    const BLINDED_UUID = AFLP.sysUuid?.("Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2") ?? "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2";
     // Cumflation tier effects and the facial vision conditions are PF2e content;
     // on Daggerheart they have no pack item, so show plain tier text (no broken link).
     const isDH = game.system?.id === "daggerheart";
 
-    // Paizuri is only reachable by actors with My Body is a Weapon, so only show
-    // its row for them (or if it already holds cum), to avoid cluttering every sheet.
-    const showPaizuri = actor?.getFlag(AFLP.FLAG_SCOPE, "myBodyIsAWeapon") === true || (cumflation.paizuri ?? 0) > 0;
-    const holeList = showPaizuri
-      ? ["oral", "vaginal", "anal", "facial", "paizuri"]
-      : ["oral", "vaginal", "anal", "facial"];
+    // The chest coat (a paizuri finish and a body-coat are the same deposit) shows
+    // as one row for any actor with tits (migrated off the My Body is a Weapon feat,
+    // kept as a legacy path), or if the pool already holds cum.
+    const _hasTits = (actor?.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits"] === true;
+    const _hasOnahole = (actor?.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits-onahole"] === true;
+    // EVERY BODY HAS A CHEST. Ardis, 29 Aug 2026: *"all actors do have a body coat,
+    // just not all have a chest coat"* - so the section must exist for a
+    // flat-chested character too, not appear only once cum has landed on them.
+    //
+    // Gated the way `ass` is and for the same reason: `anatomyFeatures.chest`
+    // defaults ON and only an explicit `false` hides it, so no existing actor needs
+    // migrating and a GM can still remove it. The tits / My Body is a Weapon /
+    // pool-holds-cum clauses are kept beneath it as escapes - an existing fill must
+    // never vanish off the sheet even if a GM has removed the chest.
+    const _hasChest = (actor?.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["chest"] !== false;
+    const showChest = _hasChest
+      || _hasTits
+      || actor?.getFlag(AFLP.FLAG_SCOPE, "myBodyIsAWeapon") === true
+      || (cumflation.bodyCoat ?? 0) > 0;
+    // The onahole reservoir (cum fucked INTO the nipples) is its own engorgement
+    // row - shown for an onahole actor or if the pool holds cum.
+    const showOnahole = _hasOnahole || (cumflation.onahole ?? 0) > 0;
+    // Vaginal and anal are gated the same way the chest and onahole rows already
+    // are, and by the SAME rules the anatomy list further down uses - not a new
+    // convention:
+    //   pussy is a TOP-LEVEL flag and defaults OFF (`!!getFlag("pussy")`, which is
+    //     how `hasPussy` reads it), so a creature without one has no vaginal row;
+    //   ass lives in `anatomyFeatures` and defaults ON - "everyone has one unless
+    //     a GM removed it" - so only an explicit `false` hides the anal row.
+    // Both keep the "or the pool already holds cum" escape, for the same reason
+    // showOnahole has it: an existing fill must never vanish off the sheet.
+    //
+    // Reported by Ardis 15 Aug 2026. The Bondage Mimic Chest is a maw with no
+    // pussy and no ass and still showed vaginal and anal pips, which reads as
+    // "these holes exist and are empty" rather than "these do not exist".
+    const showVaginal = !!actor?.getFlag(AFLP.FLAG_SCOPE, "pussy") || (cumflation.vaginal ?? 0) > 0;
+    const showAnal = (actor?.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["ass"] !== false
+      || (cumflation.anal ?? 0) > 0;
+    const holeList = [
+      "oral",
+      ...(showVaginal ? ["vaginal"] : []),
+      ...(showAnal ? ["anal"] : []),
+      "facial",
+      ...(showChest ? ["bodyCoat"] : []),
+      ...(showOnahole ? ["onahole"] : []),
+    ].filter(h => !holeFilter || holeFilter.includes(h));
+    // Row labels. `onahole` is the tits HOLE (cum in) and reads "Tits"; `bodyCoat`
+    // is the chest SURFACE (cum on) and always reads "Chest", including on an actor
+    // with tits. Two rows both labelled "Tits" told apart only by their Cumflated /
+    // Coated heading was too easy to misread at a glance.
+    // `bodyCoat` reads "Chest Coat", not "Chest". Ardis, 29 Aug 2026: the card text
+    // must name this pool exactly as the user sees it on their own sheet. It
+    // rendered as "Chest \u00b7 coated", so a card saying "Chest Coat" would have
+    // quoted a string that does not appear anywhere - the label is brought to the
+    // card's words rather than the other way round.
+    // `facial` reads "Facial Coat" for the same reason `bodyCoat` reads "Chest
+    // Coat" - Ardis, 29 Aug 2026: the two coats are the same kind of thing and a
+    // card that names one has to be able to name the other the same way. The row
+    // already carries "· coated" beside it; the label is what a card quotes.
+    const HOLE_LABEL = { oral: "Oral", vaginal: "Vaginal", anal: "Anal", facial: "Facial Coat", bodyCoat: "Chest Coat", onahole: "Tits" };
+    // Filled = cum INSIDE a hole, coated = cum ON a surface. This used to be a
+    // heading above each group, which sat over the row's ICON rather than over the
+    // pips it described. On the row it also disambiguates the Torso, where BOTH
+    // rows are called Tits - the reservoir and the chest coat.
+    const HOLE_KIND = { oral: "filled", vaginal: "filled", anal: "filled", onahole: "filled",
+                        facial: "coated", bodyCoat: "coated" };
 
     const rows = await Promise.all(holeList.map(async hole => {
       const tier    = cumflation[hole] ?? 0;
-      const maxPips = 8;  // all holes capped at 8
+      const maxPips = AFLP.CUMFLATION_MAX ?? 8;  // every pool shares one cap
       const pips    = Array.from({ length: maxPips }, (_, i) =>
         `<span class="aflp-pip aflp-cumflation-pip${i < tier ? " filled" : ""}"
                data-pip-type="cumflation" data-hole="${hole}" data-pip-index="${i}"
@@ -1233,60 +1975,71 @@ AFLP.UI.SheetTab = {
 
       let link = "";
       if (tier > 0) {
-        const w = AFLP.cumflationWordForTier?.(tier, hole);
+        // The chest pool is one pool but reads two ways: a tits-having actor gets
+        // the tits ladder, everyone else the neutral body-coat one.
+        const wordHole = (hole === "bodyCoat" && _hasTits) ? "tits" : hole;
+        const w = AFLP.cumflationWordForTier?.(tier, wordHole);
         const wordHtml = w
           ? `<span style="color:${w.color};font-weight:600;">${w.word}</span>`
           : `Tier ${tier}`;
+        // A Foundry content link paints itself with its own chip colour, which
+        // threw away the tier colour the plain rows show. Tint the wrapper and
+        // have the anchor inherit, so linked and unlinked rows read alike.
+        const tint = (html) => `<span class="aflp-cf-tint" style="color:${w?.color ?? "var(--aflr-text,#e8e0ee)"}">${html}</span>`;
         if (hole === "facial") {
-          // Show this hole's descriptor word; on PF2e link it to the matching
-          // vision condition (Dazzled/Blinded) which it causes.
-          const visionUuid = (!isDH && tier >= 8) ? BLINDED_UUID : (!isDH && tier >= 4) ? DAZZLED_UUID : null;
+          // Blinded at 8 only - Dazzled at 4 was retired so every pool reads the
+          // same: nothing until 8, one effect at 8.
+          // RESOLUTION, not system name. `!isDH` was true on 5e, where this
+          // hardcoded PF2e uuid is just as dead as it is on Daggerheart.
+          const visionUuid = (tier >= 8 && AFLP.uuidIsReal?.(BLINDED_UUID)) ? BLINDED_UUID : null;
           link = visionUuid
-            ? await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${visionUuid}]{${w?.word ?? `Tier ${tier}`}}`)
+            ? tint(await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${visionUuid}]{${w?.word ?? `Tier ${tier}`}}`))
             : wordHtml;
         } else {
-          const key  = `cumflation${hole.charAt(0).toUpperCase() + hole.slice(1)}`;
-          const uuid = AFLP.items[key]?.[tier - 1];
-          link = (uuid && !isDH)
-            ? await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${uuid}]{${w?.word ?? `Tier ${tier}`}}`)
+          // One item per pool now - the same link at every tier. The tier's detail
+          // is the word itself, and the item states the rule that lands at 8.
+          const uuid = (hole === "bodyCoat")
+            ? AFLP.coatItems?.["cumcoat-tits"]
+            : AFLP.cumflationItems?.[hole];
+          // RESOLUTION, not system name - same reason as the vision link above.
+          link = (uuid && AFLP.uuidIsReal?.(uuid))
+            ? tint(await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${uuid}]{${w?.word ?? `Tier ${tier}`}}`))
             : wordHtml;
         }
       }
 
+      // Hole-specific icon by fill level. Facial/paizuri use their own naming
+      // conventions (CoatedFacialN / CumflatedPaizuriN); if those asset
+      // files are not present yet, onerror hides the img rather than showing a
+      // broken icon. The generic CumflatedN set belongs to the Overall row.
+      // Coated areas use the Coated* sets; filled holes use Cumflated*. Tits are
+      // on both sides and need different art: CumflatedTits is the nipple
+      // reservoir, CoatedTits is cum over the chest. They used to share one set.
+      // Coated areas with their own art use the Coated* sets: CoatedFacial for the
+      // face, CoatedTits for a chest with tits. CumflatedTits is a DIFFERENT set -
+      // the nipple reservoir, filled from inside. The rest keep Cumflated* names;
+      // there is no CoatedBodyCoat or CoatedPaizuri on disk.
+      // `CoatedChest` for a body without tits, added 29 Aug 2026 when Ardis supplied
+      // the art. The old fallback was `CumflatedBodyCoat`, and **that set has never
+      // existed on disk** - measured, 404 at every tier including 0 - so a
+      // flat-chested actor with a chest coat has always rendered with the icon
+      // hidden by its own onerror handler. The `Coated*` name is also the correct
+      // convention: this is cum ON a surface, not filling a hole.
+      // The full set 0-8 is on disk - measured 200 at every tier, 29 Aug 2026 -
+      // so every tier renders. STALE WHEN: a tier goes missing from the assets
+      // folder, which shows as the icon vanishing rather than as an error.
+      const ICON_SET = { oral: "CumflatedOral", vaginal: "CumflatedVaginal", anal: "CumflatedAnal", onahole: "CumflatedTits", facial: "CoatedFacial", paizuri: "CumflatedPaizuri", bodyCoat: _hasTits ? "CoatedTits" : "CoatedChest" };
+      const iconFile = (ICON_SET[hole] ?? "Cumflated") + Math.max(0, Math.min(AFLP.CUMFLATION_MAX ?? 8, tier)) + ".webp";
       return `
         <div class="aflp-cum-row">
-          <span class="aflp-cum-row-label">${hole}</span>
+          <img class="aflp-track-icon" src="${AFLP.lewdTokenPath(iconFile)}" alt="" onerror="this.style.display='none'"/>
+          <span class="aflp-cum-row-label">${HOLE_LABEL[hole] ?? (hole.charAt(0).toUpperCase() + hole.slice(1))}${HOLE_KIND[hole] ? `<span class="aflp-cum-row-kind">\u00b7 ${HOLE_KIND[hole]}</span>` : ""}</span>
           <div class="aflp-cum-col">
             <div class="aflp-pip-bar">${pips}</div>
             <span class="aflp-cum-row-link">${tier > 0 ? link : "<span style='color:#999;font-style:italic;font-size:11px'>Clear</span>"}</span>
           </div>
         </div>`;
     }));
-
-    const overallPips = Array.from({ length: 8 }, (_, i) =>
-      `<span class="aflp-pip${i < totalTier ? " filled" : ""}"></span>`
-    ).join("");
-    const overallW = actor ? AFLP.cumflationWord(actor) : AFLP.cumflationWordForTier?.(totalTier);
-    let overallLink = "";
-    if (totalTier > 0) {
-      const wTxt  = overallW?.word ?? `Tier ${totalTier}`;
-      const wHtml = `<span style="color:${overallW?.color ?? "var(--aflr-text)"};font-weight:600;">${wTxt}</span>`;
-      const uuid  = AFLP.items.cumflationTotal?.[totalTier - 1];
-      if (uuid && !isDH) {
-        const raw = await foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${uuid}]{${wTxt}}`);
-        overallLink = typeof raw === "string" ? raw : (raw?.outerHTML ?? wHtml);
-      } else {
-        overallLink = wHtml;
-      }
-    }
-    rows.push(`
-      <div class="aflp-cum-row aflp-cum-row-overall">
-        <span class="aflp-cum-row-label">Overall</span>
-        <div class="aflp-cum-col">
-          <div class="aflp-pip-bar">${overallPips}</div>
-          <span class="aflp-cum-row-link">${totalTier > 0 ? overallLink : "<span style='color:#999;font-style:italic;font-size:11px'>Clear</span>"}</span>
-        </div>
-      </div>`);
 
     return rows.join("");
   },
@@ -1400,8 +2153,17 @@ AFLP.UI.SheetTab = {
   // -----------------------------------------------
   // Render partner history
   // -----------------------------------------------
-  _renderHistory(history, editMode = false) {
+  _renderHistory(history, editMode = false, pregnancy = null) {
     if (!history.length) return `<div class="aflp-none">No history yet.</div>`;
+    // Pregnancy records carry sourceUuid + startedAt; history entries carry
+    // sourceUuid + date, both in worldTime. Matching on the pair identifies the
+    // exact conception even when the same partner sired more than one, and never
+    // relies on names (actor names collide freely).
+    const pregList = Object.values(pregnancy ?? {}).filter(p => p && typeof p === "object");
+    const matchPreg = (entry) => {
+      if (!entry?.sourceUuid) return null;
+      return pregList.find(p => p.sourceUuid === entry.sourceUuid && p.startedAt === entry.date) ?? null;
+    };
     return `<div class="aflp-history-list">` + history.map((entry, idx) => {
       const holes   = (entry.holes ?? []).map(h => h.charAt(0).toUpperCase() + h.slice(1)).join(", ") || "-";
       const mlR     = (entry.mlReceived ?? 0).toLocaleString();
@@ -1415,9 +2177,27 @@ AFLP.UI.SheetTab = {
             .join("")
         : "";
 
-      const pregChip = entry.pregnancyResult
-        ? `<span class="aflp-history-chip aflp-history-preg">🥚 Impregnated: ${entry.pregnancyResult.offspring} ${entry.pregnancyResult.deliveryType === "egg" ? "eggs" : "offspring"}</span>`
-        : "";
+      const pregChip = (() => {
+        if (!entry.pregnancyResult) return "";
+        const isEgg = entry.pregnancyResult.deliveryType === "egg";
+        const n = entry.pregnancyResult.offspring;
+        const kind = isEgg ? (n === 1 ? "egg" : "eggs") : (n === 1 ? "offspring" : "offspring");
+        // Outcome, when the matching pregnancy record is still on the actor: in
+        // progress shows how far along, finished shows how it ended. A record that
+        // has since been removed just leaves the impregnation line as it was.
+        const p = matchPreg(entry);
+        let tail = "";
+        if (p) {
+          if (AFLP.UI.SheetTab._pregComplete(p)) tail = isEgg ? " → laid" : " → delivered";
+          else {
+            const total = Number(p.gestationTotal) || 0;
+            const rem = Number(p.gestationRemaining);
+            if (total > 0 && Number.isFinite(rem)) tail = ` → day ${Math.max(0, total - rem)}/${total}`;
+            else tail = " → carrying";
+          }
+        }
+        return `<span class="aflp-history-chip aflp-history-preg">🥚 Impregnated: ${n} ${kind}${tail}</span>`;
+      })();
 
       const holeTag = entry.holes?.length
         ? `<span class="aflp-history-holes">${holes}</span>`
@@ -1482,13 +2262,18 @@ AFLP.UI.SheetTab = {
       out.push(badge("☠", 1, "defeated", "Defeated"));
     }
     if (AFLP.cond.has(actor, "birth-control")) out.push(badge("⊘", 1, "birth-control", "Birth Control"));
-    if (AFLP.cond.has(actor, "breeding")) out.push(badge("⚸", 1, "breeding", "Breeding"));
+    if (AFLP.cond.has(actor, "breeding")) out.push(badge("⚸", AFLP.cond.value(actor, "breeding") || 3, "breeding", "Fertility"));
     const isGM = game.user.isGM;
-    if (!out.length && !isGM) return "";
+    // Status display lives OUTSIDE the sheet: the hex panel cascades down the
+    // window's right side as a body-mounted dock (aflp-status-panel.js). The
+    // in-sheet slot keeps only the GM's manage button; the legacy chips above
+    // render solely as a fallback if the status panel module failed to load.
+    const body = AFLP.StatusPanel ? "" : out.join("");
+    if (!body && !isGM) return "";
     const manageBtn = isGM
       ? `<button type="button" class="aflp-cond-manage" title="Manage conditions (GM)">⚙ Conditions</button>`
       : "";
-    return `<div class="aflp-sheet-conds">${out.join("")}${manageBtn}</div>`;
+    return `<div class="aflp-sheet-conds">${body}${manageBtn}</div>`;
   },
 
   // GM-only manager to manually set AFLR state conditions, replacing the old
@@ -1563,6 +2348,245 @@ AFLP.UI.SheetTab = {
     document.head.appendChild(style);
   },
 
+  // Exposure Token Art picker: three file slots (Exposed 0/1/2) + an enable
+  // toggle. Drives token art from the actor's Exposed value via AFLP.ExposureArt.
+  async _openExposureArt(actor) {
+    const cfg = AFLP.ExposureArt?.get?.(actor) ?? {};
+    const row = (name, label, val, hint) => `
+      <div style="margin-bottom:10px;">
+        <label style="display:block;font-size:12px;color:#c9a96e;margin-bottom:3px;">${label}
+          <span style="color:#7a7264;">${hint}</span></label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" name="${name}" value="${val ?? ""}" placeholder="(use normal art)"
+            style="flex:1;background:rgba(0,0,0,0.3);border:1px solid rgba(201,169,110,0.3);color:#e8d9b8;padding:4px 6px;border-radius:3px;"/>
+          <button type="button" class="aflp-ea-pick" data-target="${name}"
+            style="padding:4px 8px;background:rgba(201,169,110,0.15);border:1px solid rgba(201,169,110,0.4);color:#e8c46a;border-radius:3px;cursor:pointer;">Browse</button>
+        </div>
+      </div>`;
+    const content = `
+      <div style="min-width:420px;">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;color:#e8d9b8;">
+          <input type="checkbox" name="ea-enabled" ${cfg.enabled ? "checked" : ""}/>
+          Enable exposure-driven token art
+        </label>
+        ${row("ea-base", "Exposed 0 (clothed)", cfg.base, "- blank = the token's normal art")}
+        ${row("ea-e1", "Exposed 1 (stripped)", cfg.e1, "")}
+        ${row("ea-e2", "Exposed 2 (nude)", cfg.e2, "")}
+        <p style="font-size:11px;color:#7a7264;margin-top:8px;">
+          The token swaps to the matching image whenever the creature's Exposed value changes.
+          Works with the prototype token, the base texture, and the dynamic ring. Wildcard
+          (random image) tokens are left alone.
+        </p>
+      </div>`;
+    const result = await foundry.applications.api.DialogV2.wait({
+      window: { title: `Exposure Token Art - ${actor.name}` },
+      content,
+      render: (ev, dlg) => {
+        dlg.element.querySelectorAll(".aflp-ea-pick").forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const targetName = btn.dataset.target;
+            const input = dlg.element.querySelector(`input[name="${targetName}"]`);
+            new FilePicker({
+              type: "imagevideo",
+              current: input?.value || "",
+              callback: (path) => { if (input) input.value = path; },
+            }).render(true);
+          });
+        });
+      },
+      buttons: [
+        { action: "save", label: "Save", default: true, callback: (ev, btn, dlg) => {
+          const r = dlg.element;
+          return {
+            enabled: r.querySelector('input[name="ea-enabled"]')?.checked ?? false,
+            base:    r.querySelector('input[name="ea-base"]')?.value ?? "",
+            e1:      r.querySelector('input[name="ea-e1"]')?.value ?? "",
+            e2:      r.querySelector('input[name="ea-e2"]')?.value ?? "",
+          };
+        } },
+        { action: "cancel", label: "Cancel", callback: () => null },
+      ],
+    });
+    if (result && typeof result === "object") {
+      await AFLP.ExposureArt.save(actor, result);
+      ui.notifications?.info(`AFLR | Exposure token art ${result.enabled ? "enabled" : "disabled"} for ${actor.name}.`);
+    }
+  },
+
+  // Milestones: the scalar lifetime stats that were never surfaced anywhere.
+  // Key/value pairs, not a table - reads correctly at sidecar width.
+  _renderMilestones(actor, sexual, history) {
+    const lt = sexual.lifetime ?? {};
+    const h  = Array.isArray(history) ? history : [];
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+    // Guard for the known corrupted double-scale values (e.g. cumReceived holding
+    // stale ml in a unit field, 92607 on Neela). A load delivers a handful of
+    // units, never thousands - anything past 200x the load count is bad data, so
+    // we hide it with "-" rather than print a lie. Healthy values pass through.
+    const _sane = (val, loads) => {
+      const v = Number(val) || 0, L = Math.max(Number(loads) || 0, 1);
+      return (v > 200 * L && v > 200) ? "-" : v;
+    };
+    const takenLoads = (lt.oral||0) + (lt.vaginal||0) + (lt.anal||0) + (lt.facial||0);
+    const g = lt.given ?? {};
+    const givenLoads = (g.oral||0) + (g.vaginal||0) + (g.anal||0) + (g.facial||0) + (g.gangbang||0);
+
+    // Partner-history derivations - all free, no new write sites needed.
+    const keyOf = (e) => e.sourceUuid || e.sourceName || "?";
+    const freq = new Map(), dayCount = new Map();
+    let debut = null, topName = "-", topN = 0;
+    for (const e of h) {
+      const k = keyOf(e);
+      const n = (freq.get(k) || 0) + 1; freq.set(k, n);
+      if (n > topN) { topN = n; topName = e.sourceName || k; }
+      if (e.date) {
+        const day = String(e.date).slice(0, 10);
+        dayCount.set(day, (dayCount.get(day) || 0) + 1);
+        const t = Date.parse(e.date);
+        if (!isNaN(t) && (debut === null || t < debut)) debut = t;
+      }
+    }
+    const distinct   = freq.size;
+    const returning  = [...freq.values()].filter(n => n > 1).length;
+    const busiest    = dayCount.size ? Math.max(...dayCount.values()) : 0;
+    const mostFreq   = topN > 1 ? `${topName} (${topN})` : (topN === 1 ? topName : "-");
+    const debutStr   = debut !== null ? new Date(debut).toLocaleDateString() : "-";
+
+    // Creature types / largest partner - present only on saves written after the
+    // Beastmaster/Size Queen fix; older partner entries carry neither field.
+    const types = new Set(h.map(e => e.sourceType).filter(Boolean));
+    // sourceSize holds PF2e's abbreviation on one system and Daggerheart's full
+    // word on the other, so the old indexOf against a list of abbreviations
+    // returned -1 for every "large" and "gargantuan" and this row read "-" or
+    // named a smaller partner than the history actually holds. Steps, not strings.
+    let biggest = 0;
+    for (const e of h) { const i = AFLP.sizeStepOf(e.sourceSize); if (i > biggest) biggest = i; }
+
+    // Favourite Hole splits by role. lt.oral/vaginal/anal/facial count holes used
+    // ON this actor (bottoming) -> the Bottom card; lt.given.<hole> counts holes
+    // THIS actor used on a partner (topping) -> the Top card. Each side shows its
+    // own top hole, so a Dominator is no longer "-" just because it never bottoms.
+    const _topHole = (obj) => {
+      const a = [["Oral", obj.oral||0], ["Vaginal", obj.vaginal||0], ["Anal", obj.anal||0], ["Facial", obj.facial||0]]
+        .sort((x, y) => y[1] - x[1]);
+      return a[0][1] > 0 ? a[0][0] : "-";
+    };
+    const favTaken = _topHole({ oral: lt.oral, vaginal: lt.vaginal, anal: lt.anal, facial: lt.facial });
+    const favUsed  = _topHole(g);
+    const deepest = (lt.timesEnslaved||0) > 0 ? "Enslaved"
+      : (lt.timesHypnotized||0) > 0 ? "Hypnotized"
+      : (lt.timesEntranced||0) > 0 ? "Entranced" : "-";
+
+    const yn = (v) => v ? "Yes" : "-";
+
+    // Three buckets. GENERAL is role-neutral (partnerHistory is bidirectional, so
+    // every partner counts both ways). BOTTOM is what was done TO the actor; TOP
+    // is what the actor DID (the new dominator-side writers). General shows always;
+    // a Bottom/Top toggle swaps the role block.
+    const general = [
+      ["General", [
+        ["Times Climaxed",     lt.timesCummed],
+        ["Encounters",         h.length],
+        ["Distinct Partners",  distinct],
+        ["Returning Partners", returning],
+        ["Most Frequent",      mostFreq],
+        ["Most in One Day",    busiest],
+        ["Creature Types",     types.size],
+        ["Largest Partner",    biggest > 0 ? AFLP.sizeWord(biggest) : "-"],
+        ["First Encounter",    debutStr],
+      ]],
+    ];
+    const bottom = [
+      ["Taken", [
+        ["Cum Shots Taken",   _sane(lt.cumReceived, takenLoads)],
+        ["Favourite Hole",    favTaken],
+        ["Gangbanged",        lt.gangbang],
+        ["All Holes at Once", yn(lt.allHolesInSession)],
+      ]],
+      ["Bred", [
+        ["Times Impregnated",       lt.timesImpregnated],
+        ["Largest Litter",          lt.maxLitterSize],
+        ["No-Pregnancy Encounters", lt.sessionsNoPregnancy],
+        ["Bred by a Monster",       yn(lt.hasMonsterPregnancy)],
+        ["Laid a Clutch",           yn(lt.hasLaidEggs)],
+        ["Delivered a Clutch",      yn(lt.hasDeliveredClutch)],
+      ]],
+      ["Conditioned", [
+        ["Deepest Conditioning", deepest],
+        ["Times Entranced",   lt.timesEntranced],
+        ["Times Hypnotized",  lt.timesHypnotized],
+        ["Times Enslaved",    lt.timesEnslaved],
+        ["Times Defeated",    lt.timesDefeated],
+        ["Times Mind Broken", lt.timesMindBroken],
+      ]],
+      ["Endured", [
+        // Scenes, not rounds. Old worlds carry the retired round counters; sum
+        // them in so a character who earned them before the change does not
+        // read as zero here, and the number keeps rising in scenes from now on.
+        ["Scenes Bound",      (lt.bondageScenes || 0)    || lt.bondageRounds],
+        ["Scenes Restrained", (lt.restrainedScenes || 0) || lt.restrainedRounds],
+        ["Scenes Airlocked",  (lt.airlockScenes || 0)    || lt.airlockRounds],
+        ["Damage Taken",      Math.round(lt.damageTaken || 0)],
+      ]],
+    ];
+    const top = [
+      ["Used", [
+        ["Cum Shots Given",     _sane(lt.cumGiven, givenLoads)],
+        ["Favourite Hole",      favUsed],
+        ["Gangbangs Performed", lt.gangbangsPerformed],
+        ["Damage Dealt",        Math.round(lt.damageDealt || 0)],
+      ]],
+      ["Bred others", [
+        ["Partners Bred",   lt.partnersBred],
+        ["Offspring Sired", lt.offspringSired],
+      ]],
+      ["Conditioned others", [
+        ["Minds Entranced",  lt.mindsEntranced],
+        ["Minds Hypnotized", lt.mindsHypnotized],
+        ["Minds Enslaved",   lt.mindsEnslaved],
+        ["Foes Defeated",    lt.foesDefeated],
+        ["Minds Broken",     lt.mindsBroken],
+      ]],
+    ];
+
+    // Which role to show first: honour a remembered per-actor choice, else default
+    // to whichever side the actor is more active in (a monster dom opens on Top, a
+    // bred sub on Bottom). Stored as a user flag (module scope is valid for user
+    // flags), keyed by actor id, so it is per-viewer and never touches the shared
+    // actor document.
+    const bScore = (Number(lt.cumReceived)||0) + takenLoads + (lt.timesImpregnated||0) + (lt.timesDefeated||0)
+      + (lt.timesEntranced||0) + (lt.timesHypnotized||0) + (lt.timesEnslaved||0) + (lt.gangbang||0)
+      + (lt.bondageScenes||0) + (lt.restrainedScenes||0);
+    const tScore = (Number(lt.cumGiven)||0) + givenLoads + (lt.partnersBred||0) + (lt.offspringSired||0)
+      + (lt.foesDefeated||0) + (lt.mindsEntranced||0) + (lt.mindsHypnotized||0) + (lt.mindsEnslaved||0)
+      + (lt.mindsBroken||0) + (lt.gangbangsPerformed||0);
+    const _MOD = (globalThis.AFLP?.MODULE_ID) ?? "ardisfoxxs-lewd-pf2e";
+    const _saved = game.user?.getFlag?.(_MOD, "msRole")?.[actor?.id];
+    const role = (_saved === "top" || _saved === "bottom") ? _saved : (tScore > bScore ? "top" : "bottom");
+
+    const cellsFor = (rows) => rows.map(([label, val]) => {
+      const v = (val === undefined || val === null) ? 0 : val;
+      const zero = (v === 0 || v === "-");
+      const disp = (typeof v === "string") ? esc(v) : v;
+      return `<div class="aflp-ms-row${zero ? " aflp-ms-zero" : ""}">
+        <span class="aflp-ms-label">${label}</span>
+        <span class="aflp-ms-val">${disp}</span>
+      </div>`;
+    }).join("");
+    const gridFor = (grps) => `<div class="aflp-milestones">${grps.map(([t, rows]) =>
+      `<div class="aflp-ms-group">${t}</div>${cellsFor(rows)}`).join("")}</div>`;
+
+    const roleBtn = (r, label) =>
+      `<button type="button" class="aflp-ms-role-btn" data-role="${r}" aria-pressed="${role === r ? "true" : "false"}">${label}</button>`;
+    const toggle = `<div class="aflp-ms-toggle" role="group" aria-label="Role stats">${roleBtn("bottom", "Bottom")}${roleBtn("top", "Top")}</div>`;
+
+    return `${gridFor(general)}${toggle}`
+      + `<div class="aflp-ms-roleblock" data-ms-role="bottom"${role === "bottom" ? "" : ' style="display:none"'}>${gridFor(bottom)}</div>`
+      + `<div class="aflp-ms-roleblock" data-ms-role="top"${role === "top" ? "" : ' style="display:none"'}>${gridFor(top)}</div>`;
+  },
+
   async _openConditionManager(actor, html) {
     if (!game.user.isGM || !actor) return;
     AFLP.UI.SheetTab._ensureConditionManagerCSS();
@@ -1575,8 +2599,8 @@ AFLP.UI.SheetTab = {
       mindBreak:    AFLP.cond.value(actor, "mind-break"),
       bimbofied:    AFLP.cond.value(actor, "bimbofied"),
       bullified:    AFLP.cond.value(actor, "bullified"),
-      birthControl: AFLP.cond.has(actor, "birth-control"),
-      breeding:     AFLP.cond.has(actor, "breeding"),
+      breeding:     AFLP.cond.value(actor, "breeding") || (AFLP.cond.has(actor, "breeding") ? 3 : 0),
+      birthControl: AFLP.cond.value(actor, "birth-control") || (AFLP.cond.has(actor, "birth-control") ? 3 : 0),
     };
     const role = cur.dominating ? "dominating" : (cur.submitting ? "submitting" : "none");
     // Token control: +/- buttons plus left-click-to-mark / right-click-to-clear
@@ -1675,14 +2699,25 @@ AFLP.UI.SheetTab = {
         <div class="aflp-cm-section">
           <div class="aflp-cm-label">Pregnancy Modifiers</div>
           <div class="aflp-cm-chips">
-            <label class="aflp-cm-chip fx-birth-control">
-              <input type="checkbox" name="aflp-cm-birth-control" ${cur.birthControl?"checked":""}/>
-              <span class="aflp-cm-chip-ico">⊘</span><span class="aflp-cm-chip-txt">Birth Control</span>
-            </label>
-            <label class="aflp-cm-chip fx-breeding">
-              <input type="checkbox" name="aflp-cm-breeding" ${cur.breeding?"checked":""}/>
-              <span class="aflp-cm-chip-ico">⚸</span><span class="aflp-cm-chip-txt">Breeding</span>
-            </label>
+            <div class="aflp-cm-stepper breeding" title="Staged 0-3. Every creature is Fertility 1 by default; 0 here clears back to that default. 2 = Brood Roll DC -2 (Fertile anatomy), 3 = no roll, it just takes (Breeder anatomy, Potion of Breeding). Fertility 3 also lets a new pregnancy take while carrying and shortens gestation.">
+              <span class="aflp-cm-step-ico">⚸</span>
+              <span class="aflp-cm-step-name">Fertility</span>
+              ${tok("aflp-cm-breeding", cur.breeding, 0, 3)}
+            </div>
+            <div class="aflp-cm-stepper birth-control" title="Staged 1-3: each stage reduces the effective Fertility by 1, floor 0. Birth Control 1 blocks an unenhanced (Fertility 1) character entirely; 2 = the Elixir; 3 = the Greater Elixir, blocking even Breeder anatomy.">
+              <span class="aflp-cm-step-ico">⊘</span>
+              <span class="aflp-cm-step-name">Birth Control</span>
+              ${tok("aflp-cm-birth-control", cur.birthControl, 0, 3)}
+            </div>
+          </div>
+        </div>
+        <div class="aflp-cm-section">
+          <div class="aflp-cm-label">Token Art</div>
+          <div class="aflp-cm-chips">
+            <button type="button" class="aflp-cm-exposure-art" data-actor-id="${actor.id}"
+              style="padding:4px 10px;background:rgba(201,169,110,0.12);border:1px solid rgba(201,169,110,0.4);color:#e8c46a;border-radius:4px;cursor:pointer;">
+              🎭 Exposure Token Art…
+            </button>
           </div>
         </div>
       </div>`;
@@ -1712,6 +2747,13 @@ AFLP.UI.SheetTab = {
           valEl.addEventListener("click",       e => { e.preventDefault(); set(Number(hidden.value || 0) + 1); });
           valEl.addEventListener("contextmenu",  e => { e.preventDefault(); set(0); });
         });
+
+        // Exposure Token Art launcher - a separate small dialog so the big
+        // condition form stays untouched.
+        el.querySelector(".aflp-cm-exposure-art")?.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await AFLP.UI.SheetTab._openExposureArt(actor);
+        });
       },
       buttons: [
         {
@@ -1729,8 +2771,8 @@ AFLP.UI.SheetTab = {
                 : Math.max(0, Math.min(99, Number(root.querySelector('input[name="aflp-cm-mindbreak"]')?.value ?? 0))),
               bimbofied:   Math.max(0, Math.min(3, Number(root.querySelector('input[name="aflp-cm-bimbofied"]')?.value ?? 0))),
               bullified:   Math.max(0, Math.min(3, Number(root.querySelector('input[name="aflp-cm-bullified"]')?.value ?? 0))),
-              birthControl: root.querySelector('input[name="aflp-cm-birth-control"]')?.checked ?? false,
-              breeding:    root.querySelector('input[name="aflp-cm-breeding"]')?.checked ?? false,
+              birthControl: Math.max(0, Math.min(3, Number(root.querySelector('input[name="aflp-cm-birth-control"]')?.value ?? 0))),
+              breeding:    Number(root.querySelector('input[name="aflp-cm-breeding"]')?.value ?? 0),
             };
           },
         },
@@ -1739,7 +2781,9 @@ AFLP.UI.SheetTab = {
       close: () => null,
       rejectClose: false,
     });
-    if (!result) return;
+    // DialogV2 quirk: a button callback returning null resolves to the button's
+    // ACTION STRING ("cancel"), not null - only an object is a real Apply.
+    if (!result || typeof result !== "object") return;
 
     // Exact-set a valued condition (create at value if absent, set if present, remove at 0).
     const setExact = async (slug, target) => {
@@ -1777,22 +2821,25 @@ AFLP.UI.SheetTab = {
 
     // Bimbofied / Bullified are token-track conditions: prefer the adapter's
     // dedicated setter (which keeps the feature-resource track in step on DH) and
-    // fall back to the generic flag path on systems that lack it.
-    const setTracked = async (slug, setter, target) => {
-      if (typeof AFLP.system?.[setter] === "function") return AFLP.system[setter](actor, target);
-      return setExact(slug, target);
-    };
-    await setTracked("bimbofied", "setBimbofied", result.bimbofied);
-    await setTracked("bullified", "setBullified", result.bullified);
+    // fall back to the generic condition path on systems that lack it. The guard
+    // is on the RETURN VALUE, not typeof - adapter-base defines both setters as
+    // stubs returning null on every system, so a typeof guard always passed and
+    // the PF2e write was silently dropped.
+    await AFLP.cond.setTracked(actor, "bimbofied", "setBimbofied", result.bimbofied);
+    await AFLP.cond.setTracked(actor, "bullified", "setBullified", result.bullified);
 
-    // Birth Control / Breeding toggles (flag-backed on every system; the cum
-    // macro and attemptImpregnation read these via AFLP.cond).
-    const setToggle = async (slug, on) => {
-      if (on) { if (!AFLP.cond.has(actor, slug)) await AFLP.cond.apply(actor, slug); }
-      else await AFLP.cond.remove(actor, slug);
+    // Fertility / Birth Control are both staged (flag-backed on every system;
+    // the cum macro and attemptImpregnation read them via AFLP.cond). Setting
+    // 0 clears the stored condition: for Fertility that means back to the
+    // implicit default of 1, for Birth Control it means none.
+    const setStaged = async (slug, target, max) => {
+      const t = Math.max(0, Math.min(max, Number(target) || 0));
+      const current = AFLP.cond.value(actor, slug) || (AFLP.cond.has(actor, slug) ? 3 : 0);
+      if (t === 0) { if (current > 0 || AFLP.cond.has(actor, slug)) await AFLP.cond.remove(actor, slug); }
+      else if (t !== current) await AFLP.cond.apply(actor, slug, t);
     };
-    await setToggle("birth-control", result.birthControl);
-    await setToggle("breeding", result.breeding);
+    await setStaged("birth-control", result.birthControl, 3);
+    await setStaged("breeding", result.breeding, 3);
 
     // Refresh the sheet panel and any open scene card showing this actor.
     try { if (html) await AFLP.UI.SheetTab._refreshPanel(html, actor, false); } catch (e) {}
@@ -1827,41 +2874,129 @@ AFLP.UI.SheetTab = {
   // Each title has a star toggle; clicking sets it as the display title shown
   // in the banner. The active display title shows a filled star.
   // -----------------------------------------------
-  _renderTitlesView(titlesHeld, displayTitleId = null) {
-    if (!titlesHeld.size) return `<div class="aflp-none">No titles earned yet.</div>`;
-    const items = AFLP_Titles.TITLES
+  // Tracked-title progress banner for the Drives pane. Shows the one title the
+  // player is tracking toward, with a progress bar. Nothing if none tracked or
+  // the tracked title is already earned.
+  _renderTrackedTitle(actor, sexual) {
+    const tid = sexual.trackedTitleId;
+    if (!tid) return "";
+    const t = AFLP_Titles.resolveTitle(tid);
+    if (!t) return "";
+    const history = actor.getFlag(AFLP.FLAG_SCOPE, "partnerHistory") ?? [];
+    const p = AFLP_Titles.progressOf(tid, actor, sexual, history);
+    const earned = (sexual.titles ?? []).includes(tid);
+    if (earned) return "";
+    const barPct = p ? p.pct : 0;
+    const valText = p ? `${_fmtNum(p.current)} / ${_fmtNum(p.target)}` : "in progress";
+    return `
+      <div class="aflp-tracked">
+        <div class="aflp-tracked-head">
+          <span class="aflp-tracked-label">◎ H-Quest Progress</span>
+          <strong class="aflp-tracked-name">${t.name}</strong>
+          <span class="aflp-tracked-val">${valText}</span>
+        </div>
+        <div class="aflp-tracked-req">${t.desc}</div>
+        <div class="aflp-progbar"><div class="aflp-progbar-fill" style="width:${barPct}%"></div></div>
+      </div>`;
+  },
+
+  _renderTitlesView(titlesHeld, displayTitleId = null, actor = null, sexual = null) {
+    // "None" opt-out chip: always first.
+    const noneActive = !displayTitleId;
+    const noneChip = `
+      <div class="aflp-title-chip${noneActive ? " aflp-title-active" : ""}" title="Show no title">
+        <div class="aflp-title-chip-head">
+          <button type="button" class="aflp-title-star${noneActive ? " active" : ""}"
+            data-title-id="" title="${noneActive ? "No title shown" : "Show no title"}">${noneActive ? "★" : "☆"}</button>
+          <strong>None</strong>
+        </div>
+        <span class="aflp-title-desc">Display no title.</span>
+      </div>`;
+    // Held titles, sorted alphabetically by display name.
+    const held = AFLP_Titles.TITLES
       .filter(t => titlesHeld.has(t.id))
-      .map(t => {
-        const isActive = t.id === displayTitleId;
-        const star = isActive ? "★" : "☆";
-        const starTitle = isActive ? "Currently displayed title" : "Set as displayed title";
-        const name = AFLP_Titles._name(t.id, t.name);
-        return `
+      .map(t => ({ t, name: AFLP_Titles._name(t.id, t.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const earnedChips = held.map(({ t, name }) => {
+      const isActive = t.id === displayTitleId;
+      const star = isActive ? "★" : "☆";
+      return `
         <div class="aflp-title-chip${isActive ? " aflp-title-active" : ""}" title="🏆 ${name}">
           <div class="aflp-title-chip-head">
             <button type="button" class="aflp-title-star${isActive ? " active" : ""}"
-              data-title-id="${t.id}" title="${starTitle}">${star}</button>
+              data-title-id="${t.id}" title="${isActive ? "Currently displayed" : "Set as displayed title"}">${star}</button>
             🏆 <strong>${name}</strong>
           </div>
           <span class="aflp-title-desc">${t.desc}</span>
         </div>`;
+    }).join("");
+    const earnedBlock = titlesHeld.size
+      ? `<div class="aflp-title-list">${noneChip}${earnedChips}</div>`
+      : `<div class="aflp-none">No titles earned yet. Tick "Show Locked" to see what you can earn and track a quest.</div>`;
+
+    // ── Show Locked (toggle lives in the Titles header now): reveals the
+    // unearned titles with progress bars + track pins so a quest can be chosen
+    // right here in the display view. Persisted per-actor across refreshes.
+    const showLocked = actor ? !!_aflpShowLocked.get(actor.id) : false;
+    const sx = sexual ?? {};
+    const trackedId = sx.trackedTitleId ?? null;
+    const history = actor?.getFlag?.(AFLP.FLAG_SCOPE, "partnerHistory") ?? [];
+
+    let lockedBlock = "";
+    if (showLocked && actor) {
+      const locked = AFLP_Titles.TITLES
+        .filter(t => !titlesHeld.has(t.id))
+        .map(t => {
+          const p = AFLP_Titles.progressOf(t.id, actor, sx, history);
+          const name = AFLP_Titles._name(t.id, t.name);
+          // in-progress (numeric, not done) first by pct desc, then binary locked alpha.
+          const group = (p && !p.done) ? 0 : 1;
+          const sortVal = (p && !p.done) ? -p.pct : 0;
+          return { t, name, p, group, sortVal };
+        })
+        .sort((a, b) => a.group - b.group || a.sortVal - b.sortVal || a.name.localeCompare(b.name));
+      const rows = locked.map(({ t, name, p }) => {
+        const isTracked = t.id === trackedId;
+        const bar = p
+          ? `<div class="aflp-progbar"><div class="aflp-progbar-fill" style="width:${p.pct}%"></div></div>
+             <span class="aflp-prog-val">${_fmtNum(p.current)}/${_fmtNum(p.target)}</span>`
+          : `<span class="aflp-prog-binary">locked</span>`;
+        return `
+        <div class="aflp-title-erow">
+          <div class="aflp-title-erow-head">
+            <button type="button" class="aflp-title-track${isTracked ? " active" : ""}"
+              data-track-id="${t.id}" title="${isTracked ? "Tracking this quest" : "Track this as your H-Quest"}">${isTracked ? "◉" : "◎"}</button>
+            <span class="aflp-title-ename">${name}</span>
+          </div>
+          <div class="aflp-title-ereq">${t.desc}</div>
+          <div class="aflp-title-erow-prog">${bar}</div>
+        </div>`;
       }).join("");
-    return `<div class="aflp-title-list">${items}</div>`;
+      lockedBlock = `<div class="aflp-title-elist aflp-locked-list">${rows || `<div class="aflp-none">All titles earned!</div>`}</div>`;
+    }
+
+    return `${earnedBlock}${lockedBlock}`;
   },
 
   // -----------------------------------------------
-  // Render titles — edit mode (checkbox list)
+  // Render titles — edit mode: pure enable/disable award toggles (the "cheat"
+  // menu). Progress bars and quest tracking live in the DISPLAY view now, behind
+  // the "Show Locked" toggle - the edit menu is only for directly granting or
+  // removing titles.
   // -----------------------------------------------
-  _renderTitlesEdit(titlesHeld) {
-    const items = AFLP_Titles.TITLES.map(t => `
-      <li>
-        <label>
-          <span title="${t.desc}">${t.name}</span>
+  _renderTitlesEdit(titlesHeld, actor = null, sexual = null) {
+    const rows = AFLP_Titles.TITLES
+      .map(t => ({ t, name: AFLP_Titles._name(t.id, t.name), held: titlesHeld.has(t.id) }))
+      .sort((a, b) => (b.held - a.held) || a.name.localeCompare(b.name));
+    const items = rows.map(({ t, name, held }) => `
+      <div class="aflp-title-erow${held ? " earned" : ""}">
+        <label class="aflp-title-erow-head">
           <input type="checkbox" class="aflp-title-check" name="title-${t.id}"
-            data-title-id="${t.id}" ${titlesHeld.has(t.id) ? "checked" : ""}/>
+            data-title-id="${t.id}" ${held ? "checked" : ""}/>
+          <span class="aflp-title-ename" title="${t.desc}">${name}</span>
         </label>
-      </li>`).join("");
-    return `<ul class="aflp-check-list">${items}</ul>`;
+      </div>`).join("");
+    return `<div class="aflp-title-elist">${items}</div>`;
   },
 
   // -----------------------------------------------
@@ -1869,6 +3004,24 @@ AFLP.UI.SheetTab = {
   // -----------------------------------------------
   _activateListeners(html, actor, sheet) {
     const FLAG = AFLP.FLAG_SCOPE;
+
+    // ── Content links ─────────────────────────────────────────────────────
+    // The panel emits proper <a class="content-link" data-uuid="..."> markup, but
+    // Foundry binds those clicks through the Application's own core listeners,
+    // which never reach HTML we inject into somebody else's sheet. Without this
+    // EVERY anatomy, feature and cumflation link on the tab was inert - they
+    // looked like links, highlighted like links, and did nothing.
+    html.addEventListener("click", async (ev) => {
+      const a = ev.target?.closest?.("a.content-link[data-uuid]");
+      if (!a) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      try {
+        const doc = await fromUuid(a.dataset.uuid);
+        if (doc?.sheet) doc.sheet.render(true);
+        else ui.notifications?.warn("AFLR: that item is not in this world's compendiums.");
+      } catch (e) { console.warn("AFLR | content link failed:", a.dataset.uuid, e); }
+    });
 
     // ── Sub-tabs ──────────────────────────────────────────────────────────
     // Switching panes is a pure DOM toggle — no panel rebuild — so the heavy
@@ -1882,14 +3035,23 @@ AFLP.UI.SheetTab = {
       const validTabs = new Set([...tabs].map(t => t.dataset.subtab));
 
       const applySubtab = (which) => {
-        if (!validTabs.has(which)) which = "status";
+        if (!validTabs.has(which)) which = "body";
         _aflpActiveSubtab.set(actor.id, which);
         tabs.forEach(t => t.classList.toggle("active", t.dataset.subtab === which));
         panes.forEach(p => p.classList.toggle("active", p.dataset.subtabPane === which));
+        // Re-fit the auto-height window to the newly-shown pane so switching to
+        // a shorter/taller pane does not leave dead space or clip. Only when the
+        // sheet is the standalone AFLPSheetApp (not docked in another sheet).
+        try {
+          const app = foundry.applications.instances?.get?.(html.closest?.("[data-appid]")?.dataset?.appid)
+            ?? [...(foundry.applications.instances?.values?.() ?? [])]
+                 .find(a => a.constructor?.name === "AFLPSheetApp" && a.element === html.closest(".application"));
+          if (app?.setPosition) requestAnimationFrame(() => app.setPosition({ height: "auto" }));
+        } catch (_) {}
       };
 
       // Restore the previously-active tab (default "status").
-      applySubtab(_aflpActiveSubtab.get(actor.id) ?? "status");
+      applySubtab(_aflpActiveSubtab.get(actor.id) ?? "body");
 
       tabs.forEach(tab => {
         tab.addEventListener("click", (ev) => {
@@ -1969,6 +3131,29 @@ AFLP.UI.SheetTab = {
         // Stop PF2e's form handler from triggering a re-render.
         ev.stopPropagation();
 
+        // Body type select - which position pool this creature is offered.
+        //
+        // THIS BRANCH MUST STAY ABOVE THE VOICE BRANCH. The control carries BOTH
+        // `.aflp-bodytype-select` and `.aflp-voice-select`, because it reuses the
+        // voice popover's layout and CSS; a `.aflp-voice-select` test alone
+        // matches it and would write the body type into `voiceProfile`.
+        //
+        // An empty value is "Auto": UNSET the flag rather than storing a word, so
+        // `getActorPositions` falls back to live detection instead of freezing
+        // today's answer. Storing "biped" and meaning "auto" is the trap here -
+        // the two look identical on the sheet and behave differently the moment
+        // the creature's traits change.
+        if (target.matches(".aflp-bodytype-select")) {
+          const v = target.value;
+          (async () => {
+            try {
+              if (v) await actor.setFlag(AFLP.FLAG_SCOPE, "positionTrait", v);
+              else   await actor.unsetFlag(AFLP.FLAG_SCOPE, "positionTrait");
+            } catch (err) { console.warn("AFLP | could not set body type:", err?.message ?? err); }
+          })();
+          return;
+        }
+
         // Voice profile select - persist the choice. The actor update triggers a
         // refresh that rebuilds the control with the new value (and the voice row
         // stays open because _refreshPanel preserves .aflp-voice-open).
@@ -1983,23 +3168,28 @@ AFLP.UI.SheetTab = {
           return;
         }
 
-        // Pussy toggle: show/hide subtypes
-        if (target.matches(".aflp-pussy-toggle")) {
-          panelEl.querySelector(".aflp-pussy-subtypes")
-            ?.style.setProperty("display", target.checked ? "" : "none");
-          if (!target.checked) {
-            panelEl.querySelectorAll(".aflp-pussy-subtypes input[type=checkbox]")
-              .forEach(cb => cb.checked = false);
-          }
-        }
-
-        // Cock toggle: show/hide subtypes
-        if (target.matches(".aflp-cock-toggle")) {
-          panelEl.querySelector(".aflp-cock-subtypes")
-            ?.style.setProperty("display", target.checked ? "" : "none");
-          if (!target.checked) {
-            panelEl.querySelectorAll(".aflp-cock-subtypes input[type=checkbox]")
-              .forEach(cb => cb.checked = false);
+        // Anatomy toggle: show/hide that part's subtype list.
+        //
+        // ONE derived block, not one per part. This was four copy-pasted blocks
+        // for pussy, cock, tits and throat; the ass arrived in 1.0.20 with its
+        // markup and its subtypes rendered but no block here, so ticking Ass did
+        // nothing at all and its subtypes could never be reached. That is the
+        // "anything that hardcodes the original holes is a bug" rule - the next
+        // part added now works without touching this handler.
+        //
+        // Gated on `.aflp-genitalia-check` AND a matching `-subtypes` list, so the
+        // other `aflp-*-toggle` classes on this sheet (titles, milking station,
+        // coat, mind break) cannot fall in by name.
+        if (target.matches(".aflp-genitalia-check")) {
+          const part = [...target.classList]
+            .map(c => c.match(/^aflp-(.+)-toggle$/)?.[1])
+            .find(Boolean);
+          const list = part ? panelEl.querySelector(`.aflp-${part}-subtypes`) : null;
+          if (list) {
+            list.style.setProperty("display", target.checked ? "" : "none");
+            if (!target.checked) {
+              list.querySelectorAll("input[type=checkbox]").forEach(cb => cb.checked = false);
+            }
           }
         }
 
@@ -2030,19 +3220,97 @@ AFLP.UI.SheetTab = {
       const isEditMode = panelRoot.classList.contains("aflp-edit-mode");
       try {
 
+      // Doll region: switch which slot panel shows. The doll hotspots are the only
+      // selector now - the duplicate text rail is gone - so this also updates the
+      // caption under the doll. Pure DOM toggle, no rebuild.
+      if (btn.classList.contains("aflp-doll-hot")) {
+        const region = btn.dataset.region;
+        (AFLP.UI.SheetTab._activeRegion ??= {})[actor.id] = region;
+        panelRoot.querySelectorAll(".aflp-doll-hot").forEach(h => h.classList.toggle("aflp-doll-active", h.dataset.region === region));
+        panelRoot.querySelectorAll(".aflp-doll-panel").forEach(p => { p.style.display = p.dataset.region === region ? "" : "none"; });
+        const cap = panelRoot.querySelector(".aflp-doll-caption");
+        if (cap) cap.textContent = { head: "Head", torso: "Torso", "lower-body": "Lower body" }[region] ?? "";
+        return;
+      }
+      // Doll silhouette flip - remembered on the actor so it sticks next open.
+      if (btn.classList.contains("aflp-doll-flip")) {
+        const doll = panelRoot.querySelector(".aflp-doll");
+        if (doll) {
+          const order = ["Female", "Male", "Monster"];
+          const next = order[(order.indexOf(doll.dataset.silh) + 1 + order.length) % order.length];
+          doll.dataset.silh = next;
+          doll.style.backgroundImage = `url('modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/Silhouette${next}.png')`;
+          actor.setFlag(AFLP.FLAG_SCOPE, "dollSilhouette", next).catch(() => {});
+        }
+        return;
+      }
+
+      // Express milk: drain the pool into units. With an ally targeted, nurse them -
+      // the milk heals; otherwise it's just expressed.
+      if (btn.classList.contains("aflp-milk-express")) {
+        const units = await AFLP.milk.express(actor);
+        if (units > 0) {
+          const tgt = [...(game.user.targets ?? [])][0]?.actor;
+          if (tgt && tgt !== actor) {
+            const healed = await AFLP.milk.consume(tgt, units, { producer: actor });
+            ChatMessage.create({ speaker: { alias: actor.name }, content: `<div class="aflp-chat-card"><p>Nurses <strong>${tgt.name}</strong> with <strong>${units}</strong> milk - ${AFLP.system?.id === "daggerheart" ? "clearing" : "restoring"} <strong>${healed}</strong> HP.</p></div>` }).catch(() => {});
+          } else {
+            ChatMessage.create({ speaker: { alias: actor.name }, content: `<div class="aflp-chat-card"><p>Expresses <strong>${units}</strong> milk.</p></div>` }).catch(() => {});
+          }
+        }
+        await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+        return;
+      }
+
+      // Cum Measure cycle: Cum Shots -> ml -> fl oz -> gallons -> round.
+      // This button lives INSIDE .aflp-panel, so its click is caught here by the
+      // panel dispatcher. A handler on the sheet ROOT never sees it: this
+      // dispatcher stopPropagation()s every [class*='aflp-'] click before it can
+      // bubble out. That is exactly why the old root-mounted handler did nothing.
+      // Client-scoped setting, so one player reading in gallons does not change
+      // anyone else's sheet.
+      if (btn.classList.contains("aflp-measure-cycle")) {
+        const ORDER = ["units", "ml", "floz", "gal"];
+        const cur   = AFLP.Settings.cumMeasureMode ?? "units";
+        const next  = ORDER[(ORDER.indexOf(cur) + 1) % ORDER.length];
+        try { await game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.CUM_MEASURE, next); }
+        catch (e) { console.warn("AFLP | cum measure cycle:", e?.message); }
+        await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+        return;
+      }
+
+      // Milestones Bottom/Top toggle. Pure DOM swap (no re-render) plus a
+      // remembered per-actor choice, stored as a user flag so it is per-viewer
+      // and never writes to the shared actor. Lives here in the dispatcher for
+      // the same reason the measure button does: the panel swallows aflp- clicks.
+      if (btn.classList.contains("aflp-ms-role-btn")) {
+        const role = btn.dataset.role === "top" ? "top" : "bottom";
+        const scope = panelRoot ?? html;
+        scope.querySelectorAll(".aflp-ms-roleblock").forEach(el => {
+          el.style.display = (el.dataset.msRole === role) ? "" : "none";
+        });
+        scope.querySelectorAll(".aflp-ms-role-btn").forEach(b =>
+          b.setAttribute("aria-pressed", b.dataset.role === role ? "true" : "false"));
+        try {
+          const MOD = AFLP.MODULE_ID ?? "ardisfoxxs-lewd-pf2e";
+          const cur = foundry.utils.duplicate(game.user.getFlag(MOD, "msRole") ?? {});
+          cur[actor.id] = role;
+          game.user.setFlag(MOD, "msRole", cur).catch(() => {});
+        } catch (e) { /* non-fatal */ }
+        return;
+      }
+
+      // Through AFLP.denied, which knows the store AND the per-actor ceiling.
+      // These wrote the legacy bag by hand against a hardcoded 6: wrong store on
+      // Daggerheart, where the total lives in the valued condition, and wrong
+      // number everywhere, since the cap is 3 - or 4 on DH at Edge Master Greater.
       if (btn.classList.contains("aflp-denied-inc")) {
-        const FLAG   = AFLP.FLAG_SCOPE;
-        const denied = structuredClone(actor.getFlag(FLAG, "denied") ?? AFLP.deniedDefaults);
-        denied.value = Math.min(6, (denied.value ?? 0) + 1);
-        await actor.setFlag(FLAG, "denied", denied);
+        await AFLP.denied.add(actor, 1);
         await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
         return;
       }
       if (btn.classList.contains("aflp-denied-dec")) {
-        const FLAG   = AFLP.FLAG_SCOPE;
-        const denied = structuredClone(actor.getFlag(FLAG, "denied") ?? AFLP.deniedDefaults);
-        denied.value = Math.max(0, (denied.value ?? 0) - 1);
-        await actor.setFlag(FLAG, "denied", denied);
+        await AFLP.denied.add(actor, -1);
         await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
         return;
       }
@@ -2052,7 +3320,10 @@ AFLP.UI.SheetTab = {
         return;
       }
       if (btn.classList.contains("aflp-voice-test")) {
-        const sel = panelRoot.querySelector(".aflp-voice-select");
+        // :not(.aflp-bodytype-select) is load-bearing - the body-type control
+        // shares .aflp-voice-select for its layout and would otherwise be picked
+        // up here the moment it is moved above the voice row in the markup.
+        const sel = panelRoot.querySelector(".aflp-voice-select:not(.aflp-bodytype-select)");
         const profile = (sel?.value || actor.getFlag(AFLP.FLAG_SCOPE, "voiceProfile") || "").trim();
         if (!profile) { ui.notifications?.warn("AFLP: pick a voice profile to test."); return; }
         const label = window.AFLP_Voice?.testStep?.(actor.id, profile);
@@ -2064,16 +3335,26 @@ AFLP.UI.SheetTab = {
       }
       if (btn.classList.contains("aflp-voice-rescan")) {
         try { await window.AFLP_Voice?.scan?.(); await window.AFLP_Voice?.scanSfx?.(); } catch (e) { /* ignore */ }
-        ui.notifications?.info(`AFLP: rescanned voice folder (${window.AFLP_Voice?.profiles?.().length ?? 0} profile(s)).`);
+        // A seat without FILES_BROWSE takes the list from the GM's client rather
+        // than scanning, so say that instead of reporting a scan it did not do.
+        ui.notifications?.info(window.AFLP_Voice?.sharedSeat?.()
+          ? `AFLP: asked the GM for the voice list (${window.AFLP_Voice?.profiles?.().length ?? 0} profile(s) so far).`
+          : `AFLP: rescanned voice folder (${window.AFLP_Voice?.profiles?.().length ?? 0} profile(s)).`);
         await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
         return;
       }
       if (btn.classList.contains("aflp-titles-toggle")) {
-        // Flip titles-mode on the panel dataset; _refreshPanel reads it back so
-        // the whole sheet swaps to (or from) the titles view.
+        // Legacy titles-mode toggle (title banner removed; kept as a safe no-op
+        // fallback if any old surface still emits it).
         if (panelRoot.dataset.aflpTitles) delete panelRoot.dataset.aflpTitles;
         else panelRoot.dataset.aflpTitles = "1";
         await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+        return;
+      }
+      // Masthead title -> jump to the Drives pane (where titles live).
+      if (btn.classList.contains("aflp-mast-title")) {
+        const drivesTab = html.querySelector('.aflp-subtab[data-subtab="drives"]');
+        drivesTab?.click();
         return;
       }
       if (btn.classList.contains("aflp-title-star")) {
@@ -2081,12 +3362,37 @@ AFLP.UI.SheetTab = {
         const titleId = btn.dataset.titleId;
         const sexual = structuredClone(actor.getFlag(FLAG, "sexual") ?? {});
         const held = new Set((sexual.titles ?? []).filter(id => AFLP_Titles.resolveTitle(id)));
-        // Only allow selecting a title the actor actually holds.
-        if (titleId && held.has(titleId) && sexual.displayTitle !== titleId) {
+        if (!titleId) {
+          // "None" chosen: store a sentinel so the display does NOT fall back to
+          // the most recent earned title. Distinct from unset.
+          if (sexual.displayTitle !== "__none__") {
+            sexual.displayTitle = "__none__";
+            await actor.setFlag(FLAG, "sexual", sexual);
+            await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+          }
+        } else if (held.has(titleId) && sexual.displayTitle !== titleId) {
           sexual.displayTitle = titleId;
           await actor.setFlag(FLAG, "sexual", sexual);
           await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
         }
+        return;
+      }
+      if (btn.classList.contains("aflp-showlocked") || btn.classList.contains("aflp-showlocked-check")) {
+        // Toggle the display-view "Show Locked" titles section. Read the intended
+        // next state (a label click flips the checkbox), persist per-actor, refresh.
+        const cur = !!_aflpShowLocked.get(actor.id);
+        _aflpShowLocked.set(actor.id, !cur);
+        await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
+        return;
+      }
+      if (btn.classList.contains("aflp-title-track")) {
+        // Toggle the tracked title (progress target). Distinct from displayed.
+        const FLAG = AFLP.FLAG_SCOPE;
+        const trackId = btn.dataset.trackId;
+        const sexual = structuredClone(actor.getFlag(FLAG, "sexual") ?? {});
+        sexual.trackedTitleId = (sexual.trackedTitleId === trackId) ? null : trackId;
+        await actor.setFlag(FLAG, "sexual", sexual);
+        await AFLP.UI.SheetTab._refreshPanel(html, actor, isEditMode);
         return;
       }
       if (btn.classList.contains("aflp-arousal-dec")) {
@@ -2101,7 +3407,7 @@ AFLP.UI.SheetTab = {
       }
       if (btn.classList.contains("aflp-lovense-btn")) {
         if (window.AFLP_Lovense) {
-          AFLP_Lovense.openWizard(); // always open wizard — handles setup and reconnection
+          AFLP_Lovense.openWizard(); // always open wizard - handles setup and reconnection
         }
         return;
       }
@@ -2176,6 +3482,7 @@ AFLP.UI.SheetTab = {
         for (const [field, raw] of Object.entries(dirty)) {
           const val = parseFloat(raw) || 0;
           if      (field === "coomer.level")        { coomer.level = val; coomerDirty = true; }
+          else if (field === "coomer.bonus")        { coomer.bonus = val; coomerDirty = true; }
           // Skip lifetime/ml writes if we're resetting lifetime — the reset already cleared it above
           else if (field.startsWith("given."))      { if (!resetSections.lifetime) { if (!sexual.lifetime.given) sexual.lifetime.given = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 }; sexual.lifetime.given[field.replace("given.", "")] = val; } }
           else if (field.startsWith("lifetime."))   { if (!resetSections.lifetime) sexual.lifetime[field.replace("lifetime.", "")] = val; }
@@ -2189,13 +3496,58 @@ AFLP.UI.SheetTab = {
           if (resetSections.genitalia) {
             await actor.setFlag(FLAG, "pussy", false);
             await actor.setFlag(FLAG, "cock",  false);
-            await actor.setFlag(FLAG, "genitalTypes", Object.fromEntries(Object.keys(AFLP.genitalTypes).map(k => [k, false])));
+            await actor.setFlag(FLAG, "anatomyFeatures", Object.fromEntries(Object.keys(AFLP.anatomyFeatures).map(k => [k, false])));
+            // Body Features (the size-training unlocks) and the training pips are
+            // part of the body, so a Genitalia reset clears them too.
+            // Derived from the canonical lists rather than hardcoded, so adding a
+            // training track cannot leave a stale key behind. Hardcoding these is
+            // how the onahole track survived a Genitalia reset.
+            await actor.setFlag(FLAG, "sizeTraining",
+              Object.fromEntries(AFLP.TRAIN_HOLES.map(h => [h, 0])));
+            await actor.setFlag(FLAG, "bodyFeatures",
+              Object.fromEntries(Object.keys(AFLP.BODY_FEATURES).map(k => [k, false])));
           } else {
             await actor.setFlag(FLAG, "pussy", root.querySelector("input[name='genitalia-pussy']")?.checked ?? false);
             await actor.setFlag(FLAG, "cock",  root.querySelector("input[name='genitalia-cock']")?.checked  ?? false);
-            const gt = Object.fromEntries(Object.keys(AFLP.genitalTypes).map(k => [k, false]));
+            const gt = Object.fromEntries(Object.keys(AFLP.anatomyFeatures).map(k => [k, false]));
             root.querySelectorAll("input[name^='genitalType-']").forEach(el => { gt[el.name.replace("genitalType-", "")] = el.checked; });
-            await actor.setFlag(FLAG, "genitalTypes", gt);
+            // BASE PARTS ARE DERIVED, NEVER LISTED. `gt` is seeded with every
+            // anatomy key FALSE, so a base part with no line here is written
+            // `false` on every save no matter what its checkbox says. That has now
+            // happened twice with a hardcoded list:
+            //
+            //   11 Aug 2026  `ass` had no line, so every save wrote ass: false -
+            //                Neela ended up ass: false / throat: true and ticking
+            //                the box appeared to do nothing.
+            //   29 Aug 2026  `chest` was added to AFLP.anatomyFeatures and this
+            //                block was not touched, so the same bug was armed
+            //                again. It never fired only because the torso panel had
+            //                no Chest checkbox either, so nobody could set one.
+            //
+            // Looping over the registry's own base parts is what stops the third
+            // occurrence: add a base part and it is handled here with no edit.
+            // GOES STALE IF: a base part stops being `parent: null`, or the input
+            // naming convention `genitalia-<slug>` changes.
+            for (const [slug, d] of Object.entries(AFLP.anatomyFeatures)) {
+              if (d.parent) continue;                       // subtypes come from the loop above
+              const el = root.querySelector(`input[name='genitalia-${slug}']`);
+              // Absent input falls back to the part's own default: throat, ass and
+              // chest read as "everyone has one unless a GM turned it off"
+              // (`genitalTypes.x !== false`), so defaulting them false here would
+              // contradict what the panel displays.
+              gt[slug] = el ? el.checked : AFLP.ANATOMY_DEFAULT_ON.includes(slug);
+            }
+            await actor.setFlag(FLAG, "anatomyFeatures", gt);
+            // Body Feature toggles: present checkboxes win; absent holes (e.g.
+            // pussy on a no-pussy body) fall back to false.
+            const bfInputs = root.querySelectorAll("input[name^='bodyFeature-']");
+            if (bfInputs.length) {
+              // Seed every known track, not three - an absent key here silently
+              // wiped the onahole feature whenever the sheet saved.
+              const bf = Object.fromEntries(Object.keys(AFLP.BODY_FEATURES).map(k => [k, false]));
+              bfInputs.forEach(el => { bf[el.name.replace("bodyFeature-", "")] = el.checked; });
+              await actor.setFlag(FLAG, "bodyFeatures", bf);
+            }
           }
         }
 
@@ -2234,6 +3586,45 @@ AFLP.UI.SheetTab = {
           }
         }
 
+        // Cumflation — commit the staged pip fill (edit-mode pips only touch the
+        // DOM). Read each hole's filled-pip count from the Body pane. Skip when
+        // the Cumflation reset is checked (handled below by the reset path).
+        if (!resetSections.cumflation) {
+          const cfBars = root.querySelectorAll(".aflp-cumflation-pip[data-pip-type='cumflation']");
+          if (cfBars.length) {
+            const cf = structuredClone(actor.getFlag(FLAG, "cumflation") ?? { oral: 0, vaginal: 0, anal: 0, facial: 0 });
+            const byHole = {};
+            cfBars.forEach(p => {
+              const h = p.dataset.hole;
+              byHole[h] = (byHole[h] ?? 0) + (p.classList.contains("filled") ? 1 : 0);
+            });
+            let cfDirty = false;
+            for (const [h, v] of Object.entries(byHole)) { if ((cf[h] ?? 0) !== v) { cf[h] = v; cfDirty = true; } }
+            if (cfDirty) {
+              await actor.setFlag(FLAG, "cumflation", cf);
+              await AFLP_Cumflation.applyCumflationEffects(actor);
+              await AFLP.effects?.sync?.(actor);
+            }
+          }
+        }
+
+        // Size Training — commit the staged pip fill (routes through
+        // setSizeTraining so Body Feature / Size Difference unlocks fire).
+        if (!resetSections.genitalia) {
+          const stBars = root.querySelectorAll(".aflp-sizetrain-pip[data-pip-type='sizetrain']");
+          if (stBars.length) {
+            const byHole = {};
+            stBars.forEach(p => {
+              const h = p.dataset.hole;
+              byHole[h] = (byHole[h] ?? 0) + (p.classList.contains("filled") ? 1 : 0);
+            });
+            const curTrain = AFLP.sizeTrainingOf(actor);
+            for (const [h, v] of Object.entries(byHole)) {
+              if ((curTrain[h] ?? 0) !== v) await AFLP.setSizeTraining(actor, h, v);
+            }
+          }
+        }
+
         // Write sexual object once
         await actor.setFlag(FLAG, "sexual", sexual);
         if (coomerDirty) { await actor.setFlag(FLAG, "coomer", coomer); await AFLP.recalculateCum(actor); }
@@ -2256,15 +3647,20 @@ AFLP.UI.SheetTab = {
           ar.max = ar.maxBase;
           await actor.setFlag(FLAG, "arousal", ar);
         }
-        // Staged permanent Horny — written from hidden input on Save
+        // Staged permanent Horny — written from hidden input on Save.
+        //
+        // A GM setting the permanent floor by hand is just another SOURCE, keyed
+        // "manual", so it composes with the granted ones instead of fighting
+        // them: Aphrodisiac Junkie Mastery's 3 still wins by max, and a Bondage
+        // Princess's while-in-ropes token is not clobbered by a GM typing 1.
+        // setSustained also raises the TOTAL to meet the new floor and lowers it
+        // when the floor drops - which the hand-rolled version could not do on
+        // Daggerheart, where the floor is in the bag but the total is in the
+        // valued condition.
         if (dirty["horny.permanent"] !== undefined) {
-          const horny = structuredClone(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults);
-          const newPerm = Math.max(0, Math.min(3, parseInt(dirty["horny.permanent"], 10) || 0));
-          // If permanent increased, keep temp; if decreased, reduce temp so total doesn't exceed 3
-          const newTotal = newPerm + (horny.temp ?? 0);
-          if (newTotal > 3) horny.temp = Math.max(0, 3 - newPerm);
-          horny.permanent = newPerm;
-          await actor.setFlag(FLAG, "horny", horny);
+          const cap = AFLP.CONDITION_CAPS?.horny ?? 3;
+          const newPerm = Math.max(0, Math.min(cap, parseInt(dirty["horny.permanent"], 10) || 0));
+          await AFLP.horny.setSustained(actor, "manual", newPerm);
         }
 
         // ── Pregnancy edits, removals, additions — single atomic write ──────
@@ -2274,7 +3670,7 @@ AFLP.UI.SheetTab = {
         if (!resetSections.pregnancy) {
           // Always read from the world actor to bypass synthetic token cache
           const pregnancies = structuredClone(
-            game.actors?.get(actor.id)?.getFlag(FLAG, "pregnancy")
+            AFLP.system.liveActor(actor)?.getFlag(FLAG, "pregnancy")
             ?? actor.getFlag(FLAG, "pregnancy")
             ?? {}
           );
@@ -2322,7 +3718,7 @@ AFLP.UI.SheetTab = {
           _aflpPregAdditions.delete(actor.id);
 
           // Write using dot-notation path — setFlag deep-merges and won't remove keys
-          const worldActorWrite = game.actors?.get(actor.id) ?? actor;
+          const worldActorWrite = AFLP.system.liveActor(actor);
           await worldActorWrite.update({ [`flags.${FLAG}.pregnancy`]: pregnancies });
         }
 
@@ -2334,7 +3730,13 @@ AFLP.UI.SheetTab = {
           await actor.setFlag(FLAG, "arousal", { ...ar, current: 0 });
         }
         if (resetSections.horny) {
-          await actor.setFlag(FLAG, "horny", structuredClone(AFLP.hornyDefaults));
+          // Through the door, and through it TWICE - the sourced floors have to
+          // be withdrawn or the total settles straight back onto them, and on
+          // Daggerheart the total does not live in this flag at all, so the raw
+          // setFlag this replaces made the Reset Horny checkbox a no-op there.
+          const bag = actor.getFlag(FLAG, "horny") ?? {};
+          for (const src of Object.keys(bag.sources ?? {})) await AFLP.horny.setSustained(actor, src, 0);
+          await AFLP.horny._setTotal(actor, 0);
         }
         if (resetSections.cum)        await AFLP.recalculateCum(actor);
         if (resetSections.cumflation && window.AFLP_Cumflation) {
@@ -2383,7 +3785,7 @@ AFLP.UI.SheetTab = {
         const pregId = btn.dataset.pregId;
         if (!pregId) return;
         try {
-          const worldActor = game.actors?.get(actor.id) ?? actor;
+          const worldActor = AFLP.system.liveActor(actor);
           // Use Foundry's -=key deletion syntax — dot-notation replacement and setFlag
           // both deep-merge and leave deleted keys intact. Only -=key actually removes.
           await worldActor.update({ [`flags.${FLAG}.pregnancy.-=${pregId}`]: null });
@@ -2522,15 +3924,17 @@ AFLP.UI.SheetTab = {
           if (isNaN(pipIndex)) return;
 
           if (!isEditMode) {
-            // VIEW MODE: immediate flag write, fill up to clicked pip or peel off.
-            const horny = structuredClone(actor.getFlag(PFLAG, "horny") ?? AFLP.hornyDefaults);
-            const hp    = horny.permanent ?? 0;
-            const ht    = horny.temp ?? 0;
-            const total = hp + ht;
-            if (pipIndex < hp) return; // permanent — read-only in view mode
+            // VIEW MODE: set the TOTAL through the door - fill up to the clicked
+            // pip, or peel it off. Was a raw setFlag on the {temp, permanent}
+            // bag, which is not where Daggerheart keeps the total, so clicking a
+            // Horny pip on a DH sheet wrote a flag nothing reads and the pips
+            // reverted on refresh. `permanent` stays the floor either way, and
+            // _setTotal derives temp from it. Found 19 Aug 2026.
+            const hp    = AFLP.horny.permanent(actor);
+            const total = AFLP.horny.total(actor);
+            if (pipIndex < hp) return; // permanent - read-only in view mode
             const targetTotal = (pipIndex < total) ? pipIndex : pipIndex + 1;
-            horny.temp = Math.max(0, Math.min(targetTotal - hp, 3 - hp));
-            await actor.setFlag(PFLAG, "horny", horny);
+            await AFLP.horny._setTotal(actor, Math.max(hp, targetTotal));
             await AFLP.UI.SheetTab._refreshPanel(html, actor, false);
 
           } else {
@@ -2579,8 +3983,10 @@ AFLP.UI.SheetTab = {
         });
       });
 
-      // Cumflation pips — click to set hole tier directly (GM/owner only, view mode)
-      if (!isEditMode) {
+      // Cumflation pips — in VIEW mode click writes immediately; in EDIT mode
+      // click only stages the fill visually (committed by Save, reverted by
+      // Cancel), matching how the numeric inputs stage.
+      {
         panelRoot.querySelectorAll(".aflp-cumflation-pip[data-pip-type='cumflation']").forEach(pip => {
           pip.addEventListener("click", async (ev) => {
             ev.stopPropagation();
@@ -2588,12 +3994,46 @@ AFLP.UI.SheetTab = {
             const hole     = pip.dataset.hole;
             const pipIndex = parseInt(pip.dataset.pipIndex, 10);
             if (!hole || isNaN(pipIndex)) return;
+            if (isEditMode) {
+              // Stage: recompute fill for this hole's bar from the click.
+              const bar = pip.closest(".aflp-pip-bar") ?? pip.parentElement;
+              const pips = [...bar.querySelectorAll(".aflp-cumflation-pip")];
+              const cur = pips.filter(p => p.classList.contains("filled")).length;
+              const next = (pipIndex < cur) ? pipIndex : Math.min(pipIndex + 1, 8);
+              pips.forEach((p, i) => p.classList.toggle("filled", i < next));
+              return; // no write, no refresh - Save reads DOM
+            }
             const cumflation = structuredClone(actor.getFlag(FLAG, "cumflation") ?? { oral: 0, vaginal: 0, anal: 0, facial: 0 });
             const cur = cumflation[hole] ?? 0;
-            // Click within filled → reduce to pipIndex; click at/beyond → set to pipIndex+1
             cumflation[hole] = (pipIndex < cur) ? pipIndex : Math.min(pipIndex + 1, 8);
             await actor.setFlag(FLAG, "cumflation", cumflation);
             await AFLP_Cumflation.applyCumflationEffects(actor);
+            await AFLP.effects?.sync?.(actor);
+            await AFLP.UI.SheetTab._refreshPanel(html, actor, false);
+          });
+        });
+      }
+      // Size Training pips — same staging model: view mode writes, edit mode
+      // stages the fill visually until Save.
+      {
+        panelRoot.querySelectorAll(".aflp-sizetrain-pip[data-pip-type='sizetrain']").forEach(pip => {
+          pip.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            if (!actor.isOwner && !game.user?.isGM) return;
+            const hole     = pip.dataset.hole;
+            const pipIndex = parseInt(pip.dataset.pipIndex, 10);
+            if (!hole || isNaN(pipIndex)) return;
+            if (isEditMode) {
+              const bar = pip.closest(".aflp-pip-bar") ?? pip.parentElement;
+              const pips = [...bar.querySelectorAll(".aflp-sizetrain-pip")];
+              const cur = pips.filter(p => p.classList.contains("filled")).length;
+              const next = (pipIndex < cur) ? pipIndex : Math.min(pipIndex + 1, AFLP.SIZE_TRAIN_MAX);
+              pips.forEach((p, i) => p.classList.toggle("filled", i < next));
+              return;
+            }
+            const cur = (AFLP.sizeTrainingOf(actor)[hole] ?? 0);
+            const next = (pipIndex < cur) ? pipIndex : Math.min(pipIndex + 1, AFLP.SIZE_TRAIN_MAX);
+            await AFLP.setSizeTraining(actor, hole, next);
             await AFLP.UI.SheetTab._refreshPanel(html, actor, false);
           });
         });
@@ -2656,6 +4096,7 @@ AFLP.UI.SheetTab = {
     for (const [field, raw] of Object.entries(dirty)) {
       const val = parseFloat(raw) || 0;
       if      (field === "coomer.level")       { coomer.level = val; coomerDirty = true; }
+      else if (field === "coomer.bonus")       { coomer.bonus = val; coomerDirty = true; }
       else if (field === "cumShotBonus")       { await actor.setFlag(FLAG, "cumShotBonus", val); coomerDirty = true; }
       else if (field === "cum.current")        { const cum = structuredClone(actor.getFlag(FLAG, "cum") ?? AFLP.cumDefaults); cum.current = val; await actor.setFlag(FLAG, "cum", cum); }
       else if (field.startsWith("given."))     { if (!sexual.lifetime.given) sexual.lifetime.given = { oral: 0, vaginal: 0, anal: 0, facial: 0, gangbang: 0 }; sexual.lifetime.given[field.replace("given.", "")] = val; sexualDirty = true; }
@@ -2664,7 +4105,13 @@ AFLP.UI.SheetTab = {
       else if (field.startsWith("mlReceived.")){ sexual.lifetime.mlReceived[field.replace("mlReceived.", "")] = val; sexualDirty = true; }
       else if (field === "arousal.current")    { const ar = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults); ar.current = val; await actor.setFlag(FLAG, "arousal", ar); }
       else if (field === "arousal.maxBase")    { const ar = structuredClone(actor.getFlag(FLAG, "arousal") ?? AFLP.arousalDefaults); ar.maxBase = val; ar.max = val; await actor.setFlag(FLAG, "arousal", ar); }
-      else if (field === "horny.permanent")    { const h = structuredClone(actor.getFlag(FLAG, "horny") ?? AFLP.hornyDefaults); const np = Math.max(0, Math.min(3, val)); if ((np + (h.temp ?? 0)) > 3) h.temp = Math.max(0, 3 - np); h.permanent = np; await actor.setFlag(FLAG, "horny", h); }
+      // Through the door, and through the MANUAL source specifically - a floor
+      // typed into the status editor is one grantor among several, so writing
+      // `permanent` directly would clobber Bondage Princess's and Aphrodisiac
+      // Junkie's. Matches the live Save handler, which is the only caller path
+      // this duplicates. (This method has no caller today; kept in step rather
+      // than left as a second, wrong copy that could get wired up later.)
+      else if (field === "horny.permanent")    { await AFLP.horny.setSustained(actor, "manual", Math.max(0, Math.min(3, val))); }
     }
 
     // Numeric field writes — sexual flag

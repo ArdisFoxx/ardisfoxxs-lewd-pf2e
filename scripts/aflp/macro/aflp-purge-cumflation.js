@@ -5,7 +5,7 @@
 // overall effect, which is recomputed from the flags).
 //
 // Purge clears ONE hole at a time. A dialog asks which to clear, then:
-//   - External cum (facial, paizuri) is surface, not a filled hole: it wipes
+//   - External cum (the facial and chest coats) is surface, not a filled hole: it wipes
 //           off for free - no save, no Stress, no Fatigue, no chance of failure.
 //   - Internal holes (anal, oral, vaginal):
 //     - PF2e: 3-action activity, Fortitude save vs a normal DC for your level.
@@ -25,7 +25,8 @@ const FLAG  = AFLP.FLAG_SCOPE;
 const isDH  = AFLP.system?.id === "daggerheart";
 
 const cumflation = actor.getFlag(FLAG, "cumflation") ?? { oral: 0, anal: 0, vaginal: 0, facial: 0, paizuri: 0 };
-if (!cumflation.oral && !cumflation.anal && !cumflation.vaginal && !cumflation.facial && !cumflation.paizuri) {
+if (!cumflation.oral && !cumflation.anal && !cumflation.vaginal && !cumflation.facial
+    && !cumflation.bodyCoat && !cumflation.onahole) {
   ui.notifications.info(`${actor.name} isn't cumflated right now.`);
   return;
 }
@@ -35,10 +36,41 @@ const HOLES = [
   { key: "anal",    label: "Anal" },
   { key: "oral",    label: "Oral" },
   { key: "vaginal", label: "Vaginal" },
-  { key: "facial",  label: "Facial" },
-  { key: "paizuri", label: "Paizuri" },
+  { key: "facial",  label: "Facial Coat" },
+  // WAS `paizuri`, WHICH IS A DEAD POOL. A paizuri finish has written into
+  // `bodyCoat` since the chest pools were merged - `applyCumflation` remaps the
+  // key - so `cumflation.paizuri` has had no writer, and this row could never be
+  // offered no matter how coated the creature was. The chest coat had no way to be
+  // purged at all. Ardis, 29 Aug 2026: "Purge cumflation has no line for clearing
+  // body coat? Shouldn't it?"
+  // The label is the sheet's, not the pool key's.
+  { key: "bodyCoat", label: "Chest Coat" },
+  // Tits (Onahole) fills a reservoir inside the tits. Its own text says
+  // "squeezing them empties them again", which was never implemented - the pool
+  // could be filled and never drained. It is not a body cavity, so it costs
+  // nothing to empty: you squeeze, it comes out.
+  { key: "onahole", label: "Tits" },
 ];
-const filled = HOLES.filter(h => (cumflation[h.key] ?? 0) > 0);
+// A hole plugged by chastity gear cannot be purged - there is nowhere for it to
+// go while the thing is still seated. The gear list lives in AFLP.chastityGear.
+const sealed = AFLP.chastityGear?.sealedHoles?.(actor) ?? [];
+const filled = HOLES.filter(h => (cumflation[h.key] ?? 0) > 0 && !sealed.includes(h.key));
+{
+  const blocked = HOLES.filter(h => (cumflation[h.key] ?? 0) > 0 && sealed.includes(h.key));
+  if (blocked.length && !filled.length) {
+    ui.notifications.warn(`${actor.name} cannot purge: ${blocked.map(h => h.label).join(" and ")} sealed shut by worn gear.`);
+    return;
+  }
+  if (blocked.length) {
+    ui.notifications.info(`${blocked.map(h => h.label).join(" and ")} sealed shut - not offered.`);
+  }
+  // A plug seals whichever hole it happens to be in, and only the table knows
+  // which that is - so warn rather than guess and remove a valid option.
+  const plugs = AFLP.chastityGear?.plugs?.(actor) ?? [];
+  if (plugs.length) {
+    ui.notifications.info(`${actor.name} is wearing ${plugs.map(g => g.item?.name ?? "a plug").join(", ")} - a plugged hole cannot be purged until it comes out.`);
+  }
+}
 
 let hole;
 if (filled.length === 1) {
@@ -64,9 +96,10 @@ if (filled.length === 1) {
 }
 
 const holeLabel = HOLES.find(h => h.key === hole)?.label ?? hole;
-const external  = hole === "facial" || hole === "paizuri";
+const external  = hole === "facial" || hole === "bodyCoat" || hole === "onahole";
 const where = hole === "facial" ? "their face"
-            : hole === "paizuri" ? "their chest"
+            : hole === "bodyCoat" ? "their chest"
+            : hole === "onahole" ? "their tits"
             : `their ${holeLabel.toLowerCase()}`;
 
 // ── Clear a single purged hole + recompute effects ────────────────────────
@@ -81,6 +114,7 @@ const purgeHole = async () => {
   await actor.setFlag(FLAG, "cumflation",  cf);
   await actor.setFlag(FLAG, "cumOverflow", ov);
   await AFLP_Cumflation.applyCumflationEffects(actor);
+  await AFLP.effects?.sync?.(actor);
 };
 
 const getNormalDC = (level) => {
@@ -92,7 +126,7 @@ const getNormalDC = (level) => {
 };
 
 const rollPurge = async () => {
-  const actorLevel = actor.system?.details?.level?.value ?? 1;
+  const actorLevel = AFLP.actorLevel(actor);
   const dc     = getNormalDC(actorLevel);
   const flavor = `<strong>${actor.name}</strong>: Purge Cum — ${holeLabel} (Fortitude DC ${dc})`;
 
@@ -153,12 +187,29 @@ const purgeDH = async () => {
   return "success";
 };
 
-// External locations (facial, paizuri) are surface cum, not a filled hole.
+// External locations (the facial and chest coats) are surface cum, not a filled hole.
 // There is no way to fail at wiping yourself down, so they clear for free - no
 // save, no Stress, no Fatigue - on either system.
 if (external) {
+  // Squeezing cumflated tits yields a Bottle of Milky Cum, but only once per
+  // rest - otherwise a character farms bottles by being filled and squeezed
+  // over and over in a single scene. The purge itself is always free and
+  // always available; only the bottle is limited.
+  let bottled = 0;
+  if (hole === "onahole") {
+    const REST_FLAG = "milkyCumBottledThisRest";
+    const already = actor.getFlag(FLAG, REST_FLAG) === true;
+    if (!already) {
+      try {
+        bottled = await AFLP.cumBottle?.grant?.(actor, 1) ?? 0;
+        if (bottled > 0) await actor.setFlag(FLAG, REST_FLAG, true);
+      } catch (e) { console.warn("AFLP | milky cum bottle failed", e); }
+    }
+  }
   await purgeHole();
-  ChatMessage.create({ content: `<em>${actor.name} wipes the cum from ${where} clean.</em>` });
+  ChatMessage.create({ content: bottled > 0
+    ? `<em>${actor.name} squeezes their tits out, filling a Bottle of Milky Cum.</em>`
+    : `<em>${actor.name} wipes the cum from ${where} clean.</em>` });
   return;
 }
 

@@ -29,7 +29,14 @@
         resizable: true,
         minimizable: true,
       },
-      position: { width: 560, height: 740 },
+      // Widened from 560 so the Size Training rows (icon + label + 6 pips)
+      // never clip at default size. Height is auto: with the ABCD pane split,
+      // each pane is short, so a fixed tall window left dead space - auto fits
+      // the window to the active pane's content (still user-resizable).
+      // 600 leaves about 582 of usable panel. The widest row - a 50px tier icon,
+      // a 92px label and eight pips - needs roughly 436, so this has room for the
+      // pregnancy table and the longer readouts without the user resizing.
+      position: { width: 660, height: "auto" },
     };
 
     // One open window per actor.
@@ -119,23 +126,42 @@
           if (app instanceof AFLPSheetApp) return;     // not our own window
           if (!actor.isOwner && !game.user?.isGM) return;
 
-          const root = (html instanceof HTMLElement) ? html : app.element;
+          // UNWRAP jQUERY. A V1 sheet hands `html` as a jQuery object and exposes
+          // `app.element` as one too, and jQuery has no querySelector - so the
+          // optional call below returned undefined, `header` was undefined, and
+          // this function returned having done nothing. That is why the button
+          // appeared on Daggerheart (ApplicationV2, real elements) and never on
+          // Pathfinder, even after the PF2e hooks were added to the list below.
+          // Measured 11 Aug 2026: CharacterSheetPF2e is V1 and its element is
+          // jQuery.
+          const raw  = (html instanceof HTMLElement) ? html : (html?.[0] ?? app.element);
+          const root = (raw instanceof HTMLElement) ? raw : (raw?.[0] ?? null);
           const header = root?.querySelector?.(".window-header");
           if (!header || header.querySelector(".aflp-open-btn")) return;
 
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "header-control icon aflp-open-btn";
-          btn.innerHTML = `<i class="fa-solid fa-heart"></i>`;
-          btn.dataset.tooltip = "AFLP";
-          btn.setAttribute("aria-label", "AFLP");
+          // Match the header's own furniture. V1 headers are <a class="header-button
+          // control"> and V2 headers are <button class="header-control icon">; a
+          // V2-shaped button dropped into a V1 header is unstyled and sits wrong.
+          const isV1Header = !!header.querySelector("a.header-button");
+          const btn = document.createElement(isV1Header ? "a" : "button");
+          if (!isV1Header) btn.type = "button";
+          btn.className = isV1Header
+            ? "header-button control aflp-open-btn"
+            : "header-control icon aflp-open-btn";
+          // Same glyph as the floating toolbar's AFLR sheet button - one icon,
+          // one meaning. It used to be a heart, which is the H-Scene button.
+          btn.innerHTML = `<i class="fa-solid fa-clipboard-list"></i>`;
+          btn.dataset.tooltip = "AFLR sheet";
+          btn.title = "AFLR sheet";
+          btn.setAttribute("aria-label", "AFLR sheet");
           btn.addEventListener("click", (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
             AFLPSheetApp.open(actor.getWorldActor?.() ?? actor);
           });
 
-          const closeBtn = header.querySelector("[data-action='close']");
+          // AppV2 marks close with data-action; V1 sheets use a .close anchor.
+          const closeBtn = header.querySelector("[data-action='close'], a.close, .header-button.close");
           if (closeBtn) header.insertBefore(btn, closeBtn);
           else header.appendChild(btn);
         } catch (e) {
@@ -143,7 +169,23 @@
         }
       };
 
+      // PF2e actor sheets do not all emit renderApplicationV2, which is why this
+      // button existed on Daggerheart sheets and not Pathfinder ones. Mirror the
+      // sheet tab's hook set: named PF2e sheets, the AppV2 catch-all, and the V1
+      // fallbacks. injectButton is idempotent - it bails if the button is already
+      // in the header - so overlapping hooks are harmless.
+      for (const hookName of [
+        "renderCharacterSheetPF2e",
+        "renderNPCSheetPF2e",
+        "renderHazardSheetPF2e",
+        "renderVehicleSheetPF2e",
+        "renderFamiliarSheetPF2e",
+      ]) {
+        Hooks.on(hookName, (app, html) => injectButton(app, html));
+      }
       Hooks.on("renderApplicationV2", (app, html, data) => injectButton(app, html));
+      Hooks.on("renderApplication",   (app, html, data) => injectButton(app, html));
+      Hooks.on("renderActorSheet",    (app, html, data) => injectButton(app, html));
 
       // Keep an open AFLP window in sync when its actor changes externally.
       Hooks.on("updateActor", (actor) => {
@@ -159,6 +201,23 @@
         if (app._aflpContent?.querySelector(".aflp-panel.aflp-edit-mode")) return;
         app.refresh();
       });
+
+      // Items change derived numbers - Bonus Loads, Cum Shot, tits size, anatomy
+      // grants - but updateActor does not fire when an item is added or removed,
+      // so the panel showed stale values until the user reopened it. Dragging the
+      // Loads effect on lit the status panel and left the sheet's number behind.
+      const _itemRefresh = (item) => {
+        const actor = item?.parent;
+        if (!actor?.id) return;
+        const app = AFLPSheetApp._open.get(actor.id);
+        if (!app?.rendered) return;
+        if (app._aflpContent?.querySelector(".aflp-panel.aflp-edit-mode")) return;
+        app.refresh();
+      };
+      Hooks.on("createItem", _itemRefresh);
+      Hooks.on("deleteItem", _itemRefresh);
+      // A badge edit (Loads 1 -> Loads 3) is an item UPDATE, not a create.
+      Hooks.on("updateItem", _itemRefresh);
     }
   }
 

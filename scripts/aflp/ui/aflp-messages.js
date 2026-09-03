@@ -13,7 +13,6 @@ AFLP.Messages = {
     "scene-end": [
       "The scene draws to a close.",
       "{target} is released, breathless.",
-      "The moment passes, leaving only heat.",
     ],
     "cum": [
       "{attacker} finishes.",
@@ -211,8 +210,8 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id:       "aflp-cf-labels-editor",
     tag:      "div",
-    window:   { title: "Cumflation Status Labels", resizable: false, minimizable: true },
-    position: { width: 720 },
+    window:   { title: "Cumflation Status Labels", resizable: true, minimizable: true },
+    position: { width: 980, height: 560 },
   };
 
   _esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -231,14 +230,24 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
     } catch { return {}; }
   }
 
+  // Column set is derived from the canonical ladder registry, so any hole added
+  // there becomes editable here automatically - the old hardcoded list silently
+  // left the chest ladder uneditable.
+  // Column titles are the sheet's labels: the two COATS read "Facial Coat" and
+  // "Chest Coat" there, so a GM editing the ladders sees the same words they see
+  // on a character. 29 Aug 2026.
+  static COL_TITLES = { vaginal: "Pussy", anal: "Anal", oral: "Oral", facial: "Facial Coat", tits: "Tits", bodyCoat: "Chest Coat", onahole: "Nipples" };
+  _holeKeys() { return Object.keys(AFLP.CF_HOLE_WORDS ?? {}); }
+  _colTitle(h) { return CumflationLabelsApp.COL_TITLES[h] ?? (h.charAt(0).toUpperCase() + h.slice(1)); }
+
   async _renderHTML() {
-    const HOLES = ["vaginal", "anal", "oral", "facial"];
+    const HOLES = this._holeKeys();
     const overallDef = AFLP.CF_LABEL_DEFAULTS ?? [];
     const holeDef    = AFLP.CF_HOLE_WORDS ?? {};
     const customO = this._loadOverall();
     const customH = this._loadHoles();
     const inp = (col, i, def, cur) => `<input type="text" data-col="${col}" data-i="${i}" value="${this._esc(cur)}" placeholder="${this._esc(def)}"
-        style="width:118px;background:#111;color:#e0c8a0;border:1px solid rgba(200,160,80,0.3);border-radius:3px;padding:3px 5px;font-size:11px;font-weight:700;"/>`;
+        style="width:112px;background:#111;color:#e0c8a0;border:1px solid rgba(200,160,80,0.3);border-radius:3px;padding:3px 5px;font-size:11px;font-weight:700;"/>`;
     let rows = "";
     for (let t = 1; t <= 8; t++) {
       const i = t - 1;
@@ -251,22 +260,24 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
     rows += `<tr>
       <td style="color:#aaa;font-size:11px;padding:4px 8px 4px 0;white-space:nowrap;">T8 + Facial 8</td>
       <td>${inp("overall", 8, overallDef[8]?.word ?? "", customO[8]?.w ?? "")}</td>
-      <td colspan="4" style="color:#555;font-size:10px;font-style:italic;padding-left:8px;">(overall only)</td>
+      <td colspan="${HOLES.length}" style="color:#555;font-size:10px;font-style:italic;padding-left:8px;">(overall only)</td>
     </tr>`;
     const el = document.createElement("div");
     el.innerHTML = `<style>
-      #aflp-cf-labels-editor .window-content { padding: 0; }
-      .aflp-cf-i { padding: 8px 12px 4px; font-size: 10px; color: #777; border-bottom: 1px solid rgba(200,160,80,.15); }
-      .aflp-cf-t { padding: 8px 12px; }
-      .aflp-cf-f { padding: 6px 12px; border-top: 1px solid rgba(200,160,80,.15); display: flex; justify-content: flex-end; gap: 6px; }
+      #aflp-cf-labels-editor .window-content { padding: 0; display: flex; flex-direction: column; min-height: 0; }
+      .aflp-cf-i { padding: 8px 12px 4px; font-size: 10px; color: #777; border-bottom: 1px solid rgba(200,160,80,.15); flex: none; }
+      /* Scrolls both ways: the ladder set is wider than any sensible window, and
+         the window is resizable, so the table pane takes the slack. */
+      .aflp-cf-t { padding: 8px 12px; overflow: auto; flex: 1 1 auto; min-height: 0; max-height: 60vh; }
+      .aflp-cf-f { padding: 6px 12px; border-top: 1px solid rgba(200,160,80,.15); display: flex; justify-content: flex-end; gap: 6px; flex: none; }
       .aflp-cf-f button { padding: 4px 14px; font-size: 11px; cursor: pointer; }
-      .aflp-cf-t th { font-size:9px; color:#888; text-align:left; padding:0 4px 4px; }
+      .aflp-cf-t th { font-size:9px; color:#888; text-align:left; padding:0 4px 4px; position: sticky; top: 0; background: #1b1b1d; z-index: 1; }
     </style>
-    <div class="aflp-cf-i">Rename each cumflation label. Blank keeps the default. Overall shows on H-Scene cards; the four hole columns show per-hole on the sheet.</div>
+    <div class="aflp-cf-i">Rename each cumflation label. Blank keeps the default. Overall shows on H-Scene cards; the hole columns show per-hole on the sheet. Chest reads as Tits on an actor with tits, otherwise Chest.</div>
     <div class="aflp-cf-t">
       <table style="border-collapse:collapse;width:100%">
         <thead><tr>
-          <th>Tier</th><th>Overall</th><th>Pussy</th><th>Anal</th><th>Oral</th><th>Facial</th>
+          <th>Tier</th><th>Overall</th>${HOLES.map(h => `<th>${this._colTitle(h)}</th>`).join("")}
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -284,7 +295,8 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
     const el = this.element;
     el.querySelector(".aflp-cf-s")?.addEventListener("click", async () => {
       const overall = [];
-      const holes = { vaginal: [], anal: [], oral: [], facial: [] };
+      const holes = {};
+      for (const h of this._holeKeys()) holes[h] = [];
       el.querySelectorAll("input[data-col]").forEach(x => {
         const col = x.dataset.col, i = Number(x.dataset.i), v = x.value.trim();
         if (col === "overall") overall[i] = { w: v };

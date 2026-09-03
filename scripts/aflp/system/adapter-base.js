@@ -28,11 +28,25 @@
     get capabilities() {
       return {
         degreesOfSuccess: false,  // four-tier crit/success/fail/crit-fail resolution
-        valuedConditions: false,  // conditions that carry an incrementing numeric badge
-        nativeArousal: null,      // null = AFLP-owned flag; "stress" = bridge to a native resource
+        // THIS IS ABOUT THE SYSTEM'S OWN CONDITIONS, NOT AFLR'S. It asks whether
+        // the game system natively carries an incrementing numeric badge on a
+        // condition - true on PF2e, false on Daggerheart and 5e, where AFLR's
+        // valued conditions are flag-backed instead. Reading it as "does AFLR
+        // have valued conditions here" gets the opposite answer on two systems.
+        valuedConditions: false,
+        nativeArousal: null,      // null = AFLP-owned flag; a string = bridge to that native resource
         resistKind: null,         // which save/roll resists a cum; null = auto-resolve
       };
     }
+
+    // NOTHING OUTSIDE THE ADAPTERS READS `capabilities` - measured 19 Aug 2026 by
+    // grepping the whole tree. It is a declaration with no consumer, which is
+    // precisely how `nativeArousal: "stress"` sat on the Daggerheart adapter for
+    // weeks describing a bridge that had been deleted. **A declaration nothing
+    // exercises rots silently**, so the simulation harness now measures every key
+    // here against real behaviour rather than trusting the literal.
+    // GOES STALE IF: a consumer appears, in which case the wrong value stops being
+    // merely untrue and starts being a bug.
 
     // --- Actor helpers (system-agnostic, kept here so there is one home) ---
 
@@ -58,6 +72,103 @@
       return canvas?.tokens?.get(tokenId)?.actor ?? actor?.token?.actor ?? actor;
     }
 
+    // --- H-Scene damage accrual (per-system) ---------------------------
+    // The current HP value from an actor's update `changes`, or null if this
+    // update did not touch HP. PF2e / 5e store HP at system.attributes.hp.value
+    // and count DOWN (damage lowers it). Daggerheart overrides this.
+    hpValueFromChanges(changes) {
+      return foundry.utils.getProperty(changes, "system.attributes.hp.value") ?? null;
+    }
+    // The actor's current HP value right now (same field as above).
+    hpValueNow(actor) {
+      return actor?.system?.attributes?.hp?.value ?? null;
+    }
+    // Positive damage from an oldHP/newHP pair. PF2e/5e: damage = old - new
+    // (HP falls). Daggerheart overrides (marks rise).
+    hpDamageDelta(oldHP, newHP) {
+      const d = (Number(oldHP) || 0) - (Number(newHP) || 0);
+      return d > 0 ? d : 0;
+    }
+    // The actor's "downing" HP: the raw damage that represents one full drop of
+    // this actor's health bar, used to normalize H-Scene damage into a common
+    // unit (downings) so title thresholds mean the same thing on every system.
+    // PF2e / 5e: the actor's max HP. Daggerheart overrides with its 6-12 band.
+    downingHP(actor) {
+      const max = actor?.system?.attributes?.hp?.max
+        ?? actor?.system?.attributes?.hp?.value ?? 0;
+      return Math.max(1, Number(max) || 1);
+    }
+    // Convert raw H-Scene damage into normalized "downing units" (1.0 = one full
+    // health bar of this actor). Cross-system stable.
+    hscDamageToUnits(actor, rawDamage) {
+      return (Number(rawDamage) || 0) / this.downingHP(actor);
+    }
+
+    // Restore HP. PF2e / 5e store HP at system.attributes.hp.value counting UP to
+    // max; Daggerheart overrides (clearing marks). Returns HP actually restored.
+    async healActor(actor, amount) {
+      const cur = this.hpValueNow(actor);
+      if (cur == null) return 0;
+      const max = actor?.system?.attributes?.hp?.max ?? this.downingHP(actor);
+      const next = Math.min(max, cur + Math.max(0, Number(amount) || 0));
+      if (next <= cur) return 0;
+      await actor.update({ "system.attributes.hp.value": next });
+      return next - cur;
+    }
+
+    // How much one unit of milk heals. Health means different things per system:
+    // 3 hit points is a rounding error in PF2e, but 3 Daggerheart MARKS is half a
+    // health bar (a DH bar is 6-12 total). Each adapter prices its own.
+    // Milk heals per unit, scaled by the PRODUCER's level so nursing keeps pace
+    // with the party instead of falling off after level 2. Curve is half of PF2e's
+    // Lay on Hands (6 per rank): 3 at levels 1-2, 6 at 3-4, 9 at 5-6, and so on.
+    // Half, not full, because milk stockpiles and Lay on Hands cannot. Falls back
+    // to the flat base when no producer is known.
+    milkHealPerUnit(producer = null) {
+      const base = 3;
+      const lvl = Number(producer?.level ?? producer?.system?.details?.level?.value ?? 0);
+      if (!lvl) return base;
+      return base * Math.max(1, Math.ceil(lvl / 2));
+    }
+
+    // Is this actor lactating? PF2e and 5e carry a Tits (Lactating) anatomy
+    // subtype. Daggerheart deliberately has no such item and uses the Leaking
+    // condition instead, so it overrides this. Kept separate from
+    // AFLP.milk.isLactating, which gates the numeric milk POOL - a concept DH
+    // does not have at all.
+    isLactating(actor) {
+      return (actor?.getFlag?.(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits-lactating"] === true;
+    }
+
+    // Does this system keep milk in a numeric POOL with a capacity? PF2e and 5e
+    // do. Daggerheart does not - its milk is Bottled Milk items drawn off at a
+    // rest - so the pool bar, its capacity and the Express button must not appear
+    // there. Gating on isLactating is NOT enough: DH grants tits-lactating too.
+    usesMilkPool() { return true; }
+
+    // Status-panel mouseover text that states RULES. These were hardcoded to
+    // PF2e, so a Daggerheart GM read about Clumsy, AC and three-action Purge -
+    // none of which exist there. Each system answers for itself.
+    // What the daily upkeep is CALLED to a player. PF2e has Daily Preparations;
+    // Daggerheart has no such activity and runs the same upkeep off a Long Rest,
+    // so the chat line has to say the thing that system actually does.
+    dailyResetText() { return "completes daily preparations"; }
+
+    cumflationMaxText(max) {
+      return `Filled to the brim: -1 to Dexterity-based checks and DCs (AC, Reflex, ranged attacks, `
+        + `Acrobatics, Stealth, Thievery) and -5 feet Speed. Stacks with each other maxed hole. `
+        + `Purge Cumflation (3 actions, Fortitude save) empties one hole.`;
+    }
+    cumflationBelowMaxText(max) {
+      return `No penalty yet - penalties begin at ${max}. Purge Cumflation empties a hole early.`;
+    }
+    pregnancyLateText() {
+      return "Past half term and showing. Clumsy and slowed until you give birth.";
+    }
+    pregnancyEarlyText() {
+      return "Carrying, but not showing yet. No penalty until half term.";
+    }
+
     // --- Resource-change vocabulary ------------------------------------
     // How this system talks about changing a pooled/marked resource (Arousal,
     // Stress, HP). Daggerheart "marks" and "clears"; PF2e and D&D 5e "gain" and
@@ -65,6 +176,21 @@
     // that diverge from the gain/lose default (Daggerheart) override these.
     get markVerb()  { return "gain"; }
     get clearVerb() { return "lose"; }
+
+    // What this system calls the number you roll against. Pathfinder and D&D 5e
+    // say DC; Daggerheart says DIFFICULTY and never DC - it is one of the
+    // vocabulary rules the project states outright.
+    //
+    // Added 17 Aug 2026 after a sweep of every player-facing string found "DC" in
+    // six Carnal cards on Daggerheart, plus both escape flavours, the Brood roll
+    // and two macros. Ardis spotted the same class from the other end ("there are
+    // no turns in dh"). Sixteen hand edits would have been sixteen chances to
+    // drift, so it lives here beside markVerb and clearVerb, which exist for
+    // exactly this reason.
+    //
+    // Use it in any string a player reads. Do NOT use it for a Foundry roll
+    // formula or a flag name - it is a WORD, not an identifier.
+    get dcWord() { return "DC"; }
 
     // Phrase for a signed resource change: "gain 3 Arousal" / "lose 2 Arousal"
     // (pf2e, 5e), or "mark 3 Arousal" / "clear 2 Arousal" (Daggerheart).
@@ -138,14 +264,60 @@
       else if (nat === 20) degree = "crit";
       else if (roll.total >= dc) degree = "success";
       else degree = "fail";
-      return { degree, detail: `Roll <strong>${roll.total}</strong> vs Brood DC ${dc}` };
+      return { degree, detail: `Roll <strong>${roll.total}</strong> vs Brood ${this.dcWord} ${dc}` };
     }
 
     // Apply a system-native core condition (e.g. grabbed, restrained, sickened,
     // stunned) by slug, with an optional numeric value for valued conditions.
     // Distinct from applyCondition, which applies AFLP content items by uuid.
+    // Reset a mirrored timed effect's duration without changing its value. Only
+    // PF2e keeps such mirrors today (see pf2e-adapter._syncTimedMirror); every
+    // other system stores AFLR conditions as flags with no duration, so this is a
+    // genuine no-op there rather than a gap.
+    //
+    // RETURN-VALUE contract, not typeof: a `typeof === "function"` guard is always
+    // true against a base stub, which is the documented trap that made
+    // setBimbofied/setBullified silently swallow writes. Callers ignore the result
+    // here, but it answers honestly so a caller COULD branch on it.
+    async refreshConditionDuration(actor, slug, tokenId = null) { return false; }
+
     async applyNativeCondition(actor, slug, value = null, tokenId = null) {
       console.warn(`AFLP | applyNativeCondition not implemented for system '${this.id}' (${slug})`);
+    }
+
+    // ── Effects layer ──────────────────────────────────────────────────────
+    // Find the doc this system emitted for an intent (AE on DH, Item on PF2e).
+    findEffectIntentDoc(actor, key) { return null; }
+    // Emit / retract an intent. Defaults no-op with a warn so an unmapped
+    // system (5e later) degrades gracefully rather than erroring.
+    async applyEffectIntent(actor, key, spec) {
+      console.warn(`AFLP | applyEffectIntent not implemented for system '${this.id}' (${key})`);
+    }
+    async removeEffectIntent(actor, key) { /* nothing emitted, nothing to remove */ }
+
+    // Size Difference: the "first oversized penetration" bite. On Daggerheart
+    // this is 1 Stress; systems without a Stress track (pf2e, 5e) override this
+    // to their own equivalent (pf2e: minor nonlethal + Clumsy 1). Default is a
+    // no-op so an unmapped system simply skips the bite rather than erroring.
+    async sizePenalty(actor, tokenId = null) { /* system override */ }
+
+    // Remove exactly the size-penalty affliction WE applied (tracked on the
+    // sizeClumsy flag), leaving any same-named condition from other sources
+    // alone. Called at scene end, on leaving, and on a switch to a
+    // non-penetrative position.
+    //
+    // Only PF2e implements this, and deliberately so: its penalty is a lingering
+    // condition (Clumsy) that stacks. Daggerheart marks 1 Stress and D&D 5e deals
+    // 1d4 damage - a spent resource and a wound. Neither lingers, and "clearing"
+    // them would refund Stress or heal the strain, which is wrong. Base no-op.
+    async clearSizePenalty(actor, tokenId = null) { /* PF2e only - see note */ }
+
+    // Size Difference: being pinned on an oversized partner (gap 3, Ruined).
+    // DH uses restrained; pf2e/5e map to grabbed/grappled. Returns the slug that
+    // was applied (so cleanup can strip the right one), or null.
+    async sizeRestrain(actor, tokenId = null) {
+      await this.applyNativeCondition(actor, "restrained", null, tokenId);
+      return "restrained";
     }
 
     // --- AFLP custom condition state (valued / binary) ---
@@ -154,6 +326,22 @@
     // presence and numeric value so domain logic never queries actor.items
     // directly. A system without those items (5e / Daggerheart) overrides these
     // to a flag-backed store, so the same conditions work there.
+
+    // Does this system MIRROR the AFLR condition `id` onto a native token status?
+    //
+    // Only Daggerheart does today: it registers every AFLR condition in the
+    // condition manager, so one application produces a flag write and then, a
+    // tick later, a status toggle. The condition-change feed in schema.js drops
+    // status events for anything this returns true for, which is the only thing
+    // that stops that pair being counted as two transitions. Answering false is
+    // the safe default and means "a status with this id is the system's, not
+    // ours" - PF2e's Restrained and Off-Guard are exactly that.
+    //
+    // Deliberately NOT the registry test. A Daggerheart-only condition (Hooked,
+    // Lustful) has no AFLP.conditions entry at all, because registry entries
+    // carry a canonical PF2e uuid and there is no PF2e item for them to name.
+    ownsStatus(_id) { return false; }
+
 
     hasCondition(actor, key, tokenId = null) {
       const live = this.liveActor(actor, tokenId);

@@ -145,7 +145,8 @@ window.AFLP_Lovense = {
     if (this.useDirect()) this._directFire("edge");
   },
 
-  // Called by module.js logEffect for condition items
+  // Called by module.js logEffect for PF2e condition ITEMS, and by the
+  // flag-backed condition feed wired at the bottom of this file.
   emitCondition(actor, slug) {
     const k = this.CONDITION_MAP[slug?.toLowerCase?.()];
     if (!k || !this.isEventEnabled(k)) return;
@@ -1153,3 +1154,47 @@ For more help, visit the AFLP Discord at https://subscribestar.adult/ardisfoxxar
 
 // No auto-connect on world load — users must click ♥ on their sheet tab
 // to open the wizard and connect their toy each session.
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Flag-backed condition feed
+// ═══════════════════════════════════════════════════════════════════════════
+// Wired 8 August 2026, after measuring that Lovense condition events fired ZERO
+// times on Daggerheart.
+//
+// The only other route into emitCondition is logEffect() in scripts/module.js,
+// driven by preCreateItem / updateItem gated on `item.type === "condition" ||
+// "effect"`. That is the PF2e ITEM path and nothing else:
+//   - Daggerheart keeps every AFLR condition in flags.world.aflpConditions and
+//     holds no item of either type anywhere in the world, so nothing fired.
+//   - On PF2e the five conditions the adapter moved into that same bag
+//     (dominating, submitting, defeated, birth-control, breeding) were dead for
+//     the same reason. Submitting is in CONDITION_MAP and could never fire.
+//
+// This closes both gaps and nothing else:
+//   source "item"   - skipped. module.js already owns it; emitting here too
+//                     would fire every PF2e condition twice.
+//   source "status" - skipped. A native status is the SYSTEM's condition, not
+//                     AFLR's, and module.js's LOVENSE_SKIP_SLUGS exists to
+//                     exclude exactly those (prone, restrained, grabbed,
+//                     frightened...). Daggerheart's own Grabbed still fires,
+//                     because there it is an AFLR condition living in the flag
+//                     bag and arrives as source "flag".
+//   onset only      - a toy fires when a condition ARRIVES. Not while it
+//                     persists, not when it clears.
+//
+// GM-gated, matching emitArousal / emitCum / emitEdge: gift mode broadcasts to
+// every client from wherever it is called, so firing on all of them would
+// multiply each line by the number of players connected.
+Hooks.once("ready", () => {
+  if (typeof AFLP?.cond?.onChange !== "function") {
+    console.warn("AFLP | Lovense flag-backed condition feed NOT wired: AFLP.cond.onChange is missing");
+    return;
+  }
+  AFLP.cond.onChange("*", ({ actor, key, prev, next, source }) => {
+    if (source !== "flag") return;
+    if (!(prev === 0 && next > 0)) return;
+    if (!AFLP_Lovense.CONDITION_MAP[String(key).toLowerCase()]) return;
+    if (!game.user.isGM || !AFLP_Lovense.isEnabled()) return;
+    AFLP_Lovense.emitCondition(actor, key);
+  });
+});

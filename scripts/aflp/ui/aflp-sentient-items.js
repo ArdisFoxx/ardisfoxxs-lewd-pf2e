@@ -17,7 +17,7 @@ window.AFLP_SentientItems = {
   UUID_ARMOR:    "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.017D4bJ2SxYJbzJc",
   UUID_GUARDING: "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.Olh6A7c9bj4QbrbN",
   UUID_GROPING:  "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.eAPSO3IxoD8HU0dA",
-  UUID_GRABBED:  "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2",
+  get UUID_GRABBED() { return AFLP.sysUuid?.("Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2") ?? "Compendium.pf2e.conditionitems.Item.XgEqL1kFApUbl5Z2"; },
   UUID_EXPOSED:  "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.ocRgNSfLD65sWBhs",
 
   FLAG:      "armorOfHandsDisposition",
@@ -116,7 +116,7 @@ window.AFLP_SentientItems = {
       else if (merged["armor-of-hands-disposition-3plus"]) inferred = 3;
       else if (merged["armor-of-hands-bonded"])            inferred = 1;
 
-      const actor   = game.actors.get(item.actor.id) ?? item.actor;
+      const actor   = AFLP.system.liveActor(item.actor);
       const current = this.getDisposition(actor);
       if (inferred === current) return;
 
@@ -131,7 +131,7 @@ window.AFLP_SentientItems = {
     Hooks.on("combatTurnChange", async (combat, _prior, current) => {
       const combatant = combat.combatants.get(current.combatantId);
       if (!combatant?.actor) return;
-      const actor = game.actors.get(combatant.actor.id) ?? combatant.actor;
+      const actor = AFLP.system.liveActor(combatant.actor, combatant.tokenId ?? null);
       const equipped = this.getEquipped(actor);
       if (!equipped) return;
       const disp = this.getDisposition(actor);
@@ -247,7 +247,7 @@ window.AFLP_SentientItems = {
     }
 
     if (disp >= 3) {
-      const base = disp >= 4 ? 2 : 2; // always 2 base from D3+ (SA)
+      const base = 1; // SA-equivalent base; rebased when Sexual Advance dropped from 2 to 1
       await AFLP.ensureCoreFlags(actor);
       const gain = await AFLP_Arousal.increment(actor, base, "Armor of Hands (SA)", tokenId);
       const total = gain?.applied ?? base;
@@ -286,7 +286,7 @@ window.AFLP_SentientItems = {
   },
 
   async _applyDispositionEffects(actor, fromDisp, toDisp) {
-    const live = game.actors.get(actor.id) ?? actor;
+    const live = AFLP.system.liveActor(actor);
 
     // ── Update RollOption toggles on the equipped item ─────────────────
     const equipped = this.getEquipped(live);
@@ -311,7 +311,7 @@ window.AFLP_SentientItems = {
   },
 
   async _clearConditions(actor, currentDisp) {
-    const live = game.actors.get(actor.id) ?? actor;
+    const live = AFLP.system.liveActor(actor);
     if (currentDisp < 5) {
       const grabbed = live.items?.find(i =>
         ((i.flags?.core?.sourceId ?? i.sourceId ?? "") === this.UUID_GRABBED || i.slug === "grabbed")

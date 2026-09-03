@@ -35,7 +35,7 @@
   // Everything below is the PF2e grapple minigame (game.pf2e actions, Fortitude
   // DCs, flat-footed). Guard any non-PF2e system so the macro informs rather than
   // throwing on, e.g., 5e. DH is already handled above with a tailored message.
-  if (game.system.id !== "pf2e") {
+  if (!["pf2e", "sf2e"].includes(game.system.id) || !game.pf2e?.actions) {
     ui.notifications.info("AFLR | Struggle Snuggle's grapple minigame is PF2e-specific. On this system, use your system's Carnal action / resist flow instead.");
     return;
   }
@@ -68,7 +68,7 @@
   const UUID_SEXTOY_FEAT = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.svOYfYAX5tN5WH2i";
 
   // Resolve sex toys dynamically from the pack so adding new toys in future just works
-  const _pack = game.packs.get("ardisfoxxs-lewd-pf2e.aflp-lewd-items");
+  const _pack = game.packs.get(AFLP.CONTENT_ITEMS_PACK ?? "ardisfoxxs-lewd-pf2e.aflp-lewd-items");
   const _idx  = await _pack.getIndex();
 
   function findToy(name) {
@@ -151,6 +151,15 @@
       if (AFLP.cond.has(liveActor, slug)) return;
       return AFLP.cond.apply(liveActor, slug, value, actor.token?.id ?? null);
     }
+    // Horny and Denied are dual-store: AFLP.horny / AFLP.denied own the
+    // per-system branch. The caps-aware item path below is correct for Exposed
+    // and Mind Break and WRONG for these two - on Pathfinder it wrote an item
+    // that the arousal bonus, the status panel, the sheet tab and rest all
+    // ignore, so every sex-toy Horny grant in this macro (vibrator 2, dildo 1,
+    // anal plug 1) was invisible. Found 19 Aug 2026 by the dual-store sweep.
+    if (slug === "horny" || slug === "denied") {
+      return AFLP[slug].add(liveActor, value ?? 1);
+    }
     const existing = slug === "exposed"
       ? findExposedAny(liveActor)
       : liveActor.items?.find(c => {
@@ -165,7 +174,9 @@
         const next    = value !== null ? Math.max(current, value) : current + 1;
         const capped  = cap !== null ? Math.min(next, cap) : next;
         if (capped > current && !isExposedNudeItem(existing)) {
-          await existing.update({ "system.badge.value": capped });
+          // Proxied: the caps logic and the exposed-nude guard above are local and
+          // correct, but the WRITE lands on a target the caller may not own.
+          await AFLP.gm.run("updateItem", liveActor, existing.id, { "system.badge.value": capped });
         }
       }
       return;
@@ -177,10 +188,10 @@
       if (value !== null && itemData.system?.badge !== undefined) {
         itemData.system.badge.value = value;
       }
-      await actor.createEmbeddedDocuments("Item", [itemData]);
+      await AFLP.gm.run("createItem", actor, itemData);
     } catch (e) {
       if (typeof actor.increaseCondition === "function") {
-        await actor.increaseCondition(slug);
+        await AFLP.gm.run("nativeCondition", actor, slug);
       } else {
         console.warn(`AFLR | Could not apply condition ${slug} to ${actor.name}:`, e);
       }
@@ -292,12 +303,18 @@
     // Resolve the Dominating attackers acting on THIS escapee specifically
     // (participants whose intentional partner is the source), so escaping one
     // pairing in a multi-pair scene doesn't pull in unrelated dominators.
-    const domAttackers = (escapeScene.participants ?? [])
+    // Resolve the dominating partners ONCE as participants, so both the actor
+    // list and their token ids come from the same filter. Unlinked tokens off one
+    // sheet all report the same actor.id, so anything that must tell two siblings
+    // apart - the knot below - has to compare token ids.
+    const _actorOf = (p) => canvas?.tokens?.get(p.tokenId)?.actor
+                         ?? game.actors?.get(p.actorId ?? p.tokenId)
+                         ?? null;
+    const domParticipants = (escapeScene.participants ?? [])
       .filter(p => p.partnerId === sourceToken.id && !p._facing)
-      .map(p => canvas?.tokens?.get(p.tokenId)?.actor
-             ?? game.actors?.get(p.actorId ?? p.tokenId)
-             ?? null)
-      .filter(a => AFLP.cond.has(a, "dominating"));
+      .filter(p => AFLP.cond.has(_actorOf(p), "dominating"));
+    const domAttackers = domParticipants.map(_actorOf).filter(Boolean);
+    const domTokenIds  = new Set(domParticipants.map(p => p.tokenId));
 
     // Beat the highest Fortitude DC among all Dominating attackers
     const escapeTargetActor = domAttackers.reduce((best, a) => {
@@ -311,19 +328,64 @@
       return;
     }
 
-    const escapeDC      = 10 + (escapeTargetActor.system?.saves?.fortitude?.value ?? 0);
+    // Cock (Knot): a creature knotted by one of the Dominators automatically
+    // fails every Escape attempt - no roll, and no action burned on a variant
+    // dialog. Only an external force beating the owner's Fortitude DC frees
+    // them, which is the GM-side Pull Free call, not this action.
+    {
+      const knot = AFLP.knot?.get?.(sourceTokenActor);
+      // By TOKEN id: three ogres off one sheet share an actor id, and being knotted
+      // by one of them must not auto-fail your escape from another.
+      const knotIsHere = knot && domTokenIds.has(knot.tokenId);
+      if (knot && knotIsHere) {
+        await ChatMessage.create({
+          speaker: ChatMessage.getSpeaker({ actor: sourceActor }),
+          flavor: "Struggle Escape - Knotted",
+          content: `<p><strong>${sourceActor.name}</strong> pulls against <strong>${knot.name}</strong>'s knot and gets nowhere. The escape fails automatically.</p>`
+                 + `<p style="font-size:11px;color:#c9a96e;"><em>Only an external force can help: it must beat Fortitude DC ${knot.fortDC}${Number(knot.bull) ? ` (includes +${Number(knot.bull)} from ${knot.name}'s Bull grip)` : ""}. On a success the knot pops free and ${sourceActor.name} gains 2 Arousal.</em></p>`,
+        });
+        return;
+      }
+    }
+
+    // THE BULL'S GRIP, and the two rulings that shape where this line sits.
+    //
+    // Ardis, 26 Aug 2026: the Bull card's Greater beat promised "+2 to Sexual
+    // Advance checks against a creature you have grabbed" and there is no Sexual
+    // Advance check - Carnal Press rolls nothing. It is now "+2 to your Fortitude
+    // DC against Escape attempts by creatures you have grabbed", which is this.
+    //
+    // 1. AFTER THE REDUCE, NOT INSIDE IT. `escapeTargetActor` is picked by RAW
+    //    Fortitude above, so a Bull who is not already the highest sets nothing
+    //    and the group DC does not move. Ardis: "the bull in a group should not
+    //    contribute a group bonus - its ok for them to contribute nothing unless
+    //    they're already the highest. adding a silent group bonus is not a good
+    //    idea." Folding it into the reduce is the version that does that, and it
+    //    is one edit away from happening by accident.
+    // 2. `escapeDC` ONLY. Ardis: "its nothing to do with the other struggle
+    //    variants because they don't pertain to escaping a Bull's grip." The Will
+    //    and Perception DCs below read the same actor, so leaving them alone is
+    //    what NOT touching them means - no gate required.
+    const escapeBull    = AFLP.bullGripDC?.(escapeTargetActor) ?? 0;
+    const escapeDC      = 10 + (escapeTargetActor.system?.saves?.fortitude?.value ?? 0) + escapeBull;
     const escapeWillDC  = 10 + (escapeTargetActor.system?.saves?.will?.value ?? 0);
     const escapePercDC  = 10 + (escapeTargetActor.system?.perception?.value ?? 0);
     const isSingleDominator = domAttackers.length === 1;
 
-    // Variant selection for escape (same feats apply)
-    const escapeVariants = [{ id: "ss", label: "Struggle Escape", sub: "Athletics vs Fortitude DC " + escapeDC }];
+    // Variant selection for escape (same feats apply). The Bull's contribution is
+    // NAMED rather than folded silently into the number - the player can read the
+    // captor's Fortitude off the statblock and would otherwise see a DC two higher
+    // than the one they can account for.
+    const bullNote = escapeBull
+      ? ` (includes +${escapeBull} from ${escapeTargetActor.name}'s Bull grip)`
+      : "";
+    const escapeVariants = [{ id: "ss", label: "Struggle Escape", sub: "Athletics vs Fortitude DC " + escapeDC + bullNote }];
     if (hasSlyFeat)    escapeVariants.push({ id: "sly",    label: "Sly Escape",     sub: "Diplomacy vs Will DC " + escapeWillDC });
     if (hasSneakyFeat) escapeVariants.push({ id: "sneaky", label: "Sneaky Escape",  sub: "Deception vs Perception DC " + escapePercDC });
     if (hasSexToyFeat) escapeVariants.push({ id: "sextoy", label: "Sex Toy Escape", sub: "Recall Knowledge vs Will DC " + escapeWillDC });
 
     const gangbangNote = domAttackers.length > 1
-      ? `<p style="font-size:11px;color:#c9a96e;"><em>Gangbang: beat the highest Fortitude DC (${escapeDC}) among all ${domAttackers.length} Dominators. Will-based variants use that creature's Will DC (${escapeWillDC}), Deception uses Perception DC (${escapePercDC}).</em></p>`
+      ? `<p style="font-size:11px;color:#c9a96e;"><em>Gangbang: the Dominator with the highest Fortitude sets the Escape DC (${escapeDC}${bullNote}) for all ${domAttackers.length} of them. Will-based variants use that creature's Will DC (${escapeWillDC}), Deception uses Perception DC (${escapePercDC}).</em></p>`
       : "";
 
     let escapeVariantId = "ss";
@@ -346,6 +408,16 @@
       escapeVariantId = escResult;
     }
 
+    // THE SLICK, ON ALL FOUR VARIANTS. Ardis, 29 Aug 2026: the chest coat's
+    // circumstance bonus applies to "all escape attempt rolls" - so it rides every
+    // Struggle Escape, not only the Athletics one. Empty array when the creature is
+    // not slick, or off PF2e, so the call sites need no branch.
+    //
+    // These carry NO `action:escape` roll option, so the coat card's rule element
+    // is inert here and the bonus lands exactly once. If a variant is ever routed
+    // through PF2e's own Escape action, drop `modifiers` from that one.
+    const _slickMods = AFLP.slickEscapeModifiers?.(sourceActor) ?? [];
+
     // Run the escape roll (same mechanics as regular SS variants)
     let escapeOutcome = null;
 
@@ -354,7 +426,7 @@
       const checkP = waitForCheckOutcome();
       const athleticsStat = sourceActor.getStatistic?.("athletics") ?? sourceActor.skills?.athletics;
       if (athleticsStat?.roll) {
-        athleticsStat.roll({ dc: { value: escapeDC, label: "Escape DC" }, createMessage: true });
+        athleticsStat.roll({ dc: { value: escapeDC, label: "Escape DC" }, createMessage: true, modifiers: _slickMods });
       } else {
         // Fallback: use PF2e grapple action (Athletics-based) without Strike
         game.pf2e.actions.get("grapple")?.use?.({ actors: [sourceActor], event: syntheticEvent });
@@ -365,7 +437,7 @@
       const checkP = waitForCheckOutcome();
       const diplomacyStat = sourceActor.getStatistic?.("diplomacy") ?? sourceActor.skills?.diplomacy;
       if (diplomacyStat?.roll) {
-        diplomacyStat.roll({ dc: { value: escapeWillDC, label: "Escape DC (Will)" }, createMessage: true });
+        diplomacyStat.roll({ dc: { value: escapeWillDC, label: "Escape DC (Will)" }, createMessage: true, modifiers: _slickMods });
       } else {
         game.pf2e.actions.get("demoralize")?.use?.({ actors: [sourceActor], event: syntheticEvent });
       }
@@ -375,7 +447,7 @@
       const checkP = waitForCheckOutcome();
       const deceptionStat = sourceActor.getStatistic?.("deception") ?? sourceActor.skills?.deception;
       if (deceptionStat?.roll) {
-        deceptionStat.roll({ dc: { value: escapePercDC, label: "Escape DC (Perception)" }, createMessage: true });
+        deceptionStat.roll({ dc: { value: escapePercDC, label: "Escape DC (Perception)" }, createMessage: true, modifiers: _slickMods });
       } else {
         game.pf2e.actions.get("feint")?.use?.({ actors: [sourceActor], event: syntheticEvent });
       }
@@ -385,7 +457,7 @@
       const checkP = waitForCheckOutcome();
       const rkStat = sourceActor.getStatistic?.("recall-knowledge") ?? null;
       if (rkStat?.roll) {
-        rkStat.roll({ dc: { value: escapeWillDC, label: "Escape DC (Will)" }, createMessage: true });
+        rkStat.roll({ dc: { value: escapeWillDC, label: "Escape DC (Will)" }, createMessage: true, modifiers: _slickMods });
       } else {
         game.pf2e.actions.get("recall-knowledge")?.use?.({ actors: [sourceActor], event: syntheticEvent });
       }
@@ -606,11 +678,21 @@
       return;
     }
     window._aflpSSInProgress = true;
+    // THROUGH THE PROXIED APIS. This branch - the target is ALREADY Submitting,
+    // i.e. every repeat grapple on something already caught - had no GM gate at
+    // all, while its sibling handleSuccess() below wraps the identical writes in
+    // `if (game.user.isGM) ... else delegateToGM(...)`. A player pinning a monster
+    // hit Foundry's "lacks permission to update Actor" on `grabbedPin.delete()`
+    // and the macro died before the H-Scene opened. Found 19 Aug 2026 from a
+    // player bug report, not from the suite.
+    //
+    // Routed through AFLP.cond rather than duplicating the delegateToGM payload:
+    // cond.apply / cond.remove already forward themselves, the socket handler's
+    // extraConditions vocabulary cannot express "remove grabbed" or "exposed at
+    // 2", and one proxy is easier to keep true than two.
     await applyCondition(sourceTokenActor, "dominating", UUID_DOMINATING);
-    const grabbedPin = targetTokenActor.items?.find(c => c.slug === "grabbed");
-    if (grabbedPin) await grabbedPin.delete().catch(() => {});
-    if (!targetTokenActor.items?.some(c => c.slug === "restrained"))
-      await targetTokenActor.increaseCondition("restrained");
+    if (AFLP.cond.has(targetTokenActor, "grabbed")) await AFLP.cond.remove(targetTokenActor, "grabbed");
+    if (!AFLP.cond.has(targetTokenActor, "restrained")) await AFLP.cond.apply(targetTokenActor, "restrained");
     if (!targetHasMonstrousProwess) await applyCondition(targetTokenActor, "exposed", UUID_EXPOSED, 2);
     window._aflpSSInProgress = false;
     await startHScene(sourceToken, targetToken);
@@ -682,8 +764,32 @@
       });
       return;
     }
-    const strike = sourceActor.system?.actions?.find(a => a.type === "strike" && (a.item?.isMelee ?? true))
-                ?? sourceActor.system?.actions?.[0];
+    // Strike selection. An explicit pick handed over by the Scene Actions dock
+    // (window.AFLP.__ssStrikePick, consumed once) wins; otherwise, when the
+    // attacker has more than one melee strike, ask - the old behavior grabbed
+    // the first strike on the sheet, so a Garmyr Brute led with its Glaive
+    // instead of its Jaws Strike. A single-strike actor skips the dialog.
+    const meleeStrikes = (sourceActor.system?.actions ?? [])
+      .filter(a => a.type === "strike" && (a.item?.isMelee ?? true));
+    let strike = null;
+    const ssPick = window.AFLP?.__ssStrikePick;
+    if (window.AFLP) delete window.AFLP.__ssStrikePick;
+    if (ssPick) {
+      strike = meleeStrikes.find(a => (a.slug ?? a.item?.slug) === ssPick || a.label === ssPick) ?? null;
+      if (!strike) ui.notifications.warn(`AFLR | Requested strike "${ssPick}" not found - choosing manually.`);
+    }
+    if (!strike && meleeStrikes.length > 1) {
+      const strikeOpts = meleeStrikes.map((a, i) =>
+        `<option value="${i}">${a.label ?? a.item?.name ?? ("Strike " + (i + 1))}</option>`).join("");
+      const strikeIdx = await foundry.applications.api.DialogV2.prompt({
+        window: { title: "Struggle Snuggle - choose the Strike" },
+        content: `<select name="strike" style="width:100%">${strikeOpts}</select>`,
+        ok: { label: "Strike", callback: (ev, btn) => Number(btn.form.elements.strike.value) },
+      }).catch(() => null);
+      if (strikeIdx === null || strikeIdx === undefined || Number.isNaN(strikeIdx)) return;
+      strike = meleeStrikes[strikeIdx];
+    }
+    strike = strike ?? meleeStrikes[0] ?? sourceActor.system?.actions?.[0];
     if (!strike?.variants?.[0]) {
       ui.notifications.warn(`AFLR | ${sourceActor.name} has no usable strike actions.`);
       return;
@@ -703,21 +809,45 @@
     // hit raises the TARGET's Arousal by 1 (2 on a crit). This is sexual damage,
     // not a Sexual Advance, so only the target gains Arousal - never the attacker.
     // Applies on the Strike hit, independent of the following Grapple's result.
-    {
-      const sexAmt = strikeOutcome === "criticalSuccess" ? 2 : 1;
+    //
+    // THE ORDER MATTERS AND IT USED TO BE WRONG. This ran HERE, before the Grapple
+    // and before handleSuccess opens the H-Scene. A target already near their
+    // Arousal maximum was therefore tipped over with NO SCENE IN EXISTENCE, and
+    // AFLP_Arousal.increment's climax path has an explicit no-scene branch:
+    //
+    //     if (!scene) { ui.notifications.info(`... run the cum macro manually.`); return; }
+    //
+    // So the player watched their character get hit, get told to run the cum macro
+    // by hand, and only THEN get pulled into a scene they had already climaxed
+    // outside of. That is the bug Ardis reported.
+    //
+    // The gangbang macro already carries this rule in its own words - "Open the
+    // scene FIRST, then apply arousal - so a target whose arousal maxes resolves
+    // through the H-Scene UI rather than the no-scene prompt." It applies here too.
+    //
+    // The Arousal still lands on the Strike regardless of the Grapple, which is what
+    // the Sexual trait says; it is only DEFERRED past whichever branch resolves, so
+    // that a landing Grapple has opened the scene before the Arousal is applied. On
+    // a failed Grapple there is legitimately no scene - a lone sexual hit with no
+    // hold - and the manual prompt is the correct answer there.
+    const sexAmt = strikeOutcome === "criticalSuccess" ? 2 : 1;
+    const applySexualArousal = async () => {
       if (game.user.isGM) {
         await AFLP_Arousal.increment(targetTokenActor, sexAmt, "Struggle Snuggle (sexual)", targetToken.id);
       } else {
         game.socket.emit(SOCKET, { type: "aflp-apply-arousal", tgtTokenId: targetToken.id, amount: sexAmt, source: "Struggle Snuggle (sexual)" });
         await new Promise(r => setTimeout(r, 300));
       }
-    }
+    };
 
     const grappleP = waitForCheckOutcome();
     game.pf2e.actions.get("grapple").use({ actors: [sourceActor], event: syntheticEvent });
     const grappleOutcome = await grappleP;
-    if (!grappleOutcome) { ui.notifications.warn("AFLR | Grapple roll timed out."); return; }
+    // A timed-out roll is the one path that resolves nothing, so the Strike's
+    // Arousal is still owed. Pay it before bailing, or a hit silently costs nothing.
+    if (!grappleOutcome) { await applySexualArousal(); ui.notifications.warn("AFLR | Grapple roll timed out."); return; }
     if (grappleOutcome === "failure" || grappleOutcome === "criticalFailure") {
+      await applySexualArousal();
       await ChatMessage.create({
         content: `<div class="aflp-chat-card"><p><strong>${sourceActor.name}</strong> hit (${formatOutcome(strikeOutcome)}) but failed the Grapple (${formatOutcome(grappleOutcome)}) on <strong>${targetActor.name}</strong>.</p></div>`,
         speaker: ChatMessage.getSpeaker({ actor: sourceActor }),
@@ -727,6 +857,8 @@
     const critOrHeld    = grappleOutcome === "criticalSuccess" || isAlreadyGrabbed;
     const grappleLabel  = critOrHeld ? (isAlreadyGrabbed ? "Restrained (escalated)" : "Restrained (crit)") : "Grabbed";
     await handleSuccess("Struggle Snuggle", grappleOutcome, grappleLabel);
+    // AFTER handleSuccess, which is what opens the scene. See the note above.
+    await applySexualArousal();
     return;
   }
 
@@ -793,7 +925,10 @@
     // Crit success: target also flat-footed (apply to description only, PF2e system handles ff)
     await handleSuccess("Sneaky Snuggle", decOutcome, null);
     if (decOutcome === "criticalSuccess" && !targetTokenActor.items?.some(c => c.slug === "flat-footed")) {
-      await targetTokenActor.increaseCondition("flat-footed").catch(() => {});
+      // Proxied. Outside handleSuccess's GM gate and swallowing its own rejection,
+      // so on an unowned target a Sneaky Snuggle crit simply did not apply
+      // flat-footed and said nothing. Same family as runPinMode above.
+      await AFLP.gm.run("nativeCondition", targetTokenActor, "flat-footed");
     }
     return;
   }
@@ -941,6 +1076,15 @@
         const toyCompendiumDoc = await fromUuid(chosenToy.uuid);
         if (toyCompendiumDoc) {
           const toyData = toyCompendiumDoc.toObject();
+          // PF2e SHAPE, ON A PF2e-ONLY PATH. Measured on Daggerheart 8 Aug 2026:
+          // writing this object onto a DH item does not survive - Foundry DROPS it on
+          // loot (no such field in the schema) and COERCES IT TO `false` on armor, so a
+          // DH armor toy would arrive UNEQUIPPED and AFLP.anatomy._active would read
+          // false. That is not live today only because the toy list is unreachable
+          // there: SEX_TOYS in aflp-struggle-snuggle.js resolves every toy out of
+          // `aflp-lewd-items`, which is not loaded in a DH world, so the list is empty
+          // and no toyUuid is ever produced. Correct by unreachability, not by design -
+          // if a DH toy list is ever added, this needs the per-system equip shape.
           toyData.system.equipped = { carryType: "worn", inSlot: true };
           await targetActor.createEmbeddedDocuments("Item", [toyData]);
         }

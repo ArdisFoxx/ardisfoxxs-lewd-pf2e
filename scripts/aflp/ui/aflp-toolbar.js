@@ -22,10 +22,15 @@
 
   // --- Targets ---------------------------------------------------------------
   function _resolveSheetActor() {
+    // Controlled token FIRST: a player who has selected one of their owned
+    // tokens (animal companion, familiar, a second PC) means THAT actor, even
+    // when a different character is bound in their user configuration. The
+    // bound character is only the fallback for "nothing selected".
+    const controlled = canvas?.tokens?.controlled ?? [];
+    const tok = controlled.find(t => t.actor?.isOwner) ?? controlled[0];
+    if (tok?.actor) return tok.actor;
     const u = game.user;
     if (u?.character) return u.character;
-    const tok = canvas?.tokens?.controlled?.[0];
-    if (tok?.actor) return tok.actor;
     if (_lastSheetActorId) { const a = game.actors?.get(_lastSheetActorId); if (a) return a; }
     return null;
   }
@@ -38,6 +43,18 @@
   function toggleHScene() {
     try { AFLP.HScene?.toggleWindow?.(); } catch (e) { console.warn("AFLP | toggleHScene:", e); }
     sync();
+  }
+  function toggleStatusHud() {
+    try {
+      if (game.settings.get("ardisfoxxs-lewd-pf2e", "statusPanelEnabled") === false) {
+        ui.notifications?.info("AFLR: status effects are disabled by the GM (module settings).");
+        return;
+      }
+      const cur = AFLP.Settings?.statusPanelHud ?? "off";
+      game.settings.set(AFLP.Settings.ID, AFLP.Settings.KEYS.STATUS_PANEL_HUD, cur === "off" ? "on" : "off")
+        .then(() => { AFLP.StatusPanel?.refreshHud?.(); sync(); })
+        .catch(() => {});
+    } catch (e) { console.warn("AFLP | toggleStatusHud:", e); }
   }
   function toggleSheet() {
     const SA = AFLP.UI.SheetApp;
@@ -105,10 +122,12 @@
     _bar.innerHTML =
       `<span class="aflp-tb-handle" title="Drag">\u22EE\u22EE</span>`
       + `<button type="button" class="aflp-tb-btn" data-tb="hscene" title="H-Scene window"><i class="fa-solid fa-heart"></i></button>`
-      + `<button type="button" class="aflp-tb-btn" data-tb="sheet" title="AFLR sheet"><i class="fa-solid fa-clipboard-list"></i></button>`;
+      + `<button type="button" class="aflp-tb-btn" data-tb="sheet" title="AFLR sheet"><i class="fa-solid fa-clipboard-list"></i></button>`
+      + `<button type="button" class="aflp-tb-btn" data-tb="status" title="Floating status window"><i class="fa-solid fa-star-of-life"></i></button>`;
     document.body.appendChild(_bar);
     _bar.querySelector('[data-tb="hscene"]').addEventListener("click", toggleHScene);
     _bar.querySelector('[data-tb="sheet"]').addEventListener("click", toggleSheet);
+    _bar.querySelector('[data-tb="status"]').addEventListener("click", toggleStatusHud);
     _makeDraggable(_bar, _bar.querySelector(".aflp-tb-handle"));
     return _bar;
   }
@@ -122,6 +141,8 @@
       hs?.classList.toggle("active", !!AFLP.HScene?.windowOpen?.());
       const a = _resolveSheetActor();
       sh?.classList.toggle("active", !!(a && _sheetOpenFor(a.id)));
+      const st = _bar.querySelector('[data-tb="status"]');
+      st?.classList.toggle("active", (AFLP.Settings?.statusPanelHud ?? "off") !== "off");
     }
     if (_mode() === "sidebar") _syncSidebarActive();
   }
@@ -138,6 +159,9 @@
                 button: true, active: !!AFLP.HScene?.windowOpen?.(), onChange: () => toggleHScene() },
       sheet:  { name: "sheet", order: 2, title: "AFLR sheet", icon: "fa-solid fa-clipboard-list",
                 button: true, onChange: () => toggleSheet() },
+      status: { name: "status", order: 3, title: "Floating status window", icon: "fa-solid fa-star-of-life",
+                button: true, active: (AFLP.Settings?.statusPanelHud ?? "off") !== "off",
+                onChange: () => toggleStatusHud() },
     };
     return { name: "aflr", order: 99, title: "AFLR", icon: "fa-solid fa-heart",
              onChange: () => {}, onToolChange: () => {}, tools, activeTool: "hscene", active: false };

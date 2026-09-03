@@ -2,7 +2,7 @@
 // AFLP / AFLR - Rest integration (Daggerheart)
 // ===============================================================
 // Two rest behaviors, applied GM-side off the downtime card:
-//   - Any rest (short or long) clears the resting actor's Horny tokens.
+//   - Any rest (short or long) clears the resting actor's Horny and Denied tokens.
 //   - A registered "Shake Off Defeat" rest move clears one Defeat token.
 // Both use the system's own extension point - the Homebrew world setting's
 // `restMoves` collection and the downtime chat card - rather
@@ -105,16 +105,81 @@
 
   async function _clearHorny(actor) {
     if (!actor) return false;
-    const cur = AFLP.system?.conditionValue?.(actor, "horny") ?? 0;
-    if (cur <= 0) return false;
-    await AFLP.system?.setConditionValue?.(actor, "horny", 0);
+    // A rest clears the TEMPORARY part only. The permanent bucket is a floor -
+    // Aphrodisiac Junkie Mastery's 3, or a Bondage Princess still in her ropes -
+    // and this used to wipe it, because it wrote the condition straight to 0.
+    const cur = AFLP.horny.total(actor);
+    const floor = AFLP.horny.permanent(actor);
+    if (cur <= floor) return false;
+    await AFLP.horny.clearTemp(actor);
     // keep the feature resource track (if any) in sync
     try {
       const feat = actor.items?.find?.(i => i.getFlag?.(SCOPE(), "aflrKey") === "horny"
         || /^horny$/i.test(i.name ?? ""));
-      if (feat?.system?.resource?.type) await feat.update({ "system.resource.value": 0 });
+      if (feat?.system?.resource?.type) await feat.update({ "system.resource.value": floor });
     } catch (e) { /* flag is source of truth */ }
-    console.log(`AFLP | Rest: cleared Horny (${cur} -> 0) for ${actor.name}`);
+    console.log(`AFLP | Rest: cleared temporary Horny (${cur} -> ${floor}) for ${actor.name}`);
+    return true;
+  }
+
+  // Lustful clears on a rest. The card says "Lustful is cleared when you rest"
+  // with no qualifier, so this fires on a SHORT rest as well as a long one -
+  // unlike Hooked, whose card names the long rest specifically.
+  //
+  // Named and exported rather than inlined into the downtime handler so the
+  // simulation harness can drive the real clear instead of asserting against a
+  // stub. Matches _clearHorny / _clearDenied / _clearAllDefeat beside it.
+  async function _clearLustful(actor) {
+    if (!actor) return false;
+    if ((AFLP.system?.conditionValue?.(actor, "lustful") ?? 0) <= 0) return false;
+    await AFLP.system?.setConditionValue?.(actor, "lustful", 0);
+    console.log(`AFLP | Rest: cleared Lustful for ${actor.name}`);
+    return true;
+  }
+
+  // Denied clears on any rest (cap 3, held only until you rest). Each Denied
+  // token raises the Arousal maximum, so clearing it on rest is the tradeoff
+  // for the headroom edging buys mid-scene.
+  // The Denied a rest CANNOT take away.
+  //
+  // Daggerheart's Creature Fetish Signature reads "You mark 2 Denied tokens
+  // WHICH REMAIN WITH YOU ALWAYS - only your fetish gets you off easily", while
+  // the Denied card says "When you have a rest, these tokens are cleared". The
+  // kink's two are the exception, so a rest settles Denied at this floor rather
+  // than at zero.
+  //
+  // DAGGERHEART ONLY, and not by accident: PF2e's Creature Fetish grants "Denied
+  // equal to your Creature Fetish value" at Greater, which is a different number
+  // and is not described as permanent. This whole file is gated on isDH() at
+  // _onDowntimeMessage, so nothing here reaches PF2e - do not lift the floor into
+  // the shared daily-prep path.
+  function _deniedFloor(actor) {
+    try { return AFLP.actorHasKink?.(actor, "creature-fetish") ? 2 : 0; }
+    catch (e) { return 0; }
+  }
+
+  // Settle Denied AT the floor, in both directions. Clearing down to it is the
+  // rest rule; topping up to it is what actually delivers the kink's two tokens,
+  // because nothing else in the module ever marks them - the card promised a
+  // grant that had no code behind it (found 8 Aug 2026).
+  async function _clearDenied(actor) {
+    if (!actor) return false;
+    // Through AFLP.denied, which knows which store this system keeps Denied in.
+    // Reading the condition here was wrong on Pathfinder, where Edge Master's
+    // denial lives in the legacy flag - so a rest never cleared it, and the
+    // Creature Fetish floor was topped up somewhere nothing displayed.
+    // settleTo also honours any SUSTAINED floor (a chastity harness still worn),
+    // taking the higher of that and the kink's.
+    const cur = AFLP.denied.total(actor);
+    const floor = Math.max(AFLP.denied.permanent(actor), _deniedFloor(actor));
+    if (cur === floor) return false;
+    await AFLP.denied.settleTo(actor, _deniedFloor(actor));
+    try {
+      const feat = actor.items?.find?.(i => i.getFlag?.(SCOPE(), "aflrKey") === "denied"
+        || /^denied$/i.test(i.name ?? ""));
+      if (feat?.system?.resource?.type) await feat.update({ "system.resource.value": floor });
+    } catch (e) { /* flag is source of truth */ }
+    console.log(`AFLP | Rest: Denied ${cur} -> ${floor} for ${actor.name}${floor ? " (Creature Fetish floor)" : ""}`);
     return true;
   }
 
@@ -155,7 +220,7 @@
   }
 
   // When a downtime card is posted, the rest resolves AFLR conditions GM-side:
-  //   - Any rest (short OR long) clears the resting actor's Horny tokens.
+  //   - Any rest (short OR long) clears the resting actor's Horny and Denied tokens.
   //   - Shake Off Defeat: short rest -1 per instance; long rest clears Defeat fully.
   //   - A long rest with no sex in the last 24h drops Bimbofied and Bullified by 1.
   // Runs once, GM-side, to avoid double-applying across connected clients.
@@ -168,8 +233,35 @@
     actor = actor?.actor ?? actor; // tolerate token/actor uuids
     if (!actor) return;
 
-    // Any rest clears Horny.
+    // Any rest clears Horny and Denied.
     await _clearHorny(actor);
+    await _clearDenied(actor);
+
+    // Squeezing cumflated tits bottles milky cum once per rest. Clear the
+    // marker here, or the very first bottle would be the only one ever.
+    try { await actor.update({ [`flags.${SCOPE()}.-=milkyCumBottledThisRest`]: null }); }
+    catch (e) { /* nothing to clear */ }
+
+    // A rest spent strapped into milking gear is drawn off into Bottled Milk.
+    try {
+      const bottles = await AFLP.milkingStation?.drawOffAtRest?.(actor);
+      if (bottles > 0) ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `<div class="aflp-chat-card aflp-carnal-card"><p>The cups draw <strong>${actor.name}</strong> down over the rest, filling <strong>${bottles}</strong> Bottled Milk.</p></div>`,
+      });
+    } catch (e) { console.warn("AFLR | milking draw-off failed", e); }
+
+    // Gear with moving parts burns through what is inside you. The exoskeleton is
+    // the one piece that does this - it empties you over the rest, which is what
+    // sends the wearer looking to be refilled again.
+    try {
+      const drained = await AFLP.chastityGear?.drainAtRest?.(actor);
+      const holes = drained ? Object.keys(drained.took) : [];
+      if (holes.length) ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `<div class="aflp-chat-card aflp-carnal-card"><p>The joints drink over the rest. <strong>${actor.name}</strong> loses ${drained.rate} Cumflation from ${holes.join(", ")}.</p></div>`,
+      });
+    } catch (e) { console.warn("AFLR | chastity drain failed", e); }
 
     const moves = Array.isArray(sys.moves) ? sys.moves : [];
     // Rest type comes from the move paths ("longRest.moves.*" / "shortRest.moves.*").
@@ -251,14 +343,26 @@
       });
     }
 
+    // Lustful clears on any rest, short or long (see _clearLustful).
+    if (await _clearLustful(actor)) {
+      ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `<div class="aflp-chat-card aflp-carnal-card"><p>The heat drains out of <strong>${actor.name}</strong> - <strong>Lustful</strong> clears with the rest.</p></div>`,
+      });
+    }
+
     // Daggerheart has no daily preparations - so the AFLR daily upkeep (arousal
     // reset, Denied clear, cum refill, pregnancy progression and births, kink daily
     // resets) renews automatically on a Long Rest. Hand the resting actor to the
     // Daily Preparations macro via a global so it doesn't need a token selection.
     if (isLong) {
-      const dp = game.macros.find(m =>
-        m.name === "AFLR Daily Preparations" || m.name === "AFLP Daily Preparations"
-        || m.slug === "aflp-daily-prep");
+      // Module-aware lookup: valid world macro first, module compendium fallback.
+      const dp = await AFLP.getModuleMacro({
+        // The Daggerheart stub is named "AFLR Long Rest Upkeep" - Daggerheart has
+        // no daily preparations, it runs this off a Long Rest. Both names are
+        // accepted so an existing world copy under the old name still resolves.
+        world: ["AFLR Long Rest Upkeep", "AFLR Daily Preparations", "AFLP Daily Preparations"],
+        engine: "aflp-daily-prep" });
       if (dp) {
         window._aflpDailyPrepActor   = actor;
         window._aflpDailyPrepContext = "longRest";
@@ -269,7 +373,11 @@
   }
 
   window.AFLP = window.AFLP || {};
-  AFLP.Rest = { ensureMove, removeMove, MOVE_KEY };
+  // clearDenied and deniedFloor are exported so the simulation harness drives the
+  // REAL rest path rather than reimplementing the floor. _held shipped with no
+  // call sites because its test could only reach the helper, not the caller.
+  AFLP.Rest = { ensureMove, removeMove, MOVE_KEY, clearLustful: _clearLustful,
+                clearDenied: _clearDenied, deniedFloor: _deniedFloor };
 
   // Inject after the world is ready (settings registered). Also re-assert on a
   // settings change in case a GM resets the Homebrew rest moves.

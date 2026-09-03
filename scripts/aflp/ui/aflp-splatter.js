@@ -321,10 +321,11 @@
   // ── Tier -> stage params ───────────────────────────────────────────────────
   function _stage(tier) {
     let s;
-    if      (tier >= 9) s = { coatAlpha: 0.82, coatBlobs: 6, coatSpread: 0.46, face: true,  puddleR: 2.0, droplets: 16 };
-    else if (tier >= 8) s = { coatAlpha: 0.72, coatBlobs: 5, coatSpread: 0.44, face: false, puddleR: 1.7, droplets: 12 };
-    else if (tier >= 6) s = { coatAlpha: 0.60, coatBlobs: 4, coatSpread: 0.40, face: false, puddleR: 1.3, droplets: 8  };
-    else if (tier >= 4) s = { coatAlpha: 0.46, coatBlobs: 3, coatSpread: 0.36, face: false, puddleR: 0.95, droplets: 5 };
+    const _M = AFLP.CUMFLATION_MAX ?? 8;
+    if      (tier >= _M + 1) s = { coatAlpha: 0.82, coatBlobs: 6, coatSpread: 0.46, face: true,  puddleR: 2.0, droplets: 16 };
+    else if (tier >= _M) s = { coatAlpha: 0.72, coatBlobs: 5, coatSpread: 0.44, face: false, puddleR: 1.7, droplets: 12 };
+    else if (tier >= Math.round(_M * 0.75)) s = { coatAlpha: 0.60, coatBlobs: 4, coatSpread: 0.40, face: false, puddleR: 1.3, droplets: 8  };
+    else if (tier >= Math.round(_M * 0.5)) s = { coatAlpha: 0.46, coatBlobs: 3, coatSpread: 0.36, face: false, puddleR: 0.95, droplets: 5 };
     else                s = { coatAlpha: 0.34, coatBlobs: 2, coatSpread: 0.32, face: false, puddleR: 0.55, droplets: 3 };
     const k = Math.max(0.25, Math.min(2.5, Number(sIntensity()) || 1));
     return { ...s,
@@ -337,9 +338,10 @@
   function _effectiveTier(cf) {
     if (!cf) return 0;
     const anal = cf.anal ?? 0, oral = cf.oral ?? 0, vaginal = cf.vaginal ?? 0, facial = cf.facial ?? 0;
-    const overall = Math.min(8, Math.floor((anal + oral + vaginal) / 3));
+    const M = AFLP.CUMFLATION_MAX ?? 8;
+    const overall = Math.min(M, Math.floor((anal + oral + vaginal) / 3));
     if (overall <= 0) return 0;
-    return (overall >= 8 && facial >= 8) ? 9 : overall;
+    return (overall >= M && facial >= M) ? M + 1 : overall;
   }
 
   // Continuous fill level (sum / 3, capped 8) so the token coat builds a little
@@ -1149,14 +1151,24 @@
     return cnv;
   }
 
+  // Leak trails look different from standing pools on purpose: a brim-full
+  // creature on the move drips a short chain of small pools - mostly ovals
+  // stretched along the direction of travel, a couple of rounder drips mixed
+  // in. Fixed melee-sized footprint; it never scales with tier or load.
   function _drawPuddle(layer, rec) {
     const color = _color();
     const st = _stage(rec.tier);
     const grid = canvas.grid?.size ?? 100;
     let R = grid * st.puddleR * PUDDLE_SIZE;
-    // Overflow spill: a big load floods out to a DH range band (distance in grid
-    // units). Dampen the literal distance into a dramatic-but-bounded radius.
-    if (rec.spillDist > 0) R = Math.max(R, grid * (1 + Math.sqrt(rec.spillDist)));
+    // Leak trail pools (dripped while walking brim-full) are half-size: a small
+    // dribble, visually distinct from a real deposited pool and never bottleable.
+    if (rec.leak) R *= 0.5;
+    // Overflow spill: the giver's size sets an explicit floor-pool radius in grid
+    // squares (schema CUM_SPILL_RADIUS_BY_SIZE), which is also the number the chat
+    // text quotes - so the words and the picture agree. Legacy records only stored
+    // the old band distance, so fall back to the previous curve for those.
+    if (rec.spillRadius > 0) R = Math.max(R, grid * rec.spillRadius);
+    else if (rec.spillDist > 0) R = Math.max(R, grid * (1 + Math.sqrt(rec.spillDist)));
     const sub = new PIXI.Container();
     sub.position.set(rec.x, rec.y);
     sub.scale.set(1, PUDDLE_SQUASH);
@@ -1201,6 +1213,7 @@
     const cx = token.center.x, cy = token.center.y;
     const _spill = token.actor?.getFlag?.(SCOPE, "cumSpill");
     const spillDist  = _spill?.distance ?? 0;
+    const spillRadius = _spill?.radius ?? 0;
     const spillUnits = _spill?.units ?? 0;
     // Grow the nearest puddle if the token is still roughly where it was;
     // otherwise drop a NEW puddle at the current position (token has moved).
@@ -1213,12 +1226,67 @@
       let changed = false;
       if (tier > near.tier) { near.tier = tier; changed = true; }
       if (spillDist  > (near.spillDist  ?? 0)) { near.spillDist  = spillDist;  changed = true; }
+      if (spillRadius > (near.spillRadius ?? 0)) { near.spillRadius = spillRadius; changed = true; }
       if (spillUnits > (near.spillUnits ?? 0)) { near.spillUnits = spillUnits; changed = true; }
       if (!changed) return;
     } else {
-      list.push({ x: cx, y: cy, tier, spillDist, spillUnits, seed: (_hash(`${token.id}|${Date.now()}|${list.length}`) >>> 0) });
+      list.push({ x: cx, y: cy, tier, spillDist, spillRadius, spillUnits, seed: (_hash(`${token.id}|${Date.now()}|${list.length}`) >>> 0) });
     }
     map[token.id] = list;
+    await canvas.scene.setFlag(MODULE_ID, PUDDLE_KEY, map);
+  }
+
+  // Force a fresh floor pool for a real overflow EVENT, bypassing the grow-only
+  // dedupe in _maybeUpsertPuddle. That dedupe is right for passive refreshes
+  // (don't multiply puddles just because the sheet re-rendered), but a receiver
+  // who is ALREADY at max cumflation still spills with every new load - the
+  // event fired (schema.recordCumSpill whispered the emanation), so a pool must
+  // appear even though the receiver's tier/units didn't climb. Called on the
+  // spill event with the just-computed spill band so chat and canvas agree.
+  async function _forceSpillPuddle(actor, spill) {
+    if (!game.user.isGM || !canvas?.scene || !actor || !spill) return;
+    const tier = Math.max(START_TIER, _effectiveTier(actor.getFlag(SCOPE, "cumflation")));
+    const grid = canvas.grid?.size ?? 100;
+    for (const token of AFLP_Splatter._tokensFor(actor)) {
+      const map = foundry.utils.duplicate(canvas.scene.getFlag(MODULE_ID, PUDDLE_KEY) ?? {});
+      let list = map[token.id];
+      if (!Array.isArray(list)) list = list ? [list] : [];
+      list.push({
+        x: token.center.x, y: token.center.y, tier,
+        spillDist:  spill.distance ?? 0,
+        spillRadius: spill.radius ?? 0,
+        spillUnits: spill.units ?? 0,
+        seed: (_hash(`${token.id}|${Date.now()}|${list.length}|spill`) >>> 0),
+      });
+      map[token.id] = list;
+      await canvas.scene.setFlag(MODULE_ID, PUDDLE_KEY, map);
+    }
+  }
+
+  // Drop a pool at explicit coordinates. Used by the ground-cum path (a load
+  // aimed at the floor) and by the brim-full leak hook below. `spillUnits`
+  // feeds the Cum Cleaner's bottle count; `leak: true` marks drip pools so the cleaner
+  // bottles them as a single vial instead of a full tier share.
+  async function _dropPuddleAt(docId, cx, cy, { tier = START_TIER, spillDist = 0, spillUnits = 0, leak = false } = {}) {
+    if (!game.user.isGM || !canvas?.scene) return;
+    const grid = canvas.grid?.size ?? 100;
+    const map = foundry.utils.duplicate(canvas.scene.getFlag(MODULE_ID, PUDDLE_KEY) ?? {});
+    let list = map[docId];
+    if (!Array.isArray(list)) list = list ? [list] : [];
+    // Don't stack a fresh pool onto one already at this spot (short drags in place).
+    for (const rec of list) {
+      if (Math.hypot((rec.x ?? 0) - cx, (rec.y ?? 0) - cy) <= grid * 0.9) {
+        if (spillUnits > (rec.spillUnits ?? 0)) { rec.spillUnits = spillUnits; }
+        if (tier > (rec.tier ?? 0)) { rec.tier = tier; }
+        map[docId] = list;
+        await canvas.scene.setFlag(MODULE_ID, PUDDLE_KEY, map);
+        return;
+      }
+    }
+    const rec = { x: cx, y: cy, tier, spillDist, spillUnits, seed: (_hash(`${docId}|${Date.now()}|${list.length}|drop`) >>> 0) };
+    if (leak) { rec.leak = true; }
+    list.push(rec);
+    map[docId] = list;
     await canvas.scene.setFlag(MODULE_ID, PUDDLE_KEY, map);
   }
 
@@ -1227,6 +1295,19 @@
     _coats: new Map(),
     _ground: null,
     _registered: false,
+
+    // A load aimed straight at the floor: pool it where the source stands.
+    // Visual size keys off the load (a couple units splatter small, a monster
+    // load pools wide); spillUnits carries the full load so the Cum Cleaner
+    // bottles every drop of it.
+    async dropGroundPuddle(token, units = 1) {
+      if (!token) return;
+      const u = Math.max(1, Math.round(units));
+      const tier = u >= 8 ? 8 : u >= 6 ? 6 : u >= 3 ? 4 : 2;
+      const cx = token.center?.x ?? ((token.x ?? 0) + ((token.document?.width ?? token.width ?? 1) * (canvas.grid?.size ?? 100)) / 2);
+      const cy = token.center?.y ?? ((token.y ?? 0) + ((token.document?.height ?? token.height ?? 1) * (canvas.grid?.size ?? 100)) / 2);
+      await _dropPuddleAt(token.id, cx, cy, { tier, spillUnits: u });
+    },
 
     _tokensFor(actor) {
       if (!canvas?.tokens || !actor) return [];
@@ -1265,6 +1346,16 @@
       const lvl  = _effectiveLevel(cf);   // coat: combined 0-32 fill across sites
       const tier = _effectiveTier(cf);    // ground puddle: integer 0-9 stage
       for (const token of this._tokensFor(actor)) { _ensureCoat(token, lvl); _maybeUpsertPuddle(token, tier); }
+    },
+
+    // Drop a floor pool for a genuine overflow event even if the receiver is
+    // already maxed (see _forceSpillPuddle). Call this from the spill recorder so
+    // the canvas pool and the emanation chat line always agree.
+    async forceSpillPuddle(actor, spill) {
+      if (!sEnabled() || !actor || !spill) return;
+      if (!actor.hasPlayerOwner && !sIncludeNpc()) return;
+      await _forceSpillPuddle(actor, spill);
+      try { _redrawPuddles(); } catch (e) {}
     },
 
     refreshAll() {
@@ -1334,6 +1425,32 @@
         const coat = this._coats.get(token.id);
         if (coat && !coat.destroyed) { coat.mask = null; coat.destroy({ children: true }); }
         this._coats.delete(token.id);
+      });
+
+      // Leak pools: a creature packed to the brim (any primary hole at max
+      // cumflation) drips as it goes, leaving a fresh melee-sized pool where a
+      // DRAG move ends. Keyboard (WASD) movement is deliberately excluded -
+      // step-by-step moves would carpet the floor in pools and hurt canvas
+      // performance - and so are API/undo/paste moves.
+      Hooks.on("updateToken", (doc, changes, options, userId) => {
+        if (!game.user.isGM) return;
+        if (changes.x === undefined && changes.y === undefined) return;
+        if (doc.movement?.method !== "dragging") return;
+        if (doc.parent?.id !== canvas?.scene?.id) return;
+        if (!sEnabled()) return;
+        const actor = doc.actor;
+        if (!actor) return;
+        const cap = window.AFLP?.CUM_HOLE_CAP ?? 8;
+        const cf = actor.getFlag(SCOPE, "cumflation") ?? {};
+        const maxHole = Math.max(cf.anal ?? 0, cf.oral ?? 0, cf.vaginal ?? 0);
+        if (maxHole < cap) return;
+        const grid = canvas.grid?.size ?? 100;
+        const dest = doc.movement?.destination ?? { x: doc.x, y: doc.y };
+        const cx = (dest.x ?? doc.x) + ((doc.width ?? 1) * grid) / 2;
+        const cy = (dest.y ?? doc.y) + ((doc.height ?? 1) * grid) / 2;
+        // Fixed melee-sized ground pool, drawn exactly like a normal small pool
+        // (tier 2 = the base puddle footprint). It never scales with cumflation.
+        _dropPuddleAt(doc.id, cx, cy, { tier: 2, leak: true }).catch(() => {});
       });
 
       Hooks.on("updateScene", (scene, changes) => {

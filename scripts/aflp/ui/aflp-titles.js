@@ -30,6 +30,62 @@ window.AFLP_Titles = {
     return this._cfg(id).threshold ?? defaultVal;
   },
 
+  // Progress metadata for numeric titles: id -> (a,s,h) => current value.
+  // Target is the title's threshold. Titles absent from this map are binary
+  // (flag/creature-match) and report no gradient. Kept data-driven so the ~35
+  // threshold titles get a progress bar without hand-editing each one.
+  _PROGRESS: {
+    "first-time":        (a,s) => s.lifetime?.timesCummed ?? 0,
+    "no-strings":        (a,s) => s.lifetime?.sessionsNoPregnancy ?? 0,
+    "afterglow-addict":  (a,s) => s.lifetime?.timesCummed ?? 0,
+    "deepthroater":      (a,s) => s.lifetime?.oral ?? 0,
+    "backdoor-enthusiast":(a,s) => s.lifetime?.anal ?? 0,
+    "facial-collector":  (a,s) => s.lifetime?.facial ?? 0,
+    "paizuri-princess":  (a,s) => s.lifetime?.paizuri ?? 0,
+    "gangbang-queen":    (a,s) => s.lifetime?.gangbang ?? 0,
+    "total-slut":        (a,s) => (s.lifetime?.oral ?? 0)+(s.lifetime?.vaginal ?? 0)+(s.lifetime?.anal ?? 0)+(s.lifetime?.facial ?? 0)+(s.lifetime?.paizuri ?? 0),
+    "glass-cannon":      (a,s) => (s.lifetime?.vaginal ?? 0)+(s.lifetime?.anal ?? 0),
+    "cum-toilet":        (a,s) => s.lifetime?.cumReceived ?? 0,
+    "belly-full":        (a,s) => Math.max(s.lifetime?.oral ?? 0, s.lifetime?.vaginal ?? 0, s.lifetime?.anal ?? 0, s.lifetime?.facial ?? 0),
+    "baby-maker":        (a,s) => s.lifetime?.timesImpregnated ?? 0,
+    "brood-mother":      (a,s) => s.lifetime?.timesImpregnated ?? 0,
+    "perpetually-pregnant":(a,s) => s.lifetime?.timesImpregnated ?? 0,
+    "defeat-fetish":     (a,s) => s.lifetime?.timesDefeated ?? 0,
+    "mind-gone":         (a,s) => s.lifetime?.timesMindBroken ?? 0,
+    "pain-curious":      (a,s) => s.lifetime?.damageTaken ?? 0,
+    "painslut":          (a,s) => s.lifetime?.damageTaken ?? 0,
+    "masochist":         (a,s) => s.lifetime?.damageTaken ?? 0,
+    "bliss-in-agony":    (a,s) => s.lifetime?.damageTaken ?? 0,
+    "suffering-is-joy":  (a,s) => s.lifetime?.damageTaken ?? 0,
+    "rough-lover":       (a,s) => s.lifetime?.damageDealt ?? 0,
+    "dominant-striker":  (a,s) => s.lifetime?.damageDealt ?? 0,
+    "sadist":            (a,s) => s.lifetime?.damageDealt ?? 0,
+    "cruel-master":      (a,s) => s.lifetime?.damageDealt ?? 0,
+    "apex-predator":     (a,s) => s.lifetime?.damageDealt ?? 0,
+    "bound-once":        (a,s) => s.lifetime?.bondageScenes ?? 0,
+    "well-bound":        (a,s) => s.lifetime?.bondageScenes ?? 0,
+    "bondage-pet":       (a,s) => s.lifetime?.bondageScenes ?? 0,
+    "eternal-thrall":    (a,s) => s.lifetime?.restrainedScenes ?? 0,
+    "fire-hose":         (a,s) => s.lifetime?.cumGiven ?? 0,
+    "cum-dump":          (a,s) => s.lifetime?.cumReceived ?? 0,
+    "insatiable":        (a,s) => Object.values(s.kinks ?? {}).filter(Boolean).length,
+    "goblin-groupie":    (a,s,h) => (h ?? []).filter(e => AFLP_Titles._nameContains(e.sourceName, ["goblin"])).length,
+    "beastmaster":       (a,s,h) => new Set((h ?? []).map(e => e.sourceType).filter(Boolean)).size,
+  },
+
+  // Returns { current, target, pct, done } for a numeric title, or null for a
+  // binary (flag/creature) title that has no gradient.
+  progressOf(id, actor, sexual, history) {
+    const fn = this._PROGRESS[id];
+    if (!fn) return null;
+    const builtin = this.TITLES.find(t => t.id === id);
+    const target = this._threshold(id, builtin?.defaultThreshold ?? 1);
+    let current = 0;
+    try { current = Number(fn(actor, sexual, history ?? [])) || 0; } catch (_) {}
+    const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+    return { current, target, pct, done: current >= target };
+  },
+
   _name(id, defaultName) {
     return this._cfg(id).name ?? defaultName;
   },
@@ -54,14 +110,16 @@ window.AFLP_Titles = {
   TITLES: [
     {
       id: "first-time",
-      name: "First Time",
+      name: "The Deflowered",
       desc: "Had sex for the first time.",
+      defaultThreshold: 1,
       detect: (a, s) => (s.lifetime?.timesCummed ?? 0) >= 1,
     },
     {
       id: "no-strings",
       name: "The Hookup",
       desc: "Had 10 or more encounters with no pregnancy.",
+      defaultThreshold: 10,
       detect: (a, s) => (s.lifetime?.sessionsNoPregnancy ?? 0) >= 10,
     },
     {
@@ -93,6 +151,13 @@ window.AFLP_Titles = {
       detect: (a, s) => (s.lifetime?.facial ?? 0) >= AFLP_Titles._threshold("facial-collector", 20),
     },
     {
+      id: "paizuri-princess",
+      name: "Paizuri Princess",
+      desc: "Finished 20 or more times between their tits.",
+      defaultThreshold: 20,
+      detect: (a, s) => (s.lifetime?.paizuri ?? 0) >= AFLP_Titles._threshold("paizuri-princess", 20),
+    },
+    {
       id: "gangbang-queen",
       name: "Gangbang Queen",
       desc: "Been gangbanged 5 or more times.",
@@ -101,7 +166,7 @@ window.AFLP_Titles = {
     },
     {
       id: "well-used",
-      name: "Well Used",
+      name: "Airlock Angel",
       desc: "Received sex in all three holes in a single encounter.",
       detect: (a, s) => !!(s.lifetime?.allHolesInSession),
     },
@@ -112,7 +177,7 @@ window.AFLP_Titles = {
       defaultThreshold: 50,
       detect: (a, s) => {
         const l = s.lifetime ?? {};
-        return (l.oral ?? 0) + (l.vaginal ?? 0) + (l.anal ?? 0) + (l.facial ?? 0) >= AFLP_Titles._threshold("total-slut", 50);
+        return (l.oral ?? 0) + (l.vaginal ?? 0) + (l.anal ?? 0) + (l.facial ?? 0) + (l.paizuri ?? 0) >= AFLP_Titles._threshold("total-slut", 50);
       },
     },
     {
@@ -138,7 +203,7 @@ window.AFLP_Titles = {
       defaultThreshold: 100,
       detect: (a, s) => {
         const l = s.lifetime ?? {};
-        return (l.oral ?? 0) + (l.vaginal ?? 0) + (l.anal ?? 0) + (l.facial ?? 0) >= AFLP_Titles._threshold("legendary-hole", 100);
+        return (l.oral ?? 0) + (l.vaginal ?? 0) + (l.anal ?? 0) + (l.facial ?? 0) + (l.paizuri ?? 0) >= AFLP_Titles._threshold("legendary-hole", 100);
       },
     },
     {
@@ -148,7 +213,7 @@ window.AFLP_Titles = {
       defaultThreshold: 500,
       detect: (a, s) => {
         const l = s.lifetime ?? {};
-        return (l.oral ?? 0) + (l.vaginal ?? 0) + (l.anal ?? 0) + (l.facial ?? 0) >= AFLP_Titles._threshold("power-bottom", 500);
+        return (l.oral ?? 0) + (l.vaginal ?? 0) + (l.anal ?? 0) + (l.facial ?? 0) + (l.paizuri ?? 0) >= AFLP_Titles._threshold("power-bottom", 500);
       },
     },
     {
@@ -156,29 +221,31 @@ window.AFLP_Titles = {
       name: "Cum Bucket",
       desc: "Received cum from 10 or more separate partners.",
       defaultThreshold: 10,
-      detect: (a, s) => {
-        const h = s.lifetime?.partnerHistory ?? [];
-        return h.length >= AFLP_Titles._threshold("cum-bucket", 10);
-      },
+      // History is the third argument (checkAndAward reads the partnerHistory
+      // flag and passes it). sexual.lifetime.partnerHistory does not exist.
+      detect: (a, s, h) => (h ?? []).length >= AFLP_Titles._threshold("cum-bucket", 10),
     },
     {
       id: "village-bicycle",
       name: "Village Bicycle",
       desc: "Received sex from 25 or more unique partners.",
       defaultThreshold: 25,
-      detect: (a, s) => {
-        const unique = new Set((s.lifetime?.partnerHistory ?? []).map(e => e.sourceId));
+      detect: (a, s, h) => {
+        const unique = new Set((h ?? []).map(e => e.sourceUuid));
         return unique.size >= AFLP_Titles._threshold("village-bicycle", 25);
       },
     },
     {
       id: "belly-full",
       name: "Mens' Cum Dump",
-      desc: "Received at least 10,000 ml of cum in a single hole over a lifetime (about 20 medium loads or 2 large loads).",
-      defaultThreshold: 10000,
+      desc: "Taken 50 or more loads in a single hole over a lifetime.",
+      defaultThreshold: 50,
       detect: (a, s) => {
-        const ml = s.lifetime?.mlReceived ?? {};
-        return Object.values(ml).some(v => v >= AFLP_Titles._threshold("belly-full", 10000));
+        // Loads received per hole (lifetime[hole] counts +1 per filling), NOT ml -
+        // ml scales with the Realistic/Fantasy Cum Module setting, so a load count
+        // reads the same at any setting.
+        const holes = ["oral", "vaginal", "anal", "facial"];
+        return holes.some(h => (s.lifetime?.[h] ?? 0) >= AFLP_Titles._threshold("belly-full", 50));
       },
     },
     {
@@ -186,8 +253,10 @@ window.AFLP_Titles = {
       name: "Monsters' Cum Dump",
       desc: "Accumulated 40 or more overflow units in a single hole (been packed past maximum repeatedly).",
       defaultThreshold: 40,
-      detect: (a, s) => {
-        const ov = s.lifetime?.cumOverflow ?? {};
+      // cumOverflow lives as its own actor flag (cumflation.js saveCumflation),
+      // NOT under sexual.lifetime. Reading the wrong path made this unreachable.
+      detect: (a) => {
+        const ov = a?.getFlag?.(AFLP.FLAG_SCOPE, "cumOverflow") ?? {};
         return Object.values(ov).some(v => v >= AFLP_Titles._threshold("stuffed-to-bursting", 40));
       },
     },
@@ -195,17 +264,17 @@ window.AFLP_Titles = {
       id: "overflowing",
       name: "Leaky",
       desc: "Exceeded Cumflation capacity (overflow triggered) at least once.",
-      detect: (a, s) => {
-        const ov = s.lifetime?.cumOverflow ?? {};
+      detect: (a) => {
+        const ov = a?.getFlag?.(AFLP.FLAG_SCOPE, "cumOverflow") ?? {};
         return Object.values(ov).some(v => v > 0);
       },
     },
     {
       id: "cum-toilet",
       name: "Public Cum Toilet",
-      desc: "Received 50,000 ml or more of cum in total over a lifetime.",
-      defaultThreshold: 50000,
-      detect: (a, s) => (s.lifetime?.cumReceived ?? 0) >= AFLP_Titles._threshold("cum-toilet", 50000),
+      desc: "Received 200 or more Cum Shots in total over a lifetime.",
+      defaultThreshold: 200,
+      detect: (a, s) => (s.lifetime?.cumReceived ?? 0) >= AFLP_Titles._threshold("cum-toilet", 200),
     },
     {
       id: "baby-maker",
@@ -218,6 +287,7 @@ window.AFLP_Titles = {
       id: "litter-bearer",
       name: "Litter Bearer",
       desc: "Given birth to 5 or more offspring in a single pregnancy.",
+      defaultThreshold: 5,
       detect: (a, s) => (s.lifetime?.maxLitterSize ?? 0) >= 5,
     },
     {
@@ -254,7 +324,7 @@ window.AFLP_Titles = {
     },
     {
       id: "defeat-fetish",
-      name: "Defeat Fetish",
+      name: "Recreational Loser",
       desc: "Sexually defeated 5 or more times.",
       defaultThreshold: 5,
       detect: (a, s) => (s.lifetime?.timesDefeated ?? 0) >= AFLP_Titles._threshold("defeat-fetish", 5),
@@ -264,18 +334,26 @@ window.AFLP_Titles = {
       name: "Brainless Cock Sleeve",
       desc: "Suffered Mind Break 3 or more times.",
       defaultThreshold: 3,
-      detect: (a, s) => (s.lifetime?.timesMindBroke ?? 0) >= AFLP_Titles._threshold("mind-gone", 3),
+      // Field is timesMindBroken (aflp-arousal.js writes it). "timesMindBroke"
+      // never existed, so this title could never award - only its bar moved.
+      detect: (a, s) => (s.lifetime?.timesMindBroken ?? 0) >= AFLP_Titles._threshold("mind-gone", 3),
     },
     {
       id: "size-queen",
       name: "Size Queen",
       desc: "Been with a Large or larger creature (giant, dragon, etc.).",
-      detect: (a, s, h) => h.some(e => (e.sourceSize ?? "med") === "lg" || (e.sourceSize ?? "med") === "huge" || (e.sourceSize ?? "med") === "grg"),
+      // Large is step 4. Compared through AFLP.sizeStepOf because sourceSize
+      // holds PF2e's abbreviation ("lg") on one system and Daggerheart's full
+      // word ("large") on the other; testing the literals missed every Large and
+      // Gargantuan DH partner. An entry with no sourceSize reads 0 and never
+      // awards, which is what the old `?? "med"` did.
+      detect: (a, s, h) => h.some(e => AFLP.sizeStepOf(e.sourceSize) >= 4),
     },
     {
       id: "beastmaster",
       name: "Beastmaster",
       desc: "Been with 5 different kinds of creatures.",
+      defaultThreshold: 5,
       detect: (a, s, h) => new Set(h.map(e => e.sourceType).filter(Boolean)).size >= 5,
     },
     {
@@ -306,6 +384,7 @@ window.AFLP_Titles = {
       id: "goblin-groupie",
       name: "Goblin Groupie",
       desc: "Been with 3 or more goblins.",
+      defaultThreshold: 3,
       detect: (a, s, h) => h.filter(e => AFLP_Titles._nameContains(e.sourceName, ["goblin"])).length >= 3,
     },
     {
@@ -348,105 +427,197 @@ window.AFLP_Titles = {
     // ── Masochist progression ─────────────────────────────────────────────────
     {
       id: "pain-curious",
-      name: "Pain Curious",
-      desc: "Taken 50 or more damage during H-Scenes.",
-      defaultThreshold: 50,
-      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("pain-curious", 50),
+      name: "Punching Bag",
+      desc: "Taken half a health bar of damage across H-Scenes.",
+      defaultThreshold: 0.5,
+      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("pain-curious", 0.5),
     },
     {
       id: "painslut",
       name: "Painslut",
-      desc: "Taken 200 or more damage during H-Scenes.",
-      defaultThreshold: 200,
-      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("painslut", 200),
+      desc: "Taken 2 health bars of damage across H-Scenes.",
+      defaultThreshold: 2,
+      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("painslut", 2),
     },
     {
       id: "masochist",
       name: "Masochist",
-      desc: "Taken 500 or more damage during H-Scenes.",
-      defaultThreshold: 500,
-      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("masochist", 500),
+      desc: "Taken 5 health bars of damage across H-Scenes.",
+      defaultThreshold: 5,
+      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("masochist", 5),
     },
     {
       id: "bliss-in-agony",
       name: "Blissful Agony Addict",
-      desc: "Taken 1500 or more damage during H-Scenes.",
-      defaultThreshold: 1500,
-      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("bliss-in-agony", 1500),
+      desc: "Taken 15 health bars of damage across H-Scenes.",
+      defaultThreshold: 15,
+      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("bliss-in-agony", 15),
     },
     {
       id: "suffering-is-joy",
       name: "Slave to Suffering",
-      desc: "Taken 5000 or more damage during H-Scenes.",
-      defaultThreshold: 5000,
-      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("suffering-is-joy", 5000),
+      desc: "Taken 50 health bars of damage across H-Scenes.",
+      defaultThreshold: 50,
+      detect: (a, s) => (s.lifetime?.damageTaken ?? 0) >= AFLP_Titles._threshold("suffering-is-joy", 50),
     },
 
     // ── Sadist progression ────────────────────────────────────────────────────
     {
       id: "rough-lover",
       name: "Rough Lover",
-      desc: "Dealt 50 or more damage during H-Scenes.",
-      defaultThreshold: 50,
-      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("rough-lover", 50),
+      desc: "Dealt half a health bar of damage across H-Scenes.",
+      defaultThreshold: 0.5,
+      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("rough-lover", 0.5),
     },
     {
       id: "dominant-striker",
       name: "Dominant Striker",
-      desc: "Dealt 200 or more damage during H-Scenes.",
-      defaultThreshold: 200,
-      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("dominant-striker", 200),
+      desc: "Dealt 2 health bars of damage across H-Scenes.",
+      defaultThreshold: 2,
+      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("dominant-striker", 2),
     },
     {
       id: "sadist",
       name: "Sadist",
-      desc: "Dealt 500 or more damage during H-Scenes.",
-      defaultThreshold: 500,
-      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("sadist", 500),
+      desc: "Dealt 5 health bars of damage across H-Scenes.",
+      defaultThreshold: 5,
+      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("sadist", 5),
     },
     {
       id: "cruel-master",
       name: "Cruel Master",
-      desc: "Dealt 1500 or more damage during H-Scenes.",
-      defaultThreshold: 1500,
-      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("cruel-master", 1500),
+      desc: "Dealt 15 health bars of damage across H-Scenes.",
+      defaultThreshold: 15,
+      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("cruel-master", 15),
     },
     {
       id: "apex-predator",
       name: "Apex Predator",
-      desc: "Dealt 5000 or more damage during H-Scenes.",
-      defaultThreshold: 5000,
-      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("apex-predator", 5000),
+      desc: "Dealt 50 health bars of damage across H-Scenes.",
+      defaultThreshold: 50,
+      detect: (a, s) => (s.lifetime?.damageDealt ?? 0) >= AFLP_Titles._threshold("apex-predator", 50),
     },
 
     // ── Bondage progression ───────────────────────────────────────────────────
+    // Counted in SCENES, not rounds. Rounds needed initiative to be running,
+    // which Daggerheart has no equivalent of, and made one long encounter worth
+    // more than several short ones. Grabbed is deliberately no longer named on
+    // the cards: nearly every scene opens with it, so it carried no signal - but
+    // it still SETS the flag, because a scene spent grabbed is a scene spent
+    // bound. Thresholds sit in the same register as the other per-scene tallies
+    // (gangbang-queen 5, no-strings 10). A world that customised the old
+    // round-based thresholds keeps that number and will need it re-set.
     {
       id: "bound-once",
-      name: "Bondage Curious",
-      desc: "Spent 10 or more turns grabbed or in bondage during H-Scenes.",
-      defaultThreshold: 10,
-      detect: (a, s) => (s.lifetime?.bondageRounds ?? 0) >= AFLP_Titles._threshold("bound-once", 10),
+      name: "Bondage Bait",
+      desc: "Spent 5 or more H-Scenes in bondage.",
+      defaultThreshold: 5,
+      detect: (a, s) => (s.lifetime?.bondageScenes ?? 0) >= AFLP_Titles._threshold("bound-once", 5),
     },
     {
       id: "well-bound",
       name: "Helpless Fuck Toy",
-      desc: "Spent 50 or more turns grabbed or in bondage during H-Scenes.",
-      defaultThreshold: 50,
-      detect: (a, s) => (s.lifetime?.bondageRounds ?? 0) >= AFLP_Titles._threshold("well-bound", 50),
+      desc: "Spent 15 or more H-Scenes in bondage.",
+      defaultThreshold: 15,
+      detect: (a, s) => (s.lifetime?.bondageScenes ?? 0) >= AFLP_Titles._threshold("well-bound", 15),
     },
     {
       id: "bondage-pet",
       name: "Leashed Sex Slave",
-      desc: "Spent 200 or more turns grabbed or in bondage during H-Scenes.",
-      defaultThreshold: 200,
-      detect: (a, s) => (s.lifetime?.bondageRounds ?? 0) >= AFLP_Titles._threshold("bondage-pet", 200),
+      desc: "Spent 40 or more H-Scenes in bondage.",
+      defaultThreshold: 40,
+      detect: (a, s) => (s.lifetime?.bondageScenes ?? 0) >= AFLP_Titles._threshold("bondage-pet", 40),
     },
     {
       id: "eternal-thrall",
       name: "Eternal Thrall",
-      desc: "Spent 500 or more turns restrained during H-Scenes.",
+      desc: "Spent 50 or more H-Scenes restrained.",
+      defaultThreshold: 50,
+      detect: (a, s) => (s.lifetime?.restrainedScenes ?? 0) >= AFLP_Titles._threshold("eternal-thrall", 50),
+    },
+
+    // ── Cum Shot / Loads ──────────────────────────────────────────────────────
+    {
+      id: "fire-hose",
+      name: "The Fire Hose",
+      desc: "Fired 500 or more Cum Shots (Loads) over a lifetime.",
       defaultThreshold: 500,
-      detect: (a, s) => (s.lifetime?.restrainedRounds ?? 0) >= AFLP_Titles._threshold("eternal-thrall", 500),
+      detect: (a, s) => (s.lifetime?.cumGiven ?? 0) >= AFLP_Titles._threshold("fire-hose", 500),
+    },
+    {
+      id: "cum-dump",
+      name: "The Cum Dump",
+      desc: "Received 500 or more Cum Shots (Loads) over a lifetime.",
+      defaultThreshold: 500,
+      detect: (a, s) => (s.lifetime?.cumReceived ?? 0) >= AFLP_Titles._threshold("cum-dump", 500),
+    },
+
+    // ── Cumflation ────────────────────────────────────────────────────────────
+    {
+      id: "cum-balloon",
+      name: "The Cum Balloon",
+      desc: "Filled to bursting - reached maximum cumflation in a hole.",
+      detect: (a) => {
+        const cf = a.getFlag?.(AFLP.FLAG_SCOPE, "cumflation") ?? {};
+        return ["oral", "vaginal", "anal", "facial", "paizuri"].some(h => (cf[h] ?? 0) >= (AFLP.CUMFLATION_MAX ?? 8));
+      },
+    },
+    {
+      id: "human-waterbed",
+      name: "Creampie Waterbed",
+      desc: "Flooded in every hole at once - all three holes cumflated 4 or higher.",
+      detect: (a) => {
+        const cf = a.getFlag?.(AFLP.FLAG_SCOPE, "cumflation") ?? {};
+        return ["oral", "vaginal", "anal"].every(h => (cf[h] ?? 0) >= 4);
+      },
+    },
+
+    // ── Size Training / Body Features ─────────────────────────────────────────
+    {
+      id: "trained-monster-sleeve",
+      name: "Trained Monster Sleeve",
+      desc: "Fully trained every applicable hole to maximum.",
+      detect: (a) => {
+        const holes = AFLP.applicableTrainHoles?.(a) ?? [];
+        if (!holes.length) return false;
+        const train = AFLP.sizeTrainingOf?.(a) ?? {};
+        return holes.every(h => (train[h] ?? 0) >= (AFLP.SIZE_TRAIN_MAX ?? 6));
+      },
+    },
+    {
+      id: "gaping-ruin",
+      name: "The Gaping Ruin",
+      desc: "Trained the ass to its limit (Gape Glutton).",
+      detect: (a) => !!(a.getFlag?.(AFLP.FLAG_SCOPE, "bodyFeatures") ?? {})["anal"],
+    },
+    {
+      id: "slack-jaw",
+      name: "The Slack-Jaw",
+      desc: "Trained the throat to its limit (Throat Goat).",
+      detect: (a) => !!(a.getFlag?.(AFLP.FLAG_SCOPE, "bodyFeatures") ?? {})["oral"],
+    },
+    {
+      id: "ruined-sow",
+      name: "The Ruined Sow",
+      desc: "Trained the pussy to its limit (Size Queen).",
+      detect: (a) => !!(a.getFlag?.(AFLP.FLAG_SCOPE, "bodyFeatures") ?? {})["pussy"],
+    },
+
+    // ── Kinks ─────────────────────────────────────────────────────────────────
+    {
+      id: "insatiable",
+      name: "Insatiable",
+      desc: "Holds 5 or more kinks at once.",
+      defaultThreshold: 5,
+      detect: (a, s) => Object.values(s.kinks ?? {}).filter(Boolean).length >= 5,
+    },
+
+    // ── Breeding ──────────────────────────────────────────────────────────────
+    {
+      id: "clutch-mother",
+      name: "Clutch Mother",
+      desc: "Delivered an egg clutch as a clutch-bearer.",
+      detect: (a, s) => !!(s.lifetime?.hasDeliveredClutch),
     },
   ],
 
@@ -459,6 +630,9 @@ window.AFLP_Titles = {
 
   // ── Check and award titles to an actor ────────────────────────────────────
   async checkAndAward(actor) {
+    // "Titles - Automatic Award": registered and preset by the welcome screen
+    // but previously never enforced here - titles were always auto-awarded.
+    if (AFLP.Settings?.titlesAutomation === false) return [];
     const sexual  = structuredClone(actor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {});
     const history = actor.getFlag(AFLP.FLAG_SCOPE, "partnerHistory") ?? [];
     // Read from sexual.titles to match the sheet tab
@@ -486,6 +660,11 @@ window.AFLP_Titles = {
 
     if (newTitles.length) {
       sexual.titles = [...earned];
+      // If the actor was questing toward a title they just earned, clear the
+      // tracked marker - the H-Quest is complete, nothing left to track.
+      if (sexual.trackedTitleId && earned.has(sexual.trackedTitleId)) {
+        sexual.trackedTitleId = null;
+      }
       await actor.setFlag(AFLP.FLAG_SCOPE, "sexual", sexual);
       try { window.AFLP?.Voice?.playSfx?.("title"); } catch (_) {}
     }

@@ -15,6 +15,11 @@
 // event's folder is chosen, played locally, and broadcast so everyone at the
 // table hears the same clip - each client applying its own volume / mute.
 //
+// Discovery needs FILES_BROWSE, which by Foundry's DEFAULT only Trusted Player
+// and up have. A seat without it cannot pick a clip, so it asks the active GM to
+// fire the event and hears the GM's broadcast like everyone else - see "Seats
+// that cannot browse" below. Playback itself needs no permission.
+//
 // All audio is user-supplied (drop your own files into the folder); nothing is
 // bundled. Triggers are wired non-invasively: climax and cumflation from the UI
 // files, and Sexual Advance / Struggle Snuggle by wrapping AFLP_Arousal.increment
@@ -33,20 +38,21 @@
   const _get = (key, dflt) => { try { return game.settings.get(MODULE_ID, key); } catch (e) { return dflt; } };
   const _clamp01   = (v, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : d; };
   const enabled    = () => _get("voiceEnabled", true) !== false;
-  // Shipped soundpack lives in its own module at modules/aflp-soundpack/{aflp-voices,aflp-sfx}.
+  // Shipped soundpack lives in its own module at modules/aflr-soundpack/{aflp-voices,aflp-sfx}.
   // Bundled VA profiles always load from VA_BUNDLED; voiceFolder is an OPTIONAL
   // extra folder for the user's own additional profiles.
-  // Shipped audio lives in a companion module. Two ship: the full "AFLR Soundpack"
-  // (aflp-soundpack, kept that id so existing installs and paths stay valid) and
-  // the curated default "AFLR Soundpack Lite" (aflr-soundpack-lite). Resolve to
-  // whichever is active - full wins if both are installed, since it is a superset.
+  // Shipped audio lives in a companion module. The current pack is the "AFLR
+  // Soundpack" (aflr-soundpack); the old curated "AFLR Soundpack Lite"
+  // (aflr-soundpack-lite) is kept only as a legacy fallback so existing installs
+  // still resolve. The retired aflp-soundpack id is no longer consulted.
   // Evaluated at import (ready), so game.modules.active is reliable here.
   const SOUNDPACK_BASE = (() => {
     try {
-      if (game.modules.get("aflp-soundpack")?.active)      return "modules/aflp-soundpack";
+      if (game.modules.get("aflr-soundpack")?.active)      return "modules/aflr-soundpack";
       if (game.modules.get("aflr-soundpack-lite")?.active) return "modules/aflr-soundpack-lite";
+      if (game.modules.get("aflp-soundpack")?.active)      return "modules/aflp-soundpack"; // legacy id
     } catch (e) { /* fall through to default */ }
-    return "modules/aflp-soundpack";
+    return "modules/aflr-soundpack";
   })();
   const VA_BUNDLED     = `${SOUNDPACK_BASE}/aflp-voices`;
   const SFX_BUNDLED    = `${SOUNDPACK_BASE}/aflp-sfx`;
@@ -64,6 +70,11 @@
   // SFX base is fixed to the shipped soundpack (no custom-path override).
   const SFX_BASE_DEFAULT = SFX_BUNDLED;
   const sfxBase = () => SFX_BUNDLED;
+  // Floor SFX shipped inside this module itself, used as a per-key fallback when
+  // the soundpack is absent or yields nothing for a category. Folders present:
+  // plap, gluk, schlick, cum, slosh, slide.
+  const FLOOR_BASE = "modules/ardisfoxxs-lewd-pf2e/assets/audio";
+  const FLOOR_CATS = new Set(["plap", "gluk", "schlick", "cum", "slosh", "slide"]);
   // Ambient category by the position's HOLE (read from the schema position
   // registry via AFLP.getPosition), so every penetrative/oral position maps
   // correctly - doggy, missionary, cowgirl, facefuck, prone-bone, etc., not just
@@ -91,7 +102,7 @@
   const CUMFLATION_BIG_SET  = "Cum/Bubbley/Bubbly Glup Glup Cum (SquishSuccubus)";
   const CUMFLATION_BIG_LOAD = 20;   // load units this resolution at/above this -> big set
   // All ambient categories we look for under the SFX base.
-  const SFX_CATEGORIES = ["plap", "gluk", "schlick", "cum", "inflation", "title", "slosh", "slide"];
+  const SFX_CATEGORIES = ["plap", "gluk", "schlick", "cum", "title", "slosh", "slide"];
   // Folders from the bundled OpenNSFW SFX pack that also feed each category, so
   // the pack can be dropped in whole (its folder names) or curated into our clean
   // category folders - both are scanned, recursively.
@@ -100,10 +111,6 @@
     gluk:      ["Oral - Mouth"],
     schlick:   ["Fingering & Grinding"],
     cum:       ["Cum"],
-    // "Inflation & Vore" (pack) is balloon/vore SFX - sounds wrong as a cumflation
-    // sting. Leave inflation to a curated `inflation/` folder only (empty = silent;
-    // the cumflation moan fallback still plays).
-    inflation: [],
     // Internal "sloshing" cum sounds, fired when a hole takes cum while already at
     // its per-hole max (it's full, so it sloshes). Scanned from the pack's
     // Cum/Internal library (belly/womb-fill/traveling clips); .lnk files ignored.
@@ -145,8 +152,156 @@
         ?? globalThis.FilePicker;
   }
 
+  // ── Can this seat read the filesystem at all? ───────────────────────────────
+  // FILES_BROWSE is granted to roles 2/3/4 (Trusted Player and up) by Foundry's
+  // DEFAULT permission config, so an ordinary PLAYER cannot browse in anyone's
+  // world unless the GM has changed it. Measured 31 Aug 2026 in dh-test: role-1
+  // seats return false, and every `FP.browse` on them throws "You do not have
+  // permission to browse the host file system!".
+  //
+  // **Only DISCOVERY is gated. Playback is not** - the same seat GETs a clip by
+  // URL and receives 200 with the full file (measured, 266 KB .ogg). That is the
+  // whole basis of the manifest sharing below: a player seat can play anything,
+  // it just cannot find out what exists.
+  const _canBrowse = () => { try { return game.user?.can?.("FILES_BROWSE") !== false; } catch (e) { return true; } };
+
+  // ── Seats that cannot browse: the GM fires the sound, everyone hears it ─────
+  //
+  // WHY ANY OF THIS EXISTS: `play()` runs on whichever client TRIGGERS the event,
+  // picks a clip from THAT client's cache and broadcasts the chosen src. A seat
+  // with an empty cache plays nothing for ANYBODY - so a player-triggered climax
+  // was silent at the whole table while the identical GM-triggered one was heard
+  // by everyone. It never looked broken because the GM's seat usually fires.
+  //
+  // TWO THINGS A BROWSE-LESS SEAT NEEDS, AND THEY ARE NOT THE SAME SIZE:
+  //
+  //   the dropdown  needs the profile NAMES          44 names, ~700 bytes
+  //   playback      needs to pick from the CLIP LISTS 3,899 voice paths, 412 KB
+  //                                                   + ~845 ambient paths
+  //
+  // **Measured 31 Aug 2026 in dh-test, not estimated.** Shipping the clip lists
+  // to every player on every login is half a megabyte of socket traffic to solve
+  // a problem the GM's client can solve in one packet, so it does not.
+  //
+  // SO: the GM publishes the NAMES (tiny, and only the dropdown needs them), and
+  // a seat that cannot browse DELEGATES the actual firing to the active GM, which
+  // picks a clip and broadcasts it exactly as it does for its own events. Everyone
+  // hears the same clip, including the player who triggered it - which is the
+  // point, and is stronger than sharing lists: with lists, two clients could pick
+  // two different clips for one event.
+  //
+  // Only `game.users.activeGM` answers, so three GMs do not fire three copies.
+  // NO GM ONLINE: nothing is played and nothing is logged - the same behaviour as
+  // before, deliberately, because clip selection has nowhere to happen.
+  // STALE IF: FILES_BROWSE becomes default for role 1, or a server-side listing
+  // endpoint appears (then a browse-less seat could pick for itself).
+  const MANIFEST_TRIES    = 5;
+  const MANIFEST_RETRY_MS = 4000;
+  let _reqTries = 0, _reqTimer = null;
+  let _sharedNames = null;                       // profile names received from the GM
+
+  const _haveNames = () => Array.isArray(_sharedNames)
+    ? _sharedNames.length > 0
+    : Object.keys(_cache.profiles ?? {}).length > 0;
+
+  // `to` null = everyone (a push after a rescan); a user id = answering one request.
+  //
+  // **NEVER PUBLISHES AN EMPTY LIST.** `scanSfx` can finish while `scan` is still
+  // walking 44 profile folders, and the debounced publish it triggers then sent
+  // `names: []`, which players adopted over a good list - the console read
+  // "44 ... / 0 ... / 44 ..." on a player seat, 1 Sept 2026, with the dropdown
+  // momentarily empty in between. An empty list carries no information a player
+  // can use, so it is never worth sending. STALE IF: publishing moves somewhere
+  // that must be able to say "the GM now has none".
+  // A BROADCAST (`to` null) is skipped when the list has not changed since the
+  // last one. A TARGETED answer (`to` = a user id) always sends: that seat is
+  // asking precisely because it has nothing.
+  let _lastPublished = null;
+  function _publishNames(to = null) {
+    if (!game.user?.isGM) return;
+    const names = Object.keys(_cache.profiles ?? {});
+    if (!names.length) return;
+    const sig = names.join(" ");
+    if (to === null && sig === _lastPublished) return;
+    if (to === null) _lastPublished = sig;
+    game.socket?.emit(SOCKET, { aflpVoice: true, kind: "names", to, names });
+  }
+
+  // Publish from the END of a scan rather than from each caller, so every path
+  // that refills the cache - login, the sheet's Rescan button, the voice-folder
+  // and SFX settings - reaches the players without its own publish call.
+  //
+  // **THE DEBOUNCE HAS TO OUTLAST THE GAP BETWEEN THE TWO SCANS.** Measured
+  // 1 Sept 2026: `scanSfx` finishes ~830 ms before `scan` does, so a 500 ms window
+  // published twice per rescan. 2 s covers the measured gap; the unchanged-list
+  // check above is the real guard, since a slower disk could stretch it further.
+  let _pubTimer = null;
+  function _publishSoon() {
+    if (!game.user?.isGM) return;
+    clearTimeout(_pubTimer);
+    _pubTimer = setTimeout(() => _publishNames(), 2000);
+  }
+
+  function _adoptNames(names) {
+    if (!Array.isArray(names) || !names.length) return;
+    clearTimeout(_reqTimer);
+    // A login answers a request AND catches the userConnected push AND the
+    // end-of-scan push, so the same list arrives several times. Adopting it again
+    // would log and re-render each sheet for nothing.
+    if (Array.isArray(_sharedNames) && _sharedNames.join(" ") === names.join(" ")) return;
+    _sharedNames = names;
+    console.log(`AFLP Voice | ${names.length} voice profile(s) received from the GM`);
+    // Repaint any open sheet so the voice dropdown fills without a reload.
+    try {
+      const apps = foundry.applications?.instances?.values?.() ?? Object.values(ui.windows ?? {});
+      for (const app of apps) if (app?.actor) app.render?.(false);
+    } catch (e) { /* cosmetic only */ }
+  }
+
+  // Ask the active GM for the profile names, retrying while the GM's own scan
+  // finishes (or while no GM is logged in yet). Gives up after MANIFEST_TRIES
+  // rather than asking forever; a GM rescan pushes to everyone anyway.
+  function _requestManifest() {
+    if (_haveNames() || _reqTries >= MANIFEST_TRIES) return;
+    _reqTries++;
+    game.socket?.emit(SOCKET, { aflpVoice: true, kind: "namesReq", userId: game.user?.id });
+    clearTimeout(_reqTimer);
+    _reqTimer = setTimeout(_requestManifest, MANIFEST_RETRY_MS);
+  }
+
+  // ── Delegation ──────────────────────────────────────────────────────────────
+  // A seat with no clip lists asks the active GM to fire the event. Returns true
+  // when the request went out, false when there is no GM to ask (caller then does
+  // nothing, which is the pre-existing silent behaviour).
+  const _mustDelegate = () => !_canBrowse();
+  function _delegate(fn, args) {
+    if (!game.users?.activeGM) return false;
+    game.socket?.emit(SOCKET, { aflpVoice: true, kind: "req", fn, args });
+    return true;
+  }
+  // Runs ON THE ACTIVE GM only. `fn` is checked against this map rather than
+  // called by name, so a malformed or hostile packet cannot reach anything else.
+  // `reactPosition` is deliberately absent: it calls play/_playMoan, which
+  // delegate themselves, so routing it too would fire the event twice.
+  const _REQ = {
+    play:    (a) => play(a.eventKey, fromUuidSync(a.uuid), { units: a.units ?? 0 }),
+    moan:    (a) => _playMoan(fromUuidSync(a.uuid), { onlyOnClimb: !!a.onlyOnClimb, tierBoost: a.tierBoost ?? 0 }),
+    playSfx: (a) => playSfx(a.category),
+    test:    (a) => testStep(a.actorId, a.profile, { broadcast: true }),
+  };
+  function _serveReq(data) {
+    if (game.users?.activeGM?.id !== game.user?.id) return;
+    const h = _REQ[data?.fn];
+    if (!h) return;
+    try { h(data.args ?? {}); }
+    catch (e) { console.warn("AFLP Voice | delegated request failed:", data?.fn, e?.message ?? e); }
+  }
+
   async function scan() {
     if (_cache.scanning) return _cache.scanning;
+    // Cannot browse: the manifest comes from the GM instead. Asking is safe to
+    // repeat - _requestManifest no-ops once a manifest has landed.
+    if (!_canBrowse()) { _requestManifest(); return _cache.profiles; }
     // Always scan the bundled soundpack profiles; add the user's optional extra
     // folder if set and distinct. Later base wins on name collision (user override).
     const norm  = (s) => (s || "").replace(/\/+$/, "");
@@ -185,13 +340,17 @@
         }
       }
       _cache = { profiles, ts: Date.now(), scanning: null };
+      _publishSoon();
       return profiles;
     })();
     _cache.scanning = run;
     return run;
   }
 
-  const profileNames = () => Object.keys(_cache.profiles).sort((a, b) => a.localeCompare(b));
+  // A browse-less seat has no scan of its own, so the dropdown lists the names the
+  // GM published. Falls back to this seat's own scan everywhere else.
+  const profileNames = () => (Array.isArray(_sharedNames) ? [..._sharedNames] : Object.keys(_cache.profiles))
+    .sort((a, b) => a.localeCompare(b));
 
   function _pickClip(profile, eventKey) {
     const p = _cache.profiles[profile];
@@ -225,6 +384,11 @@
   // folder aliases - so dropping the pack in whole or curating into our clean
   // category folders both work.
   async function scanSfx() {
+    // Same seat rule as scan(): _gatherAudio already swallows the permission
+    // throw, but without this a player login fires ~40 doomed browse requests.
+    // Such a seat never picks an ambient clip itself - it delegates to the GM -
+    // so it keeps an empty _sfxCache and does not scan.
+    if (!_canBrowse()) return _sfxCache;
     const FP = _FP();
     const base = sfxBase();
     const out = {};
@@ -232,10 +396,14 @@
       const sources = [cat, ...(SFX_ALIASES[cat] ?? [])];
       const acc = [];
       for (const s of sources) await _gatherAudio(FP, `${base}/${s}`, 0, acc);
+      // Floor fallback: if the soundpack gave us nothing for a floor category,
+      // fall back to the clips shipped inside this module at FLOOR_BASE/<cat>.
+      if (!acc.length && FLOOR_CATS.has(cat)) await _gatherAudio(FP, `${FLOOR_BASE}/${cat}`, 0, acc);
       out[cat] = [...new Set(acc)];
     }
     _sfxCache = out;
     await _scanCumflation(FP, base);
+    _publishSoon();
     return out;
   }
   // Scan the curated cumflation sets (each weighted) and the big-load set.
@@ -347,7 +515,7 @@
     _playTrainLocal(train, sfxVolume(), key);
     if (broadcast) game.socket?.emit(SOCKET, { aflpVoice: true, kind: "sfxTrain", train, key });
   }
-  // One-shot SFX for event stings (cum / inflation / title): the whole clip once,
+  // One-shot SFX for event stings (cum / title): the whole clip once,
   // clipped if very long; no loop-fill.
   function _emitSfx(cat, broadcast) {
     if (!cat) return;
@@ -373,7 +541,11 @@
   // Play a global SFX category on demand (event stings like cum/title).
   // Not position-bound and needs no profile; gated only by the SFX toggle.
   function playSfx(category, { broadcast = true } = {}) {
-    try { if (sfxEnabled()) _emitSfx(category, broadcast); } catch (_) {}
+    try {
+      if (!sfxEnabled()) return;
+      if (_mustDelegate()) { _delegate("playSfx", { category }); return; }
+      _emitSfx(category, broadcast);
+    } catch (_) {}
   }
 
   // Cumflation sting: weighted pick across the curated cum sets, or the big-load
@@ -421,8 +593,11 @@
   // long clips are clipped with a fade (or, for build-up events, played from near
   // the end so the crescendo is kept).
   const MIN_LEN = 3;     // seconds: fill shorter clips up to about this
-  const MAX_LEN = 12;    // seconds: clip longer clips down to about this
+  const MAX_LEN = 4;     // seconds: clip longer clips down to about this (was 12)
   const FADE_MS = 600;   // fade in/out duration
+  // Positional SFX trains fall back to this window when the receiver has no
+  // vocalization to pace against (no profile / missing clip).
+  const DEFAULT_TRAIN_MS = 4000;
   // Repeat-to-fill applies to SFX only (mechanical sounds). Voice clips play once
   // (a repeated voice take is too obviously the same sound).
 
@@ -507,10 +682,12 @@
   const _availableEvents = (profile) => TEST_ORDER.filter(ev => _hasClips(profile, ev));
   const _testStep = new Map();   // `${actorId}::${profile}` -> next index
 
-  function _playOne(profile, ev, channel = null) {
+  function _playOne(profile, ev, channel = null, broadcast = false) {
     const src = _pickClip(profile, ev);
     if (!src) return false;
-    _playShaped(src, volume(), { ..._shapeFor(ev), channel });
+    const shape = { ..._shapeFor(ev), channel };
+    if (broadcast) game.socket?.emit(SOCKET, { aflpVoice: true, src, kind: "voice", shape });
+    _playShaped(src, volume(), shape);
     return true;
   }
 
@@ -528,16 +705,27 @@
   }
 
   // Play the next step for this actor/profile; returns its label or null.
-  function testStep(actorId, profile) {
+  // `broadcast` is only set when the GM is servicing a delegated Test from a seat
+  // that has no clip lists - that seat cannot hear its own preview otherwise, so
+  // the whole table hears one clip. A local Test stays local, as it always was.
+  function testStep(actorId, profile, { broadcast = false } = {}) {
     if (!profile) return null;
+    if (_mustDelegate()) return _delegate("test", { actorId, profile }) ? "Test" : null;
     const steps = _testSteps(profile);
     if (!steps.length) return null;
     const key = `${actorId}::${profile}`;
     const i = (_testStep.get(key) || 0) % steps.length;
     const step = steps[i];
     _testStep.set(key, i + 1);
-    if (step.kind === "moan") { const src = _pickMoan(profile, step.tier); if (src) _playShaped(src, volume(), { channel: actorId }); }
-    else _playOne(profile, step.ev, actorId);
+    if (step.kind === "moan") {
+      const src = _pickMoan(profile, step.tier);
+      if (src) {
+        const shape = { channel: actorId };
+        if (broadcast) game.socket?.emit(SOCKET, { aflpVoice: true, src, kind: "voice", shape });
+        _playShaped(src, volume(), shape);
+      }
+    }
+    else _playOne(profile, step.ev, actorId, broadcast);
     return step.label;
   }
 
@@ -552,6 +740,10 @@
   async function play(eventKey, actor, { broadcast = true, units = 0 } = {}) {
     try {
       if (!actor || !EVENTS.includes(eventKey)) return 0;
+      // No clip lists on this seat: the active GM fires it instead and broadcasts,
+      // so this client hears it too. Returns 0 length - a caller sizing an SFX
+      // train off the clip gets the default window rather than a matched one.
+      if (_mustDelegate()) { _delegate("play", { eventKey, uuid: actor.uuid, units }); return 0; }
       const id  = actor.id;
       const now = Date.now();
       if (eventKey === "climax") _climaxAt.set(id, now);
@@ -603,6 +795,11 @@
   // single source of act vocalization - there is no separate "advance" voice.
   async function _playMoan(actor, { onlyOnClimb = false, tierBoost = 0 } = {}) {
     if (!actor) return 0;
+    // Delegated like play(). NOTE the tier-climb guard then runs against the GM's
+    // _moanTier map rather than this seat's; the tier itself is read from the
+    // actor's flags, so the worst case is one repeated or skipped moan when a
+    // player's client and the GM's disagree about the previous tier.
+    if (_mustDelegate()) { _delegate("moan", { uuid: actor.uuid, onlyOnClimb, tierBoost }); return 0; }
     const id   = actor.id;
     const tier = _arousalTier(actor);
     const prev = _moanTier.get(id) ?? 0;
@@ -686,7 +883,9 @@
       });
       wrap.querySelector(".aflp-voice-rescan").addEventListener("click", async () => {
         await Promise.all([scan(), scanSfx()]);
-        ui.notifications?.info(`AFLP: rescanned voice folder (${profileNames().length} profile(s)) and ambient SFX.`);
+        ui.notifications?.info(!_canBrowse()
+          ? `AFLP: asked the GM for the voice list (${profileNames().length} profile(s) so far). Profiles come from the GM's client.`
+          : `AFLP: rescanned voice folder (${profileNames().length} profile(s)) and ambient SFX.`);
         // Re-render the sheet so the dropdown repopulates
         try { app.render?.(false); } catch (_) {}
       });
@@ -717,28 +916,27 @@
       const r = await orig(actor, amount, source, tokenId);
       try {
         if (/Sexual Advance/i.test(String(source || ""))) {
-          const recv = window.AFLP?.HScene?.receivedHoleForActor?.(actor.id);
+          // ALL holes this actor currently receives in - a gangbang talent
+          // taking oral + vaginal + anal at once fires gluk AND plap trains,
+          // not just the first hole found (single-hole resolution was why a
+          // facefucked talent produced no plaps for her other performers).
+          const recvHoles = window.AFLP?.HScene?.receivedHolesForActor?.(actor.id)
+            ?? (window.AFLP?.HScene?.receivedHoleForActor?.(actor.id) ? [window.AFLP.HScene.receivedHoleForActor(actor.id)] : []);
           const tier = _arousalTier(actor);
-          if (recv) {
-            // This actor is a RECEIVER. THEIR vocalization (gag if oral, else moan)
-            // drives the positional SFX, so the plaps/gluk + slide last as long as
-            // HER moan - not the performer's. Hole comes from what they receive.
-            const cat = HOLE_SFX[recv] || null;   // vaginal/anal -> plap, oral -> gluk
-            if (recv === "oral") {
-              play("oral", actor).then(ms => {
-                if (ms > 0) {
-                  if (cat) _emitSfxTrain(cat, true, ms, 0, `${actor.id}:${cat}`);   // gluk
-                  _emitSfxTrain("slide", true, ms, 0, `${actor.id}:slide`);          // wet slide in place of plaps
-                }
-              }).catch(() => {});
-            } else {
-              _playMoan(actor).then(ms => {
-                if (ms > 0) {
-                  if (cat) _emitSfxTrain(cat, true, ms, tier, `${actor.id}:${cat}`);  // plap, paced by her intensity
-                  _emitSfxTrain("slide", true, ms, tier, `${actor.id}:slide`);        // slide layered at the same cadence
-                }
-              }).catch(() => {});
-            }
+          if (recvHoles.length) {
+            // This actor is a RECEIVER. THEIR vocalization (gag if any oral,
+            // else moan) drives the positional SFX length. If the receiver has
+            // no profile or no clip for the event, the trains still fire on a
+            // default window - SFX is not hostage to VO availability.
+            const oral = recvHoles.includes("oral");
+            const cats = new Set(recvHoles.map(h => HOLE_SFX[h]).filter(Boolean));  // plap and/or gluk
+            const voP = oral ? play("oral", actor) : _playMoan(actor);
+            voP.then(ms => {
+              const win = ms > 0 ? ms : DEFAULT_TRAIN_MS;
+              const pace = oral && cats.size === 1 ? 0 : tier;   // solo oral keeps its own cadence
+              for (const cat of cats) _emitSfxTrain(cat, true, win, cat === "gluk" ? 0 : pace, `${actor.id}:${cat}`);
+              _emitSfxTrain("slide", true, win, pace, `${actor.id}:slide`);
+            }).catch(() => {});
           } else {
             // PERFORMER (receives nothing): just their own grunt. No-hole positions
             // (fingering) carry their own SFX here, since no receiver hole covers them.
@@ -746,7 +944,7 @@
             const hole  = posId ? window.AFLP?.getPosition?.(posId)?.hole : null;
             const extra = (posId && !hole) ? POS_SFX_EXTRA[posId] : null;
             _playMoan(actor).then(ms => {
-              if (extra) _emitSfxTrain(extra, true, ms, tier, `${actor.id}:${extra}`);
+              if (extra) _emitSfxTrain(extra, true, ms > 0 ? ms : DEFAULT_TRAIN_MS, tier, `${actor.id}:${extra}`);
             }).catch(() => {});
           }
         } else {
@@ -818,6 +1016,9 @@
     scan,
     scanSfx,
     profiles: profileNames,
+    // True when this seat cannot browse and therefore takes its clip lists from
+    // the GM's client. UI uses it to say where the list comes from.
+    sharedSeat: () => !_canBrowse(),
     // small inspector for the console: counts per profile/event (no paths)
     summary() {
       const out = {};
@@ -843,13 +1044,34 @@
   // would never execute. Run init now if the game is ready, else defer.
   function _init() {
     _patchArousal();
+    // A seat that can browse scans for itself and, if it is a GM, publishes from
+    // the end of the scan (_publishSoon). A seat that cannot browse asks instead -
+    // scan/scanSfx route to _requestManifest.
     scan();
     scanSfx();
     game.socket?.on(SOCKET, (data) => {
       if (!data || data.aflpVoice !== true) return;
+      // Profile names, and delegated firing. `emit` never loops back to the
+      // sender, so a GM never adopts its own push nor answers its own request.
+      if (data.kind === "namesReq") {
+        if (game.users?.activeGM?.id === game.user?.id && _haveNames()) _publishNames(data.userId ?? null);
+        return;
+      }
+      if (data.kind === "names") {
+        if (data.to && data.to !== game.user?.id) return;
+        if (_canBrowse()) return;              // this seat scans for itself; keep its own list
+        _adoptNames(data.names);
+        return;
+      }
+      if (data.kind === "req") { _serveReq(data); return; }
       if (data.kind === "sfxTrain") { _playTrainLocal(data.train, sfxVolume(), data.key || null); return; }
       if (!data.src) return;
       _playShaped(data.src, data.kind === "sfx" ? sfxVolume() : volume(), data.shape || {});
+    });
+    // A player who logs in before the GM gets nothing from the exchange above;
+    // the GM's client publishes again as each user connects.
+    if (game.user?.isGM) Hooks.on("userConnected", (user, connected) => {
+      if (connected && !user.isGM && _haveNames()) _publishNames(user.id);
     });
   }
   if (game?.ready) _init();

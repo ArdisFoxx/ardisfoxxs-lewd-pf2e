@@ -25,8 +25,9 @@ Hooks.once("init", async function () {
   // Register AFLP custom traits so they appear in the trait selector on all
   // item types and show a description tooltip on mouseover. Must run in init
   // so the dictionaries exist before any item sheets open.
-  // PF2e-only: other systems have no CONFIG.PF2E trait dictionaries.
-  if (game.system?.id === "pf2e") {
+  // PF2e-family only (pf2e, and its Starfinder 2e fork sf2e - both expose
+  // CONFIG.PF2E trait dictionaries); other systems have none.
+  if (["pf2e", "sf2e"].includes(game.system?.id)) {
     const aflpTraits = {
     aphrodisiac: {
       label: "Aphrodisiac",
@@ -51,6 +52,10 @@ Hooks.once("init", async function () {
   const traitDicts = [
     "actionTraits", "featTraits", "equipmentTraits", "consumableTraits",
     "spellTraits", "weaponTraits", "armorTraits", "hazardTraits",
+    // Categories previously supplied via the pf2e homebrew world settings -
+    // now injected directly like the rest (see the homebrew scrub in index.js).
+    "creatureTraits", "classTraits", "shieldTraits", "npcAttackTraits",
+    "effectTraits", "ancestryTraits",
   ];
   for (const [key, { label, description }] of Object.entries(aflpTraits)) {
     for (const dict of traitDicts) {
@@ -235,5 +240,22 @@ Hooks.once("ready", async function () {
 // Global logging via socketlib
 // -------------------------------
 async function logForEveryone(msg) {
-  socketlib.modules.get("ardisfoxxs-lewd-pf2e").executeForEveryone("logMessage", msg);
+  // GUARDED, AND IT HAD TO BE. This ran bare: `socketlib.modules.get(...)` with no
+  // check that socketlib exists or that the module is registered, and
+  // `.executeForEveryone` on the undefined it returns is a TypeError. Its caller
+  // `logEffect` fires from preCreateItem AND updateItem for every condition and
+  // effect, and takes the GIFT branch whenever AFLP_Lovense has not loaded
+  // (`!window.AFLP_Lovense || useGift()`), so in a world without socketlib this
+  // threw on EVERY condition change. Inside an async hook that surfaces as an
+  // unhandled rejection rather than a visible error, which is why it could sit
+  // there. Found 20 Aug 2026 by the entry-point sweep.
+  //
+  // MODULE_ID rather than the literal so it stays correct if the id is ever read
+  // rather than rewritten; the build's string rewrite handles the literal case.
+  // Logging must never break a document create, hence the catch.
+  try {
+    const sock = globalThis.socketlib?.modules?.get(globalThis.AFLP?.MODULE_ID ?? "ardisfoxxs-lewd-pf2e");
+    if (!sock) return;
+    await sock.executeForEveryone("logMessage", msg);
+  } catch (e) { /* never break a create over a log line */ }
 }

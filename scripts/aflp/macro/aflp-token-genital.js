@@ -52,7 +52,7 @@ const pussySubtypes = [
 
 // Read from first selected token as defaults
 const firstActor  = canvas.tokens.controlled[0].actor?.getWorldActor?.() ?? canvas.tokens.controlled[0].actor;
-const existing    = firstActor?.getFlag(FLAG, "genitalTypes") ?? {};
+const existing    = firstActor?.getFlag(FLAG, "anatomyFeatures") ?? {};
 const hasPussy    = firstActor?.getFlag(FLAG, "pussy") ?? false;
 const hasCock     = firstActor?.getFlag(FLAG, "cock")  ?? false;
 
@@ -123,14 +123,15 @@ const result = await foundry.applications.api.DialogV2.wait({
   },
 });
 
-if (!result) return;
+// DialogV2 quirk: Cancel resolves to the action string, not null.
+if (!result || typeof result !== "object") return;
 
 const names = [];
 for (const token of canvas.tokens.controlled) {
   const actor = token.actor?.getWorldActor?.() ?? token.actor;
   if (!actor) continue;
 
-  const genitalTypes = structuredClone(actor.getFlag(FLAG, "genitalTypes") ?? {});
+  const genitalTypes = structuredClone(actor.getFlag(FLAG, "anatomyFeatures") ?? {});
 
   genitalTypes["pussy"] = result.pussy;
   genitalTypes["cock"]  = result.cock;
@@ -148,7 +149,7 @@ for (const token of canvas.tokens.controlled) {
 
   await actor.setFlag(FLAG, "pussy",        result.pussy);
   await actor.setFlag(FLAG, "cock",         result.cock);
-  await actor.setFlag(FLAG, "genitalTypes", genitalTypes);
+  await actor.setFlag(FLAG, "anatomyFeatures", genitalTypes);
   names.push(actor.name);
 }
 

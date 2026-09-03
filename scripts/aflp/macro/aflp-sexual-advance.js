@@ -37,6 +37,36 @@
   const isSelf = !targets.length || (targets.length === 1 && targets[0].id === sourceToken.id);
 
   if (isSelf) {
+    // THE SOLO SCENE OPENS BEFORE THE AROUSAL LANDS, and the order used to be the
+    // other way round. AFLP_Arousal.increment's climax path has an explicit
+    // no-scene branch - "run the cum macro manually" - so a character already near
+    // their maximum was tipped over with no scene in existence, told to run the
+    // macro by hand, and only then dropped into the solo scene they had already
+    // climaxed outside of.
+    //
+    // Same defect as the one fixed in aflp-struggle-snuggle.js on 14 Aug 2026, and
+    // found by sweeping every AFLP_Arousal.increment call site for "is a scene
+    // opened AFTER this". The other sites are ambient - the Bitchsuit's hourly
+    // tick, Pain Slut on damage, Creature Fetish, Sticky Bomb, Armor of Hands -
+    // where there is no scene by design and the manual prompt is the right answer.
+    //
+    // Only the scene CREATION moved. The activity picker and the prose still run
+    // after, so the dialog does not gate the Arousal.
+    let soloScene = null;
+    if (AFLP.Settings.hsceneEnabled) {
+      const selfData = {
+        id: sourceToken.id, actorId: sourceActor.id,
+        name: sourceActor.name, img: sourceActor.img,
+        tokenDoc: sourceToken.document ?? null,
+      };
+      soloScene = AFLP.HScene._getSceneWhereTarget?.(sourceToken.id, sourceActor.id);
+      if (!soloScene) {
+        // fromSocket=true suppresses internal position prompt; we handle it below
+        AFLP.HScene.startScene(selfData, selfData, true);
+        soloScene = AFLP.HScene._getSceneWhereTarget?.(sourceToken.id, sourceActor.id);
+      }
+    }
+
     // Masturbation: source gains 1 Arousal
     if (AUTOMATE) {
       window._aflpMasturbationActor = sourceActor.id;
@@ -44,20 +74,7 @@
       window._aflpMasturbationActor = null;
     }
 
-    // Start or join a solo H-Scene for this actor
     if (AFLP.Settings.hsceneEnabled) {
-      const selfData = {
-        id: sourceToken.id, actorId: sourceActor.id,
-        name: sourceActor.name, img: sourceActor.img,
-        tokenDoc: sourceToken.document ?? null,
-      };
-      let soloScene = AFLP.HScene._getSceneWhereTarget?.(sourceToken.id, sourceActor.id);
-      if (!soloScene) {
-        // fromSocket=true suppresses internal position prompt; we handle it below
-        AFLP.HScene.startScene(selfData, selfData, true);
-        soloScene = AFLP.HScene._getSceneWhereTarget?.(sourceToken.id, sourceActor.id);
-      }
-
       // Show masturbation activity picker and log prose
       if (AFLP.Settings.positionTracking && window.AFLP?.HScene?._showMasturbationDialog) {
         const masturbChoice = await AFLP.HScene._showMasturbationDialog(sourceActor);
@@ -160,8 +177,14 @@
       { id: sourceToken.id, actorId: sourceActor.id, name: sourceActor.name, img: sourceActor.img, tokenDoc: sourceToken.document ?? null },
       { id: targetToken.id, actorId: targetActor.id, name: targetActor.name, img: targetActor.img, tokenDoc: targetToken.document ?? null }
     );
-    if (AFLP.Settings.proseFlavor) {
-      AFLP.HScene.generateAndShowProse(targetToken.id, "sexual-advance", sourceActor, targetActor);
+    // Log the Advance once, here, whichever prose mode is on. The block further
+    // down is skipped when saHandledScene is true, so exactly one entry lands.
+    if (AFLP.Settings.hsceneEnabled) {
+      if (AFLP.Settings.proseFlavor) {
+        AFLP.HScene.generateAndShowProse(targetToken.id, "sexual-advance", sourceActor, targetActor);
+      } else {
+        AFLP.HScene.addProse(targetToken.id, `${sourceActor.name} uses Sexual Advance on ${targetActor.name}`, "action");
+      }
     }
     window._aflpMacroHandlingPosition = false;
     saHandledScene = true;
@@ -197,10 +220,15 @@
   // ── H-Scene card prose ──
   if (AFLP.Settings.hsceneEnabled) {
     AFLP.HScene.triggerShake(targetId);
-    if (AFLP.Settings.proseFlavor) {
-      AFLP.HScene.generateAndShowProse(targetId, "sexual-advance", sourceActor, targetActor);
-    } else {
-      AFLP.HScene.addProse(targetId, `${sourceActor.name} uses Sexual Advance on ${targetActor.name}`, "action");
+    // An Advance that opened (or joined) the scene already posted its prose above,
+    // where startScene ran. Posting again here logged the same action twice for one
+    // Advance. saHandledScene was declared for exactly this guard and never read.
+    if (!saHandledScene) {
+      if (AFLP.Settings.proseFlavor) {
+        AFLP.HScene.generateAndShowProse(targetId, "sexual-advance", sourceActor, targetActor);
+      } else {
+        AFLP.HScene.addProse(targetId, `${sourceActor.name} uses Sexual Advance on ${targetActor.name}`, "action");
+      }
     }
   }
 
@@ -216,8 +244,30 @@
       sourceGain = await AFLP_Arousal.increment(sourceActor, 2, "Sexual Advance (self)", sourceToken.id);
       targetGain = sourceGain; // same result shown on both sides of the card
     } else {
-      sourceGain = await AFLP_Arousal.increment(sourceActor, 1, "Sexual Advance", sourceToken.id);
-      targetGain = await AFLP_Arousal.increment(targetActor, 1, "Sexual Advance", targetToken.id);
+      // Size Difference: an oversized partner in the hole intensifies the act.
+      // Shared engine (schema.js AFLP.sizeGapOnAct) - the same code path the DH
+      // Carnal funnel uses. Stuffed marks both sides an extra; Stretched/Ruined
+      // mark the receiver, bite once per hole per scene, and pin at gap 3.
+      const _arBefore = Number(AFLP.system?.getArousalCurrent?.(targetActor) ?? 0) || 0;
+      const _gap = await (AFLP.sizeGapOnAct?.(sourceActor, sourceToken.id, targetActor)
+        ?? { extraTarget: 0, extraSource: 0, scene: null });
+      // Cock (Girthy) rider: +1 to a Submitting target (+2 with Stretch King L5+).
+      const _girthy = AFLP.girthyArousalBonus?.(sourceActor, targetActor) ?? 0;
+      // Masturbating (self-absorbed): a target lost in self-pleasure is primed
+      // and open - a Sexual Advance lands +1 extra Arousal on them.
+      const _selfAbsorbed = AFLP.HScene?.isSelfAbsorbed?.(targetActor.id) ? 1 : 0;
+      sourceGain = await AFLP_Arousal.increment(sourceActor, 1 + (_gap.extraSource ?? 0), "Sexual Advance", sourceToken.id);
+      targetGain = await AFLP_Arousal.increment(targetActor, 1 + (_gap.extraTarget ?? 0) + _girthy + _selfAbsorbed, "Sexual Advance", targetToken.id);
+      // Size training bookkeeping: a climax under an oversized partner earns
+      // pips at scene end (arousal resets on climax, so after <= before with a
+      // positive mark means they came).
+      try {
+        const _arAfter = Number(AFLP.system?.getArousalCurrent?.(targetActor) ?? targetGain?.current ?? 0) || 0;
+        if (_gap.scene && _arAfter <= _arBefore && (1 + (_gap.extraTarget ?? 0)) > 0) {
+          _gap.scene.sizeClimaxed ??= {};
+          _gap.scene.sizeClimaxed[targetActor.id] = true;
+        }
+      } catch (e) { /* non-fatal */ }
     }
   }
 

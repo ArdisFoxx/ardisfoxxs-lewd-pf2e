@@ -5,10 +5,10 @@
 // Run once per actor or after schema updates.
 
 if (!window.AFLP) {
-  const schema = await fromUuid(
-    "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-macros.Macro.onWnuWJsqNZH96fn"
-  );
-  await schema?.execute();
+  // The module script defines window.AFLP at init; if it is missing the module
+  // is not active in this world - there is no macro to bootstrap it from.
+  ui.notifications.error("AFLR schema not loaded - enable the module and reload.");
+  return;
 }
 
 const FLAG = AFLP.FLAG_SCOPE;
@@ -64,7 +64,7 @@ for (const { actor } of tokens) {
   // Safely no-ops if cockTypes flag doesn't exist
   // --------------------------------------------------
   const oldCockTypes = worldActor.getFlag(FLAG, "cockTypes");
-  const genitalTypes = structuredClone(worldActor.getFlag(FLAG, "genitalTypes") ?? {});
+  const genitalTypes = structuredClone(worldActor.getFlag(FLAG, "anatomyFeatures") ?? {});
 
   if (oldCockTypes && typeof oldCockTypes === "object") {
     for (const [slug, val] of Object.entries(oldCockTypes)) {
@@ -75,7 +75,7 @@ for (const { actor } of tokens) {
       await worldActor.setFlag(FLAG, "cock", true);
       genitalTypes["cock"] = true;
     }
-    await worldActor.setFlag(FLAG, "genitalTypes", genitalTypes);
+    await worldActor.setFlag(FLAG, "anatomyFeatures", genitalTypes);
     await worldActor.unsetFlag(FLAG, "cockTypes");
   }
 
@@ -91,7 +91,7 @@ for (const { actor } of tokens) {
 
   if (genitalTypes["cock"]) await worldActor.setFlag(FLAG, "cock", true);
   if (genitalTypes["pussy"]) await worldActor.setFlag(FLAG, "pussy", true);
-  await worldActor.setFlag(FLAG, "genitalTypes", genitalTypes);
+  await worldActor.setFlag(FLAG, "anatomyFeatures", genitalTypes);
 
   // --------------------------------------------------
   // Position trait — detect from creature traits if not already set.

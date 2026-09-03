@@ -30,7 +30,7 @@
     el.id = STYLE_ID;
     el.textContent = `
       #${DOCK_ID} {
-        position: fixed; z-index: 99; width: 340px; max-height: 580px;
+        position: fixed; z-index: 99; width: 480px; max-height: 580px;
         overflow: auto; pointer-events: auto;
         background: var(--aflr-ground, #0f0b14);
         border: 1px solid var(--aflr-border-gold, rgba(244,183,76,0.35));

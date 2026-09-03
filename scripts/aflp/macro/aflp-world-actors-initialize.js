@@ -5,10 +5,10 @@
 // migrates legacy items and cockTypes flag, recalcs cum.
 
 if (!window.AFLP) {
-  const schema = await fromUuid(
-    "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-macros.Macro.onWnuWJsqNZH96fn"
-  );
-  await schema?.execute();
+  // The module script defines window.AFLP at init; if it is missing the module
+  // is not active in this world - there is no macro to bootstrap it from.
+  ui.notifications.error("AFLR schema not loaded - enable the module and reload.");
+  return;
 }
 
 const FLAG = AFLP.FLAG_SCOPE;
@@ -50,8 +50,8 @@ for (const actor of game.actors.contents) {
   await actor.setFlag(FLAG, "cock",   actor.getFlag(FLAG, "cock")   ?? false);
   await actor.setFlag(FLAG, "pussy",  actor.getFlag(FLAG, "pussy")  ?? false);
 
-  const genitalTypes = actor.getFlag(FLAG, "genitalTypes") ?? {};
-  await actor.setFlag(FLAG, "genitalTypes", genitalTypes);
+  const genitalTypes = actor.getFlag(FLAG, "anatomyFeatures") ?? {};
+  await actor.setFlag(FLAG, "anatomyFeatures", genitalTypes);
 
   await actor.setFlag(FLAG, "pregnancy",   actor.getFlag(FLAG, "pregnancy")   ?? {});
   await actor.setFlag(FLAG, "cumflation",  actor.getFlag(FLAG, "cumflation")  ?? structuredClone(AFLP.cumflationDefaults));
@@ -62,7 +62,7 @@ for (const actor of game.actors.contents) {
   // Safely no-ops if cockTypes doesn't exist
   // -------------------------------
   const oldCockTypes = actor.getFlag(FLAG, "cockTypes");
-  const currentGenitalTypes = structuredClone(actor.getFlag(FLAG, "genitalTypes") ?? {});
+  const currentGenitalTypes = structuredClone(actor.getFlag(FLAG, "anatomyFeatures") ?? {});
 
   if (oldCockTypes && typeof oldCockTypes === "object") {
     for (const [slug, val] of Object.entries(oldCockTypes)) {
@@ -72,7 +72,7 @@ for (const actor of game.actors.contents) {
       await actor.setFlag(FLAG, "cock", true);
       currentGenitalTypes["cock"] = true;
     }
-    await actor.setFlag(FLAG, "genitalTypes", currentGenitalTypes);
+    await actor.setFlag(FLAG, "anatomyFeatures", currentGenitalTypes);
     await actor.unsetFlag(FLAG, "cockTypes");
   }
 
@@ -99,7 +99,7 @@ for (const actor of game.actors.contents) {
   // -------------------------------
   // Legacy compendium item → genitalTypes migration
   // -------------------------------
-  const latestGenitalTypes = structuredClone(actor.getFlag(FLAG, "genitalTypes") ?? {});
+  const latestGenitalTypes = structuredClone(actor.getFlag(FLAG, "anatomyFeatures") ?? {});
   let genitalTypesChanged = false;
 
   for (const [slug, uuid] of Object.entries(GENITAL_TYPE_ITEMS)) {
@@ -114,7 +114,7 @@ for (const actor of game.actors.contents) {
   if (genitalTypesChanged) {
     if (latestGenitalTypes["cock"])  await actor.setFlag(FLAG, "cock", true);
     if (latestGenitalTypes["pussy"]) await actor.setFlag(FLAG, "pussy", true);
-    await actor.setFlag(FLAG, "genitalTypes", latestGenitalTypes);
+    await actor.setFlag(FLAG, "anatomyFeatures", latestGenitalTypes);
   }
 
   // -------------------------------

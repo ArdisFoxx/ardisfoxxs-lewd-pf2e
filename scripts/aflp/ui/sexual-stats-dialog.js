@@ -1,6 +1,30 @@
 // ============================================
 // AFLP Sexual Stats & Pregnancy UI (World Actor Version)
 // ============================================
+//
+// DO NOT DELETE THIS FILE. It has no user-facing entry point and it is still
+// load-bearing. Those two facts together are why this warning exists.
+//
+// The `AFLR Sexual Stats` macro that used to open this dialog was retired on
+// 7 August 2026 - it predated the sheet system, which now shows the same numbers.
+// Nothing in the shipped code opens the dialog any more, so a sweep for dead UI
+// will find this file unreferenced as UI and it looks safe to remove. It is not.
+//
+// `AFLP.UI.SexualStatsDialog` is the read/write layer for an actor's lifetime
+// sexual stats, and `aflp-cum.js` uses it as a DATA object rather than a dialog -
+// 21 call sites. It constructs one per resolution, calls `.load()`, mutates
+// `.sexual.lifetime` (mlReceived, cumReceived, per-hole counts, gangbang), and
+// writes the result back through the batched `flags.world.sexual` update at the
+// end of the macro. `cumflation.js` `applyCumflation` takes the same object as its
+// `sexualStatsDialog` parameter and mutates it in place.
+//
+// Deleting this file, or trimming the class down to "just the dialog parts",
+// breaks every cum resolution in the module and does it silently - the mutations
+// would land on nothing and the lifetime totals would simply stop moving.
+//
+// If the data layer is ever worth separating from the dialog, that is a real
+// refactor: move `.sexual` load/mutate/save into schema.js and repoint all 21
+// call sites first. Do not start by deleting.
 
 if (!window.AFLP) throw new Error("AFLP schema not loaded");
 if (!window.AFLP_Pregnancy) window.AFLP_Pregnancy = {};
@@ -31,6 +55,43 @@ window.AFLP_Pregnancy = {
     };
     await worldActor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
 
+    // Lifetime counters behind the breeding titles. Neither was ever written:
+    // timesImpregnated existed only as a default of 0 (so baby-maker,
+    // brood-mother and perpetually-pregnant could never award) and maxLitterSize
+    // was never recorded at all (litter-bearer). System-agnostic - every system
+    // reaches this path.
+    try {
+      const sx = structuredClone(worldActor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {});
+      sx.lifetime = sx.lifetime ?? {};
+      sx.lifetime.timesImpregnated = (sx.lifetime.timesImpregnated ?? 0) + 1;
+      sx.lifetime.maxLitterSize = Math.max(sx.lifetime.maxLitterSize ?? 0, Number(offspring) || 0);
+      // Monster Mommy: carried a pregnancy from a monster/creature source. A
+      // monster is any non-player-owned actor that is not a PC. The old check
+      // gated on type === "npc", which is right for PF2e/5e but MISSES Daggerheart,
+      // where monsters are type "adversary" - so DH breeders never counted. Test
+      // the general shape instead: not a character, and not player-owned.
+      if (partner && partner.type !== "character" && !partner.hasPlayerOwner) {
+        sx.lifetime.hasMonsterPregnancy = true;
+      }
+      // Flag the active scene so The Hookup (no-pregnancy encounters) can tell a
+      // pregnancy happened this scene and skip the increment at close.
+      try {
+        const sc = globalThis.AFLP?.HScene?.sceneForActor?.(worldActor.id);
+        if (sc) sc._pregnancyThisScene = true;
+      } catch (e) { /* non-fatal */ }
+      await worldActor.setFlag(AFLP.FLAG_SCOPE, "sexual", sx);
+      globalThis.AFLP_Titles?.checkAndAward?.(worldActor)?.catch?.(() => {});
+      // Top-side credit: the partner bred this actor. Only a real actor gets
+      // credited (some callers pass a plain descriptor object with no id/flags).
+      // System-agnostic - every system reaches addPregnancy. offspringSired
+      // counts the whole litter; partnersBred counts the pregnancy.
+      const breeder = partner?.getWorldActor?.() ?? (partner?.id ? partner : null);
+      if (breeder && typeof breeder.getFlag === "function" && breeder.id !== worldActor.id) {
+        await AFLP.bumpLifetime(breeder, "partnersBred", 1);
+        await AFLP.bumpLifetime(breeder, "offspringSired", Number(offspring) || 0);
+      }
+    } catch (e) { console.warn("AFLP | pregnancy lifetime counters:", e?.message); }
+
     // Brood Sow: apply Endurance (unlimited duration) on becoming pregnant
     if (AFLP.Settings.automation && AFLP.Kinks?.applyBroodSowEndurance) {
       await AFLP.Kinks.applyBroodSowEndurance(worldActor);
@@ -51,23 +112,100 @@ window.AFLP_Pregnancy = {
     return 30;
   },
 
+  // ── Effective Fertility (staged 0-3) ─────────────────────────────────────
+  // One truth for every breeding reader. Raw fertility is the HIGHEST of:
+  // the "breeding" condition value (absent = the implicit default 1; present
+  // without a value = legacy potion semantics, treated as 3), the anatomy
+  // stage (Breeder genitals 3, Fertile genitals 2, from the depositing cock
+  // types and the bearer's own pussy), and 3 while a Potion of Breeding
+  // effect is present. Birth Control subtracts one per stage (a legacy
+  // valueless birth-control condition counts as 3, preserving the old
+  // absolute block), floored at 0.
+  // Stages: 0 no pregnancy ever / 1 normal Brood Roll / 2 DC -2 /
+  // 3 no roll, occupancy gate overridden, gestation shortened.
+  //
+  // BOTH MATES FEED THIS, which is what the Fertility card says: "The highest
+  // Fertility between the two mates governs the roll. Birth Control on either mate
+  // reduces the roll's effective Fertility by its value, to a minimum of 0."
+  //
+  // Before 14 Aug 2026 only the BEARER's conditions were read. The sire's anatomy
+  // arrived through `cockTypes` and nothing else about them did, so a sire's own
+  // Fertility condition, their Potion of Breeding and - the reason Ardis raised it -
+  // their BIRTH CONTROL were all ignored. A sire on contraception bred normally.
+  //
+  // BOTH SIDES USE MAX, deliberately and symmetrically: the highest Fertility
+  // governs, and the highest Birth Control reduces. The card's "on either mate"
+  // does not say what happens when both are covered; summing two stage-1 Birth
+  // Controls would take a Fertility-3 pairing to 1 where each alone leaves 2, which
+  // reads as a stacking rule the card does not state. FLAG FOR REDLINE if the
+  // intent is additive.
+  //
+  // `partner` is optional and the shape is unchanged without it, so a caller that
+  // only knows one actor - the sheet's own display - still gets that actor's view.
+  effectiveFertility: (actor, { cockTypes = {}, hasPotion = false, partner = null } = {}) => {
+    // The Potion of Breeding says "You count as Fertility 3 while this effect
+    // lasts", so it has to be visible for the PARTNER too, not just for whoever
+    // the caller happened to check. Asked by aflrKey rather than by uuid: a DH or
+    // 5e copy of the effect resolves to a different uuid and carries no slug.
+    const _potion = (a) => {
+      try {
+        return !!a?.items?.some?.(i =>
+          AFLP.itemHasKey?.(i, "potion-of-breeding-effect") ||
+          AFLP.itemHasKey?.(i, "potion-of-breeding-effect-permanent"));
+      } catch (e) { return false; }
+    };
+    // One mate's contribution to the raw stage. cockTypes belongs to whoever is
+    // depositing and is folded in once, at the top.
+    const _rawOf = (a, potion) => {
+      if (!a) return 0;
+      const gen = a.getFlag?.(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {};
+      const condVal = Number(AFLP.cond?.value?.(a, "breeding") ?? 0);
+      // Absent means the implicit default 1; present-without-a-value is legacy
+      // potion semantics and means 3.
+      const condStage = condVal > 0 ? condVal : (AFLP.cond?.has?.(a, "breeding") ? 3 : 1);
+      const anatomyStage =
+        (gen["pussy-breeder"] || gen["ass-breeder"] || gen["cock-breeder"]) ? 3 :
+        (gen["pussy-fertile"] || gen["ass-fertile"] || gen["cock-fertile"]) ? 2 : 0;
+      return Math.max(condStage, anatomyStage, potion ? 3 : 0);
+    };
+    // A legacy valueless birth-control condition counts as 3, preserving the old
+    // absolute block.
+    const _bcOf = (a) => {
+      if (!a) return 0;
+      const v = Number(AFLP.cond?.value?.(a, "birth-control") ?? 0);
+      return v > 0 ? v : (AFLP.cond?.has?.(a, "birth-control") ? 3 : 0);
+    };
+
+    const cockStage =
+      (cockTypes["cock-breeder"]) ? 3 :
+      (cockTypes["cock-fertile"]) ? 2 : 0;
+    const raw = Math.max(1,
+      _rawOf(actor, hasPotion || _potion(actor)),
+      _rawOf(partner, _potion(partner)),
+      cockStage);
+    const bc = Math.max(_bcOf(actor), _bcOf(partner));
+    return { stage: Math.max(0, raw - bc), raw, bc };
+  },
+
   attemptImpregnation: async (targetActor, sourceActor, cockTypes, hasPotionOfBreeding) => {
-    // Birth control blocks ALL impregnation. On PF2e it is an effect item the cum
-    // macro already checks; here we also honor the AFLR "birth-control" condition,
-    // which is the cross-system path - Daggerheart consumables can't run code, so
-    // the Elixir of Birth Control sets the condition from the sheet. The load has
-    // already deposited upstream; only the Brood Roll / impregnation is cancelled.
-    if (AFLP.cond?.has?.(targetActor, "birth-control")) {
+    // Staged fertility model: compute the effective stage once and route every
+    // decision through it. Stage 0 (Birth Control at or above raw Fertility)
+    // blocks the pregnancy outright - the load has already deposited upstream;
+    // only the Brood Roll / impregnation is cancelled.
+    const eff = AFLP_Pregnancy.effectiveFertility(targetActor, {
+      cockTypes: cockTypes ?? {}, hasPotion: !!hasPotionOfBreeding,
+      partner: sourceActor ?? null,     // both mates govern - see effectiveFertility
+    });
+    if (eff.stage <= 0) {
       ChatMessage.create({
         speaker: ChatMessage.getSpeaker({ actor: targetActor }),
         content: `<em>${targetActor.name} is protected by birth control - no pregnancy takes.</em>`,
       });
       return null;
     }
-    // Breeding overrides the occupancy gate (and shortens gestation below), so a
-    // bearer can take a new pregnancy while already carrying. Driven by a PF2e
-    // Potion of Breeding (passed in) OR the AFLR "breeding" condition from the sheet.
-    const breeding = !!hasPotionOfBreeding || !!AFLP.cond?.has?.(targetActor, "breeding");
+    // Fertility 3 overrides the occupancy gate (and shortens gestation below),
+    // so the bearer can take a new pregnancy while already carrying.
+    const breeding = eff.stage >= 3;
 
     // Occupancy gate (uniform across every game system): a bearer already
     // carrying an active pregnancy takes no new one unless Pregnancy Stacking is
@@ -87,7 +225,7 @@ window.AFLP_Pregnancy = {
         return null;
       }
     }
-    return AFLP_Pregnancy._broodRollImpregnation(targetActor, sourceActor, cockTypes ?? {}, breeding);
+    return AFLP_Pregnancy._broodRollImpregnation(targetActor, sourceActor, cockTypes ?? {}, eff.stage);
   },
 
   // Brood Roll - the shared breeding resolution for every system. The depositor's
@@ -100,39 +238,65 @@ window.AFLP_Pregnancy = {
   //   a Clutch bearer auto-crits. Offspring = S x type die (standard 1, litter 1d4,
   //   eggs 3d4).
   _broodRollImpregnation: async (targetActor, sourceActor, cockTypes, breeding = false) => {
+    // 4th param: the effective Fertility stage (0-3). A legacy boolean true is
+    // accepted and means stage 3; a boolean false recomputes from the actors.
+    const fertStage = breeding === true ? 3
+      : (typeof breeding === "number" ? breeding
+      : AFLP_Pregnancy.effectiveFertility(targetActor, { cockTypes: cockTypes ?? {}, partner: sourceActor ?? null }).stage);
     const SCOPE = AFLP.FLAG_SCOPE;
     const tSexual = targetActor.getFlag(SCOPE, "sexual") ?? {};
     const hasBroodSow = !!(tSexual.kinks ?? {})["brood-sow"];
-    const tGen = targetActor.getFlag(SCOPE, "genitalTypes") ?? {};
+    const tGen = targetActor.getFlag(SCOPE, "anatomyFeatures") ?? {};
 
     const isOvi      = !!cockTypes["cock-ovidepositor"];
-    const isLitter   = !!cockTypes["cock-litter"]  || !!tGen["pussy-litter"];
+    const isLitter   = !!cockTypes["cock-litter"]  || !!tGen["pussy-litter"] || !!tGen["ass-litter"];
     const hasBreeder = !!cockTypes["cock-breeder"] || !!tGen["pussy-breeder"];
-    const hasFertile = !!cockTypes["cock-fertile"] || !!tGen["pussy-fertile"];
-    const hasClutch  = !!tGen["pussy-clutch"];
-    const type = isOvi ? "ovidepositor" : isLitter ? "litter" : "standard";
-    const deliveryType = type === "ovidepositor" ? "egg" : "live";
+    const hasFertile = !!cockTypes["cock-fertile"] || !!tGen["pussy-fertile"] || !!tGen["ass-fertile"];
+    const hasClutch  = !!tGen["pussy-clutch"] || !!tGen["ass-clutch"];
+    let type = isOvi ? "ovidepositor" : isLitter ? "litter" : "standard";
+    // Size Difference MASTERY: a pregnancy taken from a sire at least one body
+    // size larger comes out one brood step bigger (standard -> litter ->
+    // ovidepositor). The bearer's stretched-open body quickens a bigger brood.
+    try {
+      const sdTier = (tSexual.kinks ?? {})["size-difference"]
+        ? (AFLP.getKinkTier?.(targetActor, "size-difference") ?? 0) : 0;
+      if (sdTier >= 3 && sourceActor
+          && AFLP.bodySizeSteps(sourceActor) >= AFLP.bodySizeSteps(targetActor) + 1) {
+        type = type === "standard" ? "litter" : "ovidepositor";
+      }
+    } catch (e) { /* non-fatal */ }
+    // Clutch converts ANY pregnancy into an egg clutch: whatever quickens in a
+    // brood-sac womb is incubated and laid as eggs, regardless of the sire's
+    // cock type. Offspring count still follows the sire's anatomy dice
+    // (standard 1 / litter 1d4 / ovi 3d4 per S); only the delivery form and
+    // the laying term (clutch: 3 days) change.
+    const deliveryType = (type === "ovidepositor" || hasClutch) ? "egg" : "live";
 
-    const dc = 11 - (hasFertile ? 2 : 0);
+    const dc = 11 - (fertStage >= 2 ? 2 : 0);
 
-    // Breeder always auto-crits; a Clutch bearer auto-crits an egg-laying.
-    const autoCrit = hasBreeder || (hasClutch && isOvi);
+    // Fertility 3 auto-crits (Breeder anatomy, Potion of Breeding, or a
+    // GM-set stage - Birth Control can subtract it back down to a real roll);
+    // a Clutch bearer auto-crits an egg-laying.
+    const autoCrit = fertStage >= 3 || (hasClutch && isOvi);
     let degree, detail;
     if (autoCrit) {
       degree = "crit";
-      detail = hasBreeder ? "<em>Breeder - automatic critical success.</em>" : "<em>Clutch - the laying takes as a critical success.</em>";
+      detail = fertStage >= 3 ? "<em>Fertility 3 - the breeding simply takes: automatic critical success.</em>" : "<em>Clutch - the laying takes as a critical success.</em>";
     } else {
       const r = await (AFLP.system?.rollBrood?.(dc) ?? (async () => {
         const roll = await new Roll("1d20").evaluate();
         const nat = roll.dice?.[0]?.results?.[0]?.result ?? roll.total;
         const d = nat === 1 ? "safe" : nat === 20 ? "crit" : roll.total >= dc ? "success" : "fail";
-        return { degree: d, detail: `Roll <strong>${roll.total}</strong> vs Brood DC ${dc}` };
+        return { degree: d, detail: `Roll <strong>${roll.total}</strong> vs Brood ${AFLP.system?.dcWord ?? "DC"} ${dc}` };
       })());
       degree = r.degree; detail = r.detail;
     }
 
     let S = degree === "crit" ? 2 : degree === "success" ? 1 : 0;
-    if (hasBroodSow && (degree === "success" || degree === "crit")) S += 1;
+    // Brood Sow adds to the success count BEFORE the anatomy dice (journal
+    // rule), scaled by beat: Signature +1 / Greater +2 / Mastery +3.
+    const broodSowBonus = hasBroodSow ? Math.max(1, AFLP.getKinkTier?.(targetActor, "brood-sow") ?? 1) : 0;
+    if (broodSowBonus && (degree === "success" || degree === "crit")) S += broodSowBonus;
 
     // Safe day: no pregnancy, and the bearer is protected until their next daily
     // preparations (pf2e) / long rest (Daggerheart).
@@ -153,11 +317,16 @@ window.AFLP_Pregnancy = {
     ChatMessage.create({
       speaker: ChatMessage.getSpeaker({ actor: targetActor }),
       content: `<div class="aflp-chat-card"><p><strong>Brood Roll</strong> - ${sourceActor.name} breeds ${targetActor.name}</p>`
-        + `<p>${detail} - <strong>${outcome}</strong>${hasBroodSow && S > 0 ? " <em>(Brood Sow +1)</em>" : ""}</p>`
+        + `<p>${detail} - <strong>${outcome}</strong>${broodSowBonus && S > 0 ? ` <em>(Brood Sow +${broodSowBonus})</em>` : ""}</p>`
         + (degree === "safe"
             ? `<p>A safe day - the seed does not take, and ${targetActor.name} is protected by birth control until their next daily preparations.</p>`
             : S > 0
-              ? `<p>${targetActor.name} is bred: <strong>${offspring}</strong> ${word}${type !== "standard" ? ` <em>(${type})</em>` : ""}.</p>`
+              ? `<p>${targetActor.name} is bred: <strong>${offspring}</strong> ${word}${(() => {
+                  const notes = [];
+                  if (type !== "standard") notes.push(type);
+                  if (hasClutch && type !== "ovidepositor") notes.push("clutch - laid as eggs");
+                  return notes.length ? ` <em>(${notes.join("; ")})</em>` : "";
+                })()}.</p>`
               : `<p>The seed does not take this time.</p>`)
         + `</div>`,
     });
@@ -165,7 +334,7 @@ window.AFLP_Pregnancy = {
     if (S <= 0 || offspring <= 0) return null;
     const gestationDays = deliveryType === "egg"
       ? (hasClutch ? 3 : 9)
-      : (breeding || hasBreeder) ? 11 : AFLP_Pregnancy._youngGestation(sourceActor);
+      : fertStage >= 3 ? 11 : AFLP_Pregnancy._youngGestation(sourceActor);
     return await AFLP_Pregnancy.addPregnancy(targetActor, {
       partner: sourceActor,
       gestationTotal: gestationDays,
@@ -179,43 +348,10 @@ window.AFLP_Pregnancy = {
     await worldActor.setFlag(AFLP.FLAG_SCOPE, "pregnancy", pregnancies);
   },
 
-  rollLiveBirth: async (actor = null) => {
-    let count = 1;
-    let hasBroodSow = false;
-    let level = 0;
-
-    if (actor) {
-      const sexual = actor.getFlag(AFLP.FLAG_SCOPE, "sexual") ?? {};
-      const kinks = sexual.kinks ?? {};
-      hasBroodSow = !!kinks["brood-sow"];
-      level = actor.system?.details?.level?.value ?? 0;
-    }
-
-    while (true) {
-      const roll = await new Roll("1d6").evaluate();
-      const explode =
-        roll.total === 6 ||
-        (hasBroodSow && roll.total >= 5) ||
-        (hasBroodSow && level >= 3 && roll.total >= 4) ||
-        (hasBroodSow && level >= 7 && roll.total >= 3);
-      if (explode) { count++; } else { break; }
-    }
-
-    return count;
-  },
-
-  rollExploding2D4: async () => {
-    let dice = 2;
-    let result = [];
-    while (true) {
-      const r = await new Roll(`${dice}d4`).evaluate();
-      const faces = r.dice[0].results.map(x => x.result);
-      result.push(...faces);
-      if (faces.every(x => x === 4)) dice += 2;
-      else break;
-    }
-    return result.reduce((a, b) => a + b, 0);
-  },
+  // (The old exploding-d6 birth rolls lived here. The Brood Roll chapter's
+  // d20 degree system - implemented in _broodRollImpregnation above - replaced
+  // them entirely; they were dead code with zero callers and were removed so
+  // the retired system cannot regress back into use.)
 
   recordBirth: async (actor, pregId, { suppressChat = false } = {}) => {
     const worldActor = actor.getWorldActor?.() ?? actor;
@@ -225,6 +361,20 @@ window.AFLP_Pregnancy = {
     if (!preg) return;
     preg.gestationRemaining = "Complete";
     await worldActor.setFlag(FLAG, "pregnancy", pregnancies);
+
+    // Lifetime breeding flags for titles: an egg delivery unlocks Egg Layer; an
+    // egg delivery by a clutch-bearer (pussy-clutch) unlocks Clutch Mother.
+    try {
+      if (preg.deliveryType === "egg") {
+        const sexual = structuredClone(worldActor.getFlag(FLAG, "sexual") ?? {});
+        sexual.lifetime = sexual.lifetime ?? {};
+        sexual.lifetime.hasLaidEggs = true;
+        const _cbAF = worldActor.getFlag(FLAG, "anatomyFeatures") ?? {};
+        const isClutchBearer = !!_cbAF["pussy-clutch"] || !!_cbAF["ass-clutch"];
+        if (isClutchBearer) sexual.lifetime.hasDeliveredClutch = true;
+        await worldActor.setFlag(FLAG, "sexual", sexual);
+      }
+    } catch (e) { /* non-fatal */ }
 
     // Brood Sow: remove Endurance if no active pregnancies remain
     if (AFLP.Settings.automation && AFLP.Kinks?.applyBroodSowEndurance) {
@@ -268,11 +418,12 @@ AFLP.UI.SexualStatsDialog.prototype.load = async function() {
   this.hasPussy = !!(await this.actor.getFlag(this.FLAG, "pussy"));
   this.hasCock = !!(await this.actor.getFlag(this.FLAG, "cock"));
 
-  const savedGenitalTypes = structuredClone(await this.actor.getFlag(this.FLAG, "genitalTypes") ?? {});
+  const savedGenitalTypes = structuredClone(await this.actor.getFlag(this.FLAG, "anatomyFeatures") ?? {});
   this.genitalTypes = {};
-  for (const slug of Object.keys(AFLP.genitalTypes)) {
+  for (const slug of Object.keys(AFLP.anatomyFeatures)) {
     this.genitalTypes[slug] = !!savedGenitalTypes[slug];
   }
+  this.hasTits = !!this.genitalTypes["tits"];
 
   this.kinks = {};
   for (const slug of Object.keys(AFLP.kinks)) {
@@ -444,52 +595,93 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
     // uuid), fall back to the registry uuid on other systems, else plain text so
     // a missing item never renders a broken @UUID link.
     const gLink = async (slug, data) => {
+      // RESOLUTION, not system name. contentUuid falls through to the canonical
+      // PF2e uuid when this system's index has no entry, so it can hand back a
+      // TRUTHY string pointing into an unloaded pack - the documented trap. Both
+      // candidates are therefore tested with uuidIsReal, and the label falls back
+      // to plain text. Measured 11 Aug 2026 on Daggerheart: 16 of the 67 anatomy
+      // rows carry a hardcoded PF2e uuid that is dead there, and every one is
+      // saved by the system index. On a world with no anatomy items at all the
+      // index cannot save them, and the old `system.id !== "daggerheart"` gate
+      // would have rendered a broken link rather than the name.
       const enrich = (u) => foundry.applications.ux.TextEditor.implementation.enrichHTML(`@UUID[${u}]{${data.name}}`);
       const sysUuid = AFLP.system?.contentUuid?.(slug) ?? null;
-      if (sysUuid) return await enrich(sysUuid);
-      if (game.system?.id !== "daggerheart" && data?.uuid) return await enrich(data.uuid);
+      const live = [sysUuid, data?.uuid].find(u => u && AFLP.uuidIsReal?.(u)) ?? null;
+      if (live) return await enrich(live);
       return `<span>${data.name}</span>`;
     };
     const subtypesOf = async (parent) => (await Promise.all(
-      Object.entries(AFLP.genitalTypes)
+      Object.entries(AFLP.anatomyFeatures)
         .filter(([slug, data]) => data.parent === parent && this.genitalTypes[slug])
         .sort((a, b) => a[1].name.localeCompare(b[1].name))
         .map(async ([slug, data]) => `<li style="margin-left:14px">${await gLink(slug, data)}</li>`)
     )).filter(Boolean);
 
     if (this.hasPussy) {
-      genitals.push(`<li>${await gLink("pussy", AFLP.genitalTypes["pussy"])}</li>`);
+      genitals.push(`<li>${await gLink("pussy", AFLP.anatomyFeatures["pussy"])}</li>`);
       genitals.push(...await subtypesOf("pussy"));
     }
 
     if (this.hasCock) {
-      genitals.push(`<li>${await gLink("cock", AFLP.genitalTypes["cock"])}</li>`);
+      genitals.push(`<li>${await gLink("cock", AFLP.anatomyFeatures["cock"])}</li>`);
       genitals.push(...await subtypesOf("cock"));
+    }
+
+    if (this.hasTits) {
+      genitals.push(`<li>${await gLink("tits", AFLP.anatomyFeatures["tits"])}</li>`);
+      genitals.push(...await subtypesOf("tits"));
     }
 
     genitalSection = `<div class="aflp-col-section"><b>Genitalia</b>${genitals.length ? `<ul style="margin:4px 0 0 0;padding-left:16px">${genitals.join("")}</ul>` : `<div style="color:#888">None</div>`}</div>`;
 
   } else {
-    const cockSubtypeHtml = Object.entries(AFLP.genitalTypes)
-      .filter(([slug, data]) => data.parent === "cock")
+    const subtypeHtmlFor = (parent) => Object.entries(AFLP.anatomyFeatures)
+      .filter(([slug, data]) => data.parent === parent)
       .sort((a, b) => a[1].name.localeCompare(b[1].name))
       .map(([slug, data]) => {
         const checked = this.genitalTypes[slug] ? "checked" : "";
         return `<div style="margin-bottom:2px;margin-left:14px"><label><input type="checkbox" name="genitalType-${slug}" ${checked}/> ${data.name}</label></div>`;
       }).join("");
+    const pussySubtypeHtml = subtypeHtmlFor("pussy");
+    const cockSubtypeHtml  = subtypeHtmlFor("cock");
+    const titsSubtypeHtml  = subtypeHtmlFor("tits");
+    const throatSubtypeHtml = subtypeHtmlFor("throat");
+    // Silhouette auto-picks from anatomy (cock-only reads male, else female) and can
+    // be flipped by hand - no gender field needed.
+    const _silh = this.actor?.getFlag?.(AFLP.FLAG_SCOPE, "dollSilhouette")
+      ?? ((this.hasCock && !this.hasPussy) ? "Male" : "Female");
+    const _hot = _silh === "Monster"
+      ? { mouth: "12%", chest: "48%", crotch: "75%" }
+      : { mouth: "8%",  chest: "28%", crotch: "54%" };
+    const SIL = (g) => `modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/Silhouette${g}.png`;
 
     genitalSection = `
       <div class="aflp-col-section">
-        <b>Genitalia</b>
-        <div style="margin-top:4px">
-          <div style="margin-bottom:4px">
-            <label><input type="checkbox" name="pussy" ${this.hasPussy ? "checked" : ""}/> <strong>Pussy</strong></label>
+        <b>Anatomy</b>
+        <div class="aflp-doll-wrap">
+          <div class="aflp-doll" id="aflp-doll" data-silh="${_silh}" style="background-image:url('${SIL(_silh)}')">
+            <button type="button" class="aflp-doll-hot" data-region="mouth"  style="top:${_hot.mouth}"  title="Mouth / Throat"></button>
+            <button type="button" class="aflp-doll-hot" data-region="chest"  style="top:${_hot.chest}" title="Chest / Tits"></button>
+            <button type="button" class="aflp-doll-hot active" data-region="crotch" style="top:${_hot.crotch}" title="Genitals"></button>
+            <button type="button" class="aflp-doll-flip" data-action="flip-silh" title="Flip silhouette">&#8646;</button>
           </div>
-          <div style="margin-bottom:2px">
-            <label><input type="checkbox" name="cock" id="aflp-cock-checkbox" ${this.hasCock ? "checked" : ""}/> <strong>Cock</strong></label>
-          </div>
-          <div id="aflp-cock-subtypes" style="${this.hasCock ? "" : "display:none;"}">
-            ${cockSubtypeHtml}
+          <div class="aflp-doll-slots">
+            <div class="aflp-doll-panel" data-region="crotch">
+              <div class="aflp-doll-panel-h">Genitals</div>
+              <label><input type="checkbox" name="pussy" id="aflp-pussy-checkbox" ${this.hasPussy ? "checked" : ""}/> <strong>Pussy</strong></label>
+              <div id="aflp-pussy-subtypes" style="${this.hasPussy ? "" : "display:none"}">${pussySubtypeHtml}</div>
+              <label><input type="checkbox" name="cock" id="aflp-cock-checkbox" ${this.hasCock ? "checked" : ""}/> <strong>Cock</strong></label>
+              <div id="aflp-cock-subtypes" style="${this.hasCock ? "" : "display:none"}">${cockSubtypeHtml}</div>
+            </div>
+            <div class="aflp-doll-panel" data-region="chest" style="display:none">
+              <div class="aflp-doll-panel-h">Chest</div>
+              <label><input type="checkbox" name="tits" id="aflp-tits-checkbox" ${this.hasTits ? "checked" : ""}/> <strong>Tits</strong></label>
+              <div id="aflp-tits-subtypes" style="${this.hasTits ? "" : "display:none"}">${titsSubtypeHtml}</div>
+            </div>
+            <div class="aflp-doll-panel" data-region="mouth" style="display:none">
+              <div class="aflp-doll-panel-h">Mouth / Throat</div>
+              ${throatSubtypeHtml || `<div class="aflp-doll-empty">No throat features yet</div>`}
+            </div>
           </div>
         </div>
       </div>`;
@@ -514,30 +706,54 @@ AFLP.UI.SexualStatsDialog.prototype._renderContent = async function() {
       .aflp-two-col{display:flex;gap:16px;margin-bottom:10px;}
       .aflp-col-section{flex:1;min-width:0;}
       .aflp-col-section b{display:block;margin-bottom:2px;}
+      .aflp-subtabs{display:flex;gap:2px;border-bottom:2px solid var(--color-border-dark,#666);margin-bottom:10px;}
+      .aflp-subtab{flex:1;padding:5px 8px;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;cursor:pointer;font-weight:600;opacity:.55;line-height:1.2;}
+      .aflp-subtab.active{opacity:1;border-bottom-color:var(--color-warm-2,#aa2222);}
+      .aflp-subpanel{min-height:60px;}
+      .aflp-doll-wrap{display:flex;gap:12px;margin-top:6px;align-items:flex-start;}
+      /* Doll art standardized at 836x1908; box locked to the art ratio. */
+      .aflp-doll{position:relative;width:150px;aspect-ratio:836 / 1908;height:auto;background-size:contain;background-repeat:no-repeat;background-position:center top;flex:none;}
+      .aflp-doll-hot{position:absolute;left:50%;transform:translateX(-50%);width:46px;height:40px;border:2px dashed rgba(200,60,90,.45);border-radius:50%;background:rgba(200,60,90,.06);cursor:pointer;padding:0;}
+      .aflp-doll-hot:hover{background:rgba(200,60,90,.16);}
+      .aflp-doll-hot.active{border-style:solid;border-color:#c8385a;background:rgba(200,60,90,.22);}
+      .aflp-doll-flip{position:absolute;bottom:0;left:50%;transform:translateX(-50%);border:none;background:rgba(0,0,0,.18);border-radius:4px;cursor:pointer;font-size:13px;padding:1px 7px;}
+      .aflp-doll-slots{flex:1;min-width:0;border-left:1px solid rgba(150,150,150,.3);padding-left:10px;}
+      .aflp-doll-panel-h{font-weight:700;margin-bottom:4px;border-bottom:1px solid rgba(150,150,150,.25);padding-bottom:2px;}
+      .aflp-doll-panel label{display:block;margin-bottom:3px;}
+      .aflp-doll-empty{color:#888;font-style:italic;font-size:12px;}
     </style>
 
-    <div class="aflp-section">
-      <b>Cum:</b> ${this.cum.current}/${this.cum.max}
-      ${this.view === "adjust" ? `<br><label style="margin-top:4px;display:inline-block;margin-right:10px">Loads: <input name="coomer" type="number" value="${this.coomer.level}" style="width:50px"/></label><label style="margin-top:4px;display:inline-block">Cum Shot +: <input name="cumShotBonus" type="number" value="${this.cumShotBonus}" style="width:50px"/></label><br><span style="font-size:11px;opacity:.7">Per shot ${AFLP.cumPerShot(this.actor)} \u00d7 ${AFLP.effectiveLoads(this.actor)} loads (worn gear included)</span>` : ""}
-    </div>
+    <nav class="aflp-subtabs">
+      <button type="button" class="aflp-subtab active" data-tab="anatomy">Anatomy</button>
+      <button type="button" class="aflp-subtab" data-tab="kinks">Kinks</button>
+      <button type="button" class="aflp-subtab" data-tab="stats">Stats</button>
+    </nav>
 
-    <div class="aflp-section">
-      <b>Lifetime Totals</b>
-      ${lifetimeTable}
-    </div>
-
-    <div class="aflp-two-col">
-      ${kinkSection}
+    <div class="aflp-subpanel" data-panel="anatomy">
       ${genitalSection}
+      ${this.hasPussy ? `
+      <div class="aflp-section" style="margin-top:10px">
+        <b>Pregnancy</b>
+        ${pregRows
+          ? `<table class="aflp-table"><tr><th>Source</th><th>Type</th><th>Number</th><th>Gestation</th></tr>${pregRows}</table>`
+          : `<div style="color:#888">None</div>`}
+      </div>` : ""}
     </div>
 
-    ${this.hasPussy ? `
-    <div class="aflp-section">
-      <b>Pregnancy</b>
-      ${pregRows
-        ? `<table class="aflp-table"><tr><th>Source</th><th>Type</th><th>Number</th><th>Gestation</th></tr>${pregRows}</table>`
-        : `<div style="color:#888">None</div>`}
-    </div>` : ""}
+    <div class="aflp-subpanel" data-panel="kinks" style="display:none">
+      ${kinkSection}
+    </div>
+
+    <div class="aflp-subpanel" data-panel="stats" style="display:none">
+      <div class="aflp-section">
+        <b>Cum:</b> ${this.cum.current}/${this.cum.max}
+        ${this.view === "adjust" ? `<br><label style="margin-top:4px;display:inline-block;margin-right:10px">Loads: <input name="coomer" type="number" value="${this.coomer.level}" style="width:50px"/></label><label style="margin-top:4px;display:inline-block">Cum Shot +: <input name="cumShotBonus" type="number" value="${this.cumShotBonus}" style="width:50px"/></label><br><span style="font-size:11px;opacity:.7">Per shot ${AFLP.cumPerShot(this.actor)} \u00d7 ${AFLP.effectiveLoads(this.actor)} loads (worn gear included)</span>` : ""}
+      </div>
+      <div class="aflp-section">
+        <b>Lifetime Totals</b>
+        ${lifetimeTable}
+      </div>
+    </div>
 
     <div style="text-align:center;margin-top:8px">
       ${this.view === "display"
@@ -561,6 +777,48 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
   cockCheckbox?.addEventListener("change", () => {
     const subtypes = html.querySelector("#aflp-cock-subtypes");
     if (subtypes) subtypes.style.display = cockCheckbox.checked ? "" : "none";
+  });
+
+  const titsCheckbox = html.querySelector("#aflp-tits-checkbox");
+  titsCheckbox?.addEventListener("change", () => {
+    const subtypes = html.querySelector("#aflp-tits-subtypes");
+    if (subtypes) subtypes.style.display = titsCheckbox.checked ? "" : "none";
+  });
+
+  // Subtab switching - hidden panels keep their inputs in the form, so a submit
+  // still reads every tab's fields.
+  html.querySelectorAll(".aflp-subtab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.tab;
+      html.querySelectorAll(".aflp-subtab").forEach(b => b.classList.toggle("active", b === btn));
+      html.querySelectorAll(".aflp-subpanel").forEach(p => { p.style.display = p.dataset.panel === tab ? "" : "none"; });
+    });
+  });
+
+  // Doll: clicking a body region shows that region's slot panel.
+  html.querySelectorAll(".aflp-doll-hot").forEach(hot => {
+    hot.addEventListener("click", () => {
+      const region = hot.dataset.region;
+      html.querySelectorAll(".aflp-doll-hot").forEach(h => h.classList.toggle("active", h === hot));
+      html.querySelectorAll(".aflp-doll-panel").forEach(p => { p.style.display = p.dataset.region === region ? "" : "none"; });
+    });
+  });
+
+  // Doll: flip the silhouette by hand.
+  html.querySelector('[data-action="flip-silh"]')?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const doll = html.querySelector("#aflp-doll");
+    if (!doll) return;
+    const next = doll.dataset.silh === "Female" ? "Male" : "Female";
+    doll.dataset.silh = next;
+    doll.style.backgroundImage = `url('modules/ardisfoxxs-lewd-pf2e/assets/Lewd%20Tokens/Silhouette${next}.png')`;
+  });
+
+  // Pussy subtypes fold with the Pussy checkbox (cock/tits handled below).
+  const pussyCheckbox = html.querySelector("#aflp-pussy-checkbox");
+  pussyCheckbox?.addEventListener("change", () => {
+    const st = html.querySelector("#aflp-pussy-subtypes");
+    if (st) st.style.display = pussyCheckbox.checked ? "" : "none";
   });
 
   html.querySelector("[data-action=reset]")?.addEventListener("click", async () => {
@@ -604,20 +862,23 @@ AFLP.UI.SexualStatsDialog.prototype._activateListeners = function(html, dialog) 
     // Genitalia top-level flags
     this.hasPussy = !!fd.get("pussy");
     this.hasCock = !!fd.get("cock");
+    this.hasTits = !!fd.get("tits");
     await this.actor.setFlag(this.FLAG, "pussy", this.hasPussy);
     await this.actor.setFlag(this.FLAG, "cock", this.hasCock);
 
     // GenitalTypes
-    for (const slug of Object.keys(AFLP.genitalTypes)) {
+    for (const slug of Object.keys(AFLP.anatomyFeatures)) {
       if (slug === "pussy") {
         this.genitalTypes[slug] = this.hasPussy;
       } else if (slug === "cock") {
         this.genitalTypes[slug] = this.hasCock;
+      } else if (slug === "tits") {
+        this.genitalTypes[slug] = this.hasTits;
       } else {
         this.genitalTypes[slug] = !!fd.get(`genitalType-${slug}`);
       }
     }
-    await this.actor.setFlag(this.FLAG, "genitalTypes", this.genitalTypes);
+    await this.actor.setFlag(this.FLAG, "anatomyFeatures", this.genitalTypes);
 
     // Kinks
     for (const slug of Object.keys(AFLP.kinks)) {
