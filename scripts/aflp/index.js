@@ -211,17 +211,25 @@ Hooks.once("ready", async () => {
     // potion embedded, was kept, and left Fertility at 0 because this comparison
     // was the only thing identifying it. `itemHasKey` answered TRUE for the same
     // item. STALE IF: the potion effects lose their aflrKey/slug.
-    const _isPobEffect = (item) => {
-      if (AFLP.itemHasKey?.(item, "potion-of-breeding-effect")
-       || AFLP.itemHasKey?.(item, "potion-of-breeding-effect-permanent")) return true;
-      const src = _srcOf(item);
-      return src === _pobTemp || src === _pobPerm;
-    };
+    // ONE test, used by the gate AND by the recount below. The first cut of this
+    // fix keyed only the gate and left the two `.some()` scans comparing uuids,
+    // so on Starfinder the gate opened and the recount then found nothing:
+    // target computed to 0 and the sync "correctly" cleared a floor it had never
+    // set. Measured 1 Sept 2026 - calling the hook by hand with the right item
+    // still left Fertility 0 while `itemHasKey` answered true for that same item.
+    // **A half-converted identity check is worse than an unconverted one**: it
+    // passes the guard and fails the arithmetic, so the failure moves somewhere
+    // that does not name the cause.
+    const _isPob = (item, which) =>
+      AFLP.itemHasKey?.(item, which === "perm" ? "potion-of-breeding-effect-permanent"
+                                              : "potion-of-breeding-effect")
+      || _srcOf(item) === (which === "perm" ? _pobPerm : _pobTemp);
+    const _isPobEffect = (item) => _isPob(item, "temp") || _isPob(item, "perm");
     const _syncBreeding = async (item) => {
       const actor = item?.parent;
       if (!actor || actor.documentName !== "Actor" || !_isPobEffect(item)) return;
-      const hasPerm = actor.items.some(i => _srcOf(i) === _pobPerm);
-      const hasTemp = actor.items.some(i => _srcOf(i) === _pobTemp);
+      const hasPerm = actor.items.some(i => _isPob(i, "perm"));
+      const hasTemp = actor.items.some(i => _isPob(i, "temp"));
       const target = (hasPerm || hasTemp) ? 3 : 0;
       try {
         const current = AFLP.cond.value(actor, "breeding");
