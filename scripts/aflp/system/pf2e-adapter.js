@@ -35,7 +35,24 @@
 
   class PF2eAdapter extends AFLP.SystemAdapter {
     get id() { return "pf2e"; }
-    contentPackIds() { return ["aflp-lewd-items"]; }
+    // **STARFINDER LOADS A DIFFERENT PACK, AND THIS ADAPTER SERVES BOTH.**
+    // `aflp-lewd-items` declares `system: "pf2e"`, so in an sf2e world Foundry
+    // does not load it: `game.packs.get(...aflp-lewd-items)` is undefined and the
+    // content lives in the twin `aflr-sf2e-items` instead. Measured 1 Sept 2026
+    // in a clean sf2e 1.5.0 world on the published 8.0.29:
+    //
+    //   contentUuid("bimbofied")          -> the aflp-lewd-items uuid, uuidIsReal FALSE
+    //   contentUuid("living-exoskeleton") -> NULL, so the gear could not be found at all
+    //
+    // `fromUuid` still resolved the pf2e-pack uuids because the twins carry the
+    // same document ids - which is why applying a condition worked while every
+    // INDEX-backed check (uuidIsReal, the living-gear grant gate, the status
+    // panel's link resolution) read the content as absent.
+    //
+    // Naming both packs lets `buildContentIndex` use whichever this world loaded;
+    // the other is skipped by its own `if (!pack) continue`. STALE IF: the twins
+    // stop sharing document ids, or sf2e gets its own adapter.
+    contentPackIds() { return ["aflp-lewd-items", "aflr-sf2e-items"]; }
 
     get capabilities() {
       return {
