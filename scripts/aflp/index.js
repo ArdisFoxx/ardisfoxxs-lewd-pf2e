@@ -205,7 +205,18 @@ Hooks.once("ready", async () => {
     const _pobTemp = AFLP.items?.["potion-of-breeding-effect"]?.uuid ?? null;
     const _pobPerm = AFLP.items?.["potion-of-breeding-effect-permanent"]?.uuid ?? null;
     const _srcOf = (item) => String(item?.flags?.core?.sourceId ?? item?._stats?.compendiumSource ?? item?.sourceId ?? "");
-    const _isPobEffect = (item) => { const src = _srcOf(item); return src === _pobTemp || src === _pobPerm; };
+    // ASK BY KEY FIRST, uuid SECOND. On Starfinder the effect is dragged out of
+    // `aflr-sf2e-items`, so its compendiumSource is the TWIN's uuid and never
+    // equals the registry's pf2e-pack spelling - measured 1 Sept 2026, where the
+    // potion embedded, was kept, and left Fertility at 0 because this comparison
+    // was the only thing identifying it. `itemHasKey` answered TRUE for the same
+    // item. STALE IF: the potion effects lose their aflrKey/slug.
+    const _isPobEffect = (item) => {
+      if (AFLP.itemHasKey?.(item, "potion-of-breeding-effect")
+       || AFLP.itemHasKey?.(item, "potion-of-breeding-effect-permanent")) return true;
+      const src = _srcOf(item);
+      return src === _pobTemp || src === _pobPerm;
+    };
     const _syncBreeding = async (item) => {
       const actor = item?.parent;
       if (!actor || actor.documentName !== "Actor" || !_isPobEffect(item)) return;

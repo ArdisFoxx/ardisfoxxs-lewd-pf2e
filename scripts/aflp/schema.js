@@ -400,13 +400,34 @@ AFLP.itemIsBondage = (item) => {
 //
 // Stale when: PF2e drops the legacy-id remap, at which point those 22 links
 // break for real and this helper becomes right about them by accident.
+// STARFINDER READS THE SAME UUID OUT OF A DIFFERENT PACK.
+//
+// The pf2e packs declare `system: "pf2e"`, so an sf2e world does not load them -
+// the content is in the twins (`aflp-lewd-items` -> `aflr-sf2e-items`), which
+// carry the SAME document ids. Every static registry in AFLR (`AFLP.coatItems`,
+// `AFLP.items`, `AFLP.conditions`) holds the pf2e-pack spelling, so on sf2e this
+// answered FALSE for content that is present and that `fromUuid` resolves.
+//
+// Measured 1 Sept 2026 in a clean sf2e 1.5.0 world: the slick carrier refused to
+// apply ("coat card uuid does not resolve"), the living-gear grant gate skipped,
+// and the status panel dropped its links - all from this one line.
+//
+// The twin is tried only when the named pack is ABSENT, so a pf2e world never
+// takes this path. STALE IF: the twins stop sharing document ids, or the pack
+// naming changes.
+const _SF2E_TWIN = { "aflp-lewd-items": "aflr-sf2e-items", "aflp-lewd-actors": "aflr-sf2e-actors",
+                     "aflp-lewd-journals": "aflr-sf2e-journals", "aflp-lewd-tables": "aflr-sf2e-tables" };
 AFLP.uuidIsReal = (u) => {
   if (!u) return false;
   const q = String(u).split(".");
   if (q[0] !== "Compendium") {
     try { return !!fromUuidSync(u); } catch (e) { return false; }
   }
-  return !!game.packs.get(q[1] + "." + q[2])?.index?.get(q[q.length - 1]);
+  const id = q[q.length - 1];
+  const pack = game.packs.get(q[1] + "." + q[2]);
+  if (pack) return !!pack.index?.get(id);
+  const twin = _SF2E_TWIN[q[2]];
+  return twin ? !!game.packs.get(q[1] + "." + twin)?.index?.get(id) : false;
 };
 
 // A card's text as a READER sees it, not as it is stored.
