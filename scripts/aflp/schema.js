@@ -358,6 +358,63 @@ AFLP.itemIsBondage = (item) => {
   return AFLP.BONDAGE_KEYS.has(key);
 };
 
+// STATE, NOT CAPABILITY. `itemIsBondage` answers "is this bondage content" -
+// true for a spell that ties someone up, which is correct and is why the spell
+// keeps the trait. It is the WRONG question for "is this creature bound",
+// because a Dark Elf Slaver owns Apprehend; Apprehend does not own him.
+//
+// MEASURED 4 Sept 2026 in `pf2e-dev`, which is how this was found: 16 of the
+// world's 103 actors and 17 of the pack's 102 read as permanently bound in every
+// H-Scene - every slaver, drake and mimic in the bestiary - because owning the
+// ability to bind was read as being bound. It also meant a Bondage Princess who
+// merely KNEW Shibari Trap would hold the Horny 1 floor forever, since the
+// reconcile pass re-derives from items and nothing ever took it off.
+//
+// The rule is the item's TYPE, deliberately, rather than a list of the eight
+// offenders: a list needs maintaining and the next spell anyone adds - ours or a
+// customer's homebrew - silently re-opens the hole. Capability types can never
+// bind their owner; gear and applied effects can.
+//
+// Only the whole pack's nine non-physical bondage-trait items were ever in
+// scope: 4 spells, 3 actions, 1 feat - all capability - and `Effect: Milking
+// Station`, which is state and still counts.
+//
+// This costs the binding abilities NOTHING, because they already land real state
+// on the target: Shibari Trap applies Restrained, Chained Onahole applies
+// Restrained plus its own armor, Apprehend applies Grabbed plus Manacles, Bound
+// and Fucked applies a Leather Blindfold. The bound flag reads those.
+//
+// An `Effect: <spell>` carrying the `bondage` trait is what hooks the KINK,
+// which scans items and so never sees PF2e's Restrained condition at all.
+// ON DAGGERHEART such an effect needs an `aflrKey` listed in BONDAGE_KEYS
+// instead - DH has no traits, so the trait on it buys nothing there.
+//
+// STALE IF: a system introduces a worn item under a type not listed here, or
+// starts expressing an applied effect as something other than effect/condition.
+AFLP.BINDING_ITEM_TYPES = new Set([
+  // worn or carried gear, across pf2e (equipment/armor/...) and DH (loot)
+  "equipment", "weapon", "armor", "shield", "consumable", "backpack", "loot",
+  "treasure", "kit",
+  // state applied TO a creature
+  "effect", "condition",
+]);
+
+// Is this item, sitting on this creature, a reason to call the creature bound?
+AFLP.itemBindsOwner = (item) => {
+  if (!item || !AFLP.BINDING_ITEM_TYPES.has(item.type)) return false;
+  if (!AFLP.itemIsBondage(item)) return false;
+  // Worn-and-active, not merely carried - a harness in a backpack does not bind.
+  // An effect has no `equipped` data and `_active` answers TRUE for it (measured
+  // on `Effect: Milking Station`), which is the right answer: an effect on you is
+  // on you.
+  //
+  // TRUTHY, not `!== false`. If `anatomy._active` is ever missing the optional
+  // call returns undefined, and `!== false` would read that as "yes, bound" -
+  // every bondage item binding unconditionally, silently. This direction fails
+  // closed instead, which matches what the call sites did before.
+  return !!AFLP.anatomy?._active?.(item);
+};
+
 // ---------------------------------------------------------------------------
 // Identity helpers.
 //
@@ -581,7 +638,7 @@ AFLP.BONDAGE_KEYS = new Set([
   "living-leather-armbinder", "living-leather-mitts", "living-ring-gag",
   "living-leather-blindfold", "living-sensory-hood", "living-spreader-bar",
   "living-latex-hobble-dress", "living-milkmaid-harness", "living-tail-plug",
-  "living-milking-sleeve", "living-collar-leash", "mimic-suction-clamps",
+  "living-collar-leash", "mimic-suction-clamps",
   "living-chastity-belt", "living-vibe-egg", "living-latex-corset",
   "cursed-codpiece", "living-piercings", "living-milking-station",
   "living-pillory", "living-pillory-of-attraction", "mimic-biosuit",
@@ -598,6 +655,35 @@ AFLP.BONDAGE_KEYS = new Set([
   "cock-cage-of-the-cumdump-femboy",
   "portal-plug-of-free-use",
   "bagsluts-buttplug", "bagsluts-buttplug-type-i",
+  // Added 4 Sept 2026 from a LIVE folder check, which is what the key-by-key
+  // reconciliation above could not do: it asked whether each KEY had an item,
+  // never whether each ITEM had a key.
+  //
+  // MEASURED in `dh-test`: the Bondage Gear folder holds 75 items, every one
+  // keyed, and three answered FALSE to `AFLP.itemIsBondage`. Two are real
+  // wearables that also register in `chastityGear.ITEMS` - so on Daggerheart,
+  // where there are no traits and this set is the ONLY path, wearing either one
+  // failed to fire Bondage Princess's Horny grant and its reconcile pass, and
+  // did not mark the wearer `bound` in the H-Scene. Silently, since 8.0.20.
+  //
+  // The third, `living-bondage`, is the explainer card rather than gear and is
+  // correctly absent.
+  //
+  // PF2e carries all 103 items in its Bondage and Living folders with the
+  // `bondage` trait, so none of this ever showed there - which is also why
+  // `living-pillory-attraction` had no symptom: that is the PF2e item's key,
+  // DH spells the same piece `living-pillory-of-attraction`, and only the DH
+  // spelling was here. Both are listed rather than renaming a shipped key.
+  //
+  // STALE IF: a bondage piece is added to either pack. The check is a folder
+  // sweep in a live world, not a search - `dev-aflr-audit-identifiers.js` does
+  // not report this class.
+  "living-chastity-harness", "living-femboy-cage", "living-pillory-attraction",
+  // REMOVED 4 Sept 2026: `living-milking-sleeve`. It was the wrong key on
+  // Daggerheart's Living Cock Cage, fixed by re-keying the item on 11 Aug and
+  // left here. Verified dead four ways before removal: no DH pack item, no PF2e
+  // pack item, no world actor, no embedded item on any of the 47 DH actors.
+  //
   // DELIBERATELY ABSENT: `silken-shibari-cords`.
   //
   // It reads like bondage gear and it is not worn. On Daggerheart it is a

@@ -833,8 +833,13 @@ AFLP.HScene = (() => {
       const restrained = AFLP.cond.has(a, "restrained");
       // Worn, ACTIVE bondage gear counts even with no condition applied: living
       // gear seals a body without ever marking Restrained.
-      const gear = (a.items?.contents ?? []).some(i =>
-        AFLP.itemIsBondage?.(i) && AFLP.anatomy?._active?.(i));
+      //
+      // `itemBindsOwner`, NOT `itemIsBondage`. The bare trait test read a monster
+      // that OWNS a binding ability as bound: measured 4 Sept 2026, 16 of this
+      // world's 103 actors - every slaver and drake in the bestiary - flagged
+      // bound in every scene, each taking a flag write and a bondageScenes tick
+      // at close. The rule now lives in one place; see schema.js.
+      const gear = (a.items?.contents ?? []).some(i => AFLP.itemBindsOwner?.(i));
       if (restrained) st.restrained = true;
       if (restrained || gear || AFLP.cond.has(a, "grabbed")) st.bound = true;
       if (_airlockedFor(scene, p.tokenId)) st.airlock = true;

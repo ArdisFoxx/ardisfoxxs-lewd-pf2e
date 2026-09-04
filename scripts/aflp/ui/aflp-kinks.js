@@ -300,10 +300,14 @@ AFLP.Kinks = {
       // "loot" is Daggerheart's gear type and was missing, so all 74 DH bondage
       // items failed this check before ever reaching the trait test - which they
       // would also have failed, since DH has no traits. Both halves now go
-      // through AFLP.itemIsBondage, which asks each system in its own terms.
-      const physicalTypes = ["equipment", "weapon", "armor", "shield", "consumable", "backpack", "loot"];
-      if (!physicalTypes.includes(item.type)) return;
-      if (!AFLP.itemIsBondage(item)) return;
+      // through AFLP.itemBindsOwner, which asks each system in its own terms.
+      //
+      // This site always had the type filter; the other two had lost it, which is
+      // the bug of 4 Sept 2026. The list moved into schema.js so there is ONE
+      // rule - and it now admits `effect`, which is what the card actually says:
+      // Horny WHILE AFFECTED BY a Bondage effect. An `Effect: Shibari Trap`
+      // carrying the trait hooks here; the spell itself never does.
+      if (!AFLP.itemBindsOwner(item)) return;
       if (!AFLP.actorHasKink(item.actor, "bondage-princess")) return;
       await AFLP.Kinks.onBondageItemEquippedBondagePrincess(item.actor);
     });
@@ -322,6 +326,12 @@ AFLP.Kinks = {
     const _bpSync = async (item) => {
       if (!game.user.isGM || !item?.actor) return;
       if (!AFLP.Settings.automation) return;
+      // GATE ON TYPE TOO. This only decides whether to re-derive, so a capability
+      // item changing can never change the answer - and gating on the bare trait
+      // meant deleting a bondage SPELL kicked off a pass whose result was already
+      // wrong. `itemBindsOwner` is deliberately NOT applied to _active here: an
+      // item being unequipped is exactly when this must run.
+      if (!AFLP.BINDING_ITEM_TYPES?.has(item.type)) return;
       if (!AFLP.itemIsBondage(item)) return;
       if (!AFLP.actorHasKink(item.actor, "bondage-princess")) return;
       await AFLP.Kinks.syncBondagePrincessHorny(item.actor);
@@ -811,8 +821,12 @@ AFLP.Kinks = {
   async syncBondagePrincessHorny(actor) {
     const live = AFLP.system.liveActor(actor);
     if (!live) return 0;
+    // `itemBindsOwner` also refuses the CAPABILITY types, which this pass read as
+    // bondage until 4 Sept 2026: a Bondage Princess who merely KNEW Shibari Trap
+    // held the floor at 1 permanently, because the re-derive found the spell in
+    // her items every time and nothing could ever take it off.
     const bound = (live.items?.contents ?? live.items ?? []).some(
-      i => AFLP.itemIsBondage?.(i) && AFLP.anatomy?._active?.(i));
+      i => AFLP.itemBindsOwner?.(i));
     return AFLP.horny.setSustained(live, "bondage-princess", bound ? 1 : 0);
   },
 
