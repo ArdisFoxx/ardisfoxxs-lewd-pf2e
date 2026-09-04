@@ -5261,6 +5261,25 @@ AFLP.HScene = (() => {
     // Calculate true arousal max for an actor
     // Base 6 + Denied level + any flag overrides
     calcArousalMax(actor) {
+      // **NO ACTOR IS A REAL CASE ON A PLAYER'S CLIENT.** A participant's actor
+      // resolves to null on a seat that cannot see the token, and on ANY seat
+      // once the actor is deleted mid-scene. Every neighbouring read on the
+      // portrait row already guards with `tgtActor ? ... : {}` and this one did
+      // not, so the whole refresh threw:
+      //
+      //   AFLP | coalesced refresh failed TypeError: Cannot read properties of
+      //   null (reading 'getFlag')  at calcArousalMax <- _classicReceiverGroup
+      //   <- _refreshPortraits_AflpClassic <- _flushRefresh
+      //
+      // Observed on a player seat against the published 8.0.28 build, 1 Sept
+      // 2026. The throw killed `_flushRefresh`, so that player's H-Scene card
+      // stopped repainting for the rest of the scene - not cosmetic.
+      //
+      // Guarded HERE rather than at the one call site because ten call sites
+      // hand this an actor that may be null, and the next one added will too.
+      // 6 is `maxBase`'s own default, so an unresolvable participant renders at
+      // the base ceiling instead of taking the card down.
+      if (!actor) return 6;
       // System bridge: when the adapter backs arousal with a capped native
       // resource (Daggerheart Stress), that track's max IS the arousal
       // ceiling — the system owns it, so maxBase/Denied do not extend it.
