@@ -225,38 +225,65 @@
     } catch (e) { return false; }
   };
 
+  // EVERY ROW THAT HAS A CARD NAMES IT WITH `ckey`. Do not rely on `icon.cond`
+  // to produce the link. `icon.cond` reads AFLP.conditions, and every uuid in
+  // that registry is pinned to the PATHFINDER pack `aflp-lewd-items`, which a
+  // Daggerheart world does not register at all - so on DH the uuid is dead and
+  // the row opens nothing. MEASURED in dh-test 5 Sept 2026, on 1.0.37: 7 of 39
+  // rows linked. Adding `ckey` to the 24 rows that have a DH document took it to
+  // 31, the same number PF2e sits at.
+  //
+  // Safe on PF2e because it is not a repointing: all 16 rows that already
+  // resolved there resolve through contentUuid to the IDENTICAL document id,
+  // checked one by one against the pack - including `breeding` (Fertility
+  // 5XuYxTnQd6scwp7V) and `birth-control` (ivWPDyho7crXnPGx), whose registry
+  // uuids are load-bearing and were mis-pointed once before (see schema.js).
+  //
+  // Stale if the registry is ever taught to resolve per system, or if a row's
+  // key stops naming its card.
   AFLP.STATUS_DEFS = [
     // Afflictions
     { key: "mind-break", label: "Mind Break", color: "#e14fd2", glyph: "\u2732", band: 0,
+      ckey: "mind-break",
       icon: { cond: "mind-break" },
       value: a => isDH() ? AFLP.cond.has(a, "mind-break") : AFLP.cond.value(a, "mind-break") },
     { key: "bimbofied", label: "Bimbofied", color: "#ff7ad9", glyph: "\u2740", band: 0,
+      ckey: "bimbofied",
       icon: { cond: "bimbofied" }, value: a => AFLP.cond.value(a, "bimbofied") },
     { key: "bullified", label: "Bullified", color: "#e0607a", glyph: "\u2642", band: 0,
+      ckey: "bullified",
       icon: { cond: "bullified" }, value: a => AFLP.cond.value(a, "bullified") },
     // Strict precedence: Hypno Slave > Hypnotized > Entranced. Each stage subsumes
     // the last, so exactly one ever renders. Previously hypno-slave read the KINK
     // flag independently, so a conditioned slave also displayed as Hypnotized -
     // and, worse, could display as merely Entranced by someone else.
     // LINKS TO THE KINK, NOT TO HYPNOTIZED. This row is a KINK - its value asks
-    // hasKink - but it borrows the Hypnotized artwork, and `_uuidFor` tries
-    // `icon.cond` BEFORE anything else, so the click always opened the Hypnotized
-    // condition instead of the kink that is actually on the sheet. `uuidFrom` is
-    // tried first, so naming the kink's own key here wins - and it resolves per
-    // system through contentUuid, rather than pinning one pack's uuid.
-    // MEASURED 4 Sept 2026 in dh-test: contentUuid("hypno-slave") ->
-    // aflr-dh-items.Item.iBvSYqQbWofLBbKu, "Hypno Slave", type feature.
+    // hasKink - but it borrows the Hypnotized artwork, and with no key of its own
+    // the resolver fell through to `icon.cond` and opened the Hypnotized condition
+    // instead of the kink that is actually on the sheet.
+    // 8.0 tried to fix that with `uuidFrom: { cond: "hypno-slave" }` and IT DID
+    // NOT WORK: `uuidFrom` reads the CONDITION REGISTRY, and "hypno-slave" is
+    // content, not a registered condition, so the lookup returned null and
+    // icon.cond won again. MEASURED in pf2e-dev 5 Sept 2026 - the row still
+    // opened "Hypnotized". `ckey` is the field that asks contentUuid, and it is
+    // tried first, so it beats icon.cond and resolves per system.
+    // MEASURED: contentUuid("hypno-slave") -> aflp-lewd-items.Item.naEmpTaaGI3qYAeC
+    // on pf2e; aflr-dh-items.Item.iBvSYqQbWofLBbKu, "Hypno Slave", on dh.
+    // Stale if the row ever opens Hypnotized again.
     { key: "hypno-slave", label: "Hypno Slave", color: "#c95fb8", glyph: "\u26AD", band: 0,
-      uuidFrom: { cond: "hypno-slave" },
+      ckey: "hypno-slave",
       icon: { cond: "hypnotized" }, value: a => hasKink(a, "hypno-slave") },
     { key: "hypnotized", label: "Hypnotized", color: "#d264c0", glyph: "\u25C9", band: 0,
+      ckey: "hypnotized",
       icon: { cond: "hypnotized" },
       value: a => AFLP.cond.has(a, "hypnotized") && !hasKink(a, "hypno-slave") },
     { key: "entranced", label: "Entranced", color: "#c877c8", glyph: "\u25CE", band: 0,
+      ckey: "entranced",
       icon: { cond: "entranced" },
       value: a => AFLP.cond.has(a, "entranced")
         && !AFLP.cond.has(a, "hypnotized") && !hasKink(a, "hypno-slave") },
     { key: "exposed", color: "#ef7fa6", glyph: "\u2726", band: 3,
+      ckey: "exposed",
       icon: { cond: "exposed" },
       label: a => AFLP.cond.value(a, "exposed") >= 2 ? "Nude" : "Exposed",
       value: a => AFLP.cond.value(a, "exposed") },
@@ -284,6 +311,7 @@
     // PF2e character and **this row had never once lit there**. It also shows the
     // number now, matching the Horny row rather than being a bare on/off.
     { key: "denied", label: "Denied", color: "#6fc6d8", glyph: "\u26D4", band: 4,
+      ckey: "denied",
       icon: { cond: "denied" },
       value: a => {
         const n = Number(AFLP.denied?.total?.(a)) || 0;
@@ -339,15 +367,20 @@
       icon: { cond: "chaste" }, ckey: "chaste",
       value: a => AFLP.cond.has(a, "chaste") },
     { key: "gagged", label: "Gagged", color: "#d9a48f", glyph: "\u2298", band: 2,
-      icon: { cond: "gagged" },
+      // icon.cond alone opens nothing: "gagged" is content, not a registered
+      // condition, so the registry lookup returns null. contentUuid finds it.
+      ckey: "gagged", icon: { cond: "gagged" },
       value: a => AFLP.cond.has(a, "gagged") },
     { key: "blindfolded", label: "Blindfolded", color: "#8f8fb0", glyph: "\u25D1", band: 2,
+      ckey: "blindfolded",
       icon: { cond: "blindfolded" },
       value: a => AFLP.cond.has(a, "blindfolded") },
     { key: "hobbled", label: "Hobbled", color: "#b0a07a", glyph: "\u26D3", band: 2,
+      ckey: "hobbled",
       icon: { cond: "hobbled" },
       value: a => AFLP.cond.has(a, "hobbled") },
     { key: "cuffed", label: "Cuffed", color: "#a89b8c", glyph: "\u26D2", band: 2,
+      ckey: "cuffed",
       icon: { cond: "cuffed" },
       value: a => AFLP.cond.has(a, "cuffed") },
     // The two cursed pieces from the Feminizer Glyph. These are the ONLY rows in
@@ -371,6 +404,7 @@
       icon: a => AFLP.actorItemByKey?.(a, "chastity-harness-of-the-throat-sleeve-slave")?.img ?? null,
       value: a => _wornKey(a, "chastity-harness-of-the-throat-sleeve-slave") },
     { key: "toasted", label: "Toasted", color: "#ec7a8e", glyph: "\u2668", band: 6,
+      ckey: "toasted",
       icon: { cond: "toasted" },
       value: a => AFLP.cond.has(a, "toasted") },
     { key: "dubious-consent", label: "Dubious Consent", color: "#e08a9a", glyph: "\u2049", band: 3,
@@ -379,6 +413,10 @@
       // check lit this row for anyone who merely owned the reaction. value() rather
       // than has() so the row shows which tier is running: 1 is Defeated DC 9,
       // 2 is cannot gain Defeated.
+      //
+      // Opens the REACTION card, not the effect the row counts: the reaction is
+      // where the rule is written, and the effect item is a bare tier marker.
+      ckey: "dubious-consent",
       icon: { cond: "dubious-consent" }, value: a => AFLP.cond.value(a, "effect-dubious-consent") },
     { key: "masturbating", label: "Masturbating", color: "#e88ac0", glyph: "\u264B", band: 3,
       // PF2E ONLY from 4 Sept 2026, same ruling. Ardis: "the GM will probably just
@@ -403,6 +441,9 @@
     // after, which is exactly when the Impregnated items grant Clumsy. The belly
     // ladder is used at its two ends only, 0 and 8, not as a gestation slider.
     { key: "impregnated", label: "Impregnated", color: "#e79ec2", glyph: "\u2695", band: 3,
+      // The Impregnated item carried no aflrKey until 4 Sept 2026 and this row
+      // named no document at all, so it opened nothing. Keyed `impregnated`.
+      ckey: "impregnated",
       icon: `${ASSETS}Pregnant.webp`,
       icon2: a => `${ASSETS}Cumflated${AFLP.pregnancyPastHalfTerm?.(a) ? 8 : 0}.webp`,
       // Plain and specific: say what is true and what it does, not how it feels.
@@ -420,6 +461,11 @@
     // facts are in scope there - not a guess made at render time from anatomy the
     // host might have gained since.
     { key: "egg-host", label: "Egg Host", color: "#c9d67a", glyph: "\u2698", band: 3,
+      // The CARD is called Ovideposited; only the row is called Egg Host. The item
+      // carried no aflrKey at all until 4 Sept 2026, so nothing could resolve it -
+      // it is now keyed `ovideposited`, after its own name rather than after this
+      // row, because a key names the thing and not the UI that shows it.
+      ckey: "ovideposited",
       // Art follows the size of the clutch, not the term - a big clutch reads big
       // from the moment it is laid in.
       icon: a => `${ASSETS}${pregnancySums(a).eggs > 4 ? "PregnantEggsBig" : "PregnantEggsSmall"}.webp`,
@@ -429,10 +475,12 @@
         : (AFLP.system?.pregnancyEarlyText?.() ?? "Carrying, but not showing yet."),
       value: a => pregnancySums(a).eggs },
     { key: "arousal", label: "Arousal", color: "#ff5f9e", glyph: "\u2665", band: 4,
+      ckey: "arousal",
       icon: { cond: "arousal" }, uuidFrom: { cond: "arousal" }, value: a => arousalPips(a) },
 
     // Drives
     { key: "horny", color: "#ff7a86", glyph: "\u2661", band: 4,
+      ckey: "horny",
       icon: { cond: "horny" }, uuidFrom: { cond: "horny" },
       label: a => AFLP.cond.has(a, "horny-always") ? "Horny (Always)" : "Horny",
       // Numeral = the sheet's Horny pips (temp + permanent); the row also
@@ -443,6 +491,7 @@
         return AFLP.cond.has(a, "horny") || AFLP.cond.has(a, "horny-always");
       } },
     { key: "breeding", label: "Fertility", color: "#ec7ab0", glyph: "\u26B8", band: 4,
+      ckey: "breeding",
       icon: { cond: "breeding" }, uuidFrom: { cond: "breeding" },
       // I = Potion of Breeding, II = the Permanent effect (kept in sync by the
       // effect->condition hooks); a bare condition with no value shows as I.
@@ -450,12 +499,16 @@
 
     // Roles
     { key: "dominating", label: "Dominating", color: "#ec7a7a", glyph: "\u25B2", band: 5,
+      ckey: "dominating",
       icon: { cond: "dominating" }, value: a => AFLP.cond.has(a, "dominating") },
     { key: "submitting", label: "Submitting", color: "#e08aae", glyph: "\u25BC", band: 5,
+      ckey: "submitting",
       icon: { cond: "submitting" }, value: a => AFLP.cond.has(a, "submitting") && !AFLP.cond.has(a, "stuck-submitting") },
     { key: "stuck-submitting", label: "Stuck Submitting", color: "#d47ab0", glyph: "\u26D3", band: 5,
+      ckey: "stuck-submitting",
       icon: { cond: "stuck-submitting" }, value: a => AFLP.cond.has(a, "stuck-submitting") },
     { key: "swallowed", label: "Swallowed", color: "#c98a6a", glyph: "\u21A7", band: 5,
+      ckey: "swallowed",
       icon: { cond: "swallowed" }, value: a => AFLP.cond.has(a, "swallowed") },
 
     // Buffs
@@ -471,6 +524,7 @@
     { key: "afterglow", label: "Afterglow", color: "#ffd97a", glyph: "\u2600", band: 6,
       icon: { cond: "afterglow" }, value: a => !isDH() && AFLP.cond.has(a, "afterglow") },
     { key: "birth-control", label: "Birth Control", color: "#5fb478", glyph: "\u2298", band: 6,
+      ckey: "birth-control",
       icon: { cond: "birth-control" }, uuidFrom: { cond: "birth-control" },
       value: a => AFLP.cond.has(a, "birth-control") },
 
@@ -496,18 +550,23 @@
     // Descriptions are the CARDS' own words, read out of the pack rather than
     // written here. STALE IF a card is reworded.
     { key: "dizzy", label: "Dizzy", color: "#c9a0dc", glyph: "\u2735", band: 2,
+      ckey: "dizzy",
       icon: { cond: "dizzy" },
       value: a => AFLP.cond.has(a, "dizzy") },
     { key: "posed", label: "Posed", color: "#b9a6c9", glyph: "\u26cf", band: 2,
+      ckey: "posed",
       icon: { cond: "posed" },
       value: a => AFLP.cond.has(a, "posed") },
     { key: "hooked", label: "Hooked", color: "#d08a5a", glyph: "\u2695", band: 3,
+      ckey: "hooked",
       icon: { cond: "hooked" },
       value: a => AFLP.cond.has(a, "hooked") },
     { key: "lustful", label: "Lustful", color: "#e884b4", glyph: "\u2665", band: 3,
+      ckey: "lustful",
       icon: { cond: "lustful" },
       value: a => AFLP.cond.has(a, "lustful") },
     { key: "nirvana", label: "Nirvana", color: "#8fd6e0", glyph: "\u273a", band: 6,
+      ckey: "nirvana",
       icon: { cond: "nirvana" },
       value: a => AFLP.cond.has(a, "nirvana") },
     { key: "persona-overridden", label: "Persona Overridden", color: "#9a86c4", glyph: "\u26a1", band: 3,
@@ -516,7 +575,8 @@
     // DERIVED, and that is why it is not removable below: the suit runs dry from
     // Chest Coat, so an X here would clear it and the next sync would put it back.
     { key: "exoskeleton-dry", label: "Exoskeleton (Dry)", color: "#a8b47a", glyph: "\u2699", band: 6,
-      icon: { cond: "exoskeleton-dry" },
+      // Content, not a registered condition - icon.cond resolves art but no link.
+      ckey: "exoskeleton-dry", icon: { cond: "exoskeleton-dry" },
       value: a => AFLP.cond.has(a, "exoskeleton-dry") },
   ];
 
@@ -789,6 +849,16 @@
     //
     // First that RESOLVES wins. Never `?? ` down a list of uuids - a dead uuid is
     // a truthy string and would win over a live one behind it.
+    //
+    // `ckey` IS THE ONLY FIELD THAT ASKS contentUuid. `uuidFrom.cond` and
+    // `icon.cond` below both read AFLP.conditions - the REGISTRY - and return
+    // null for anything that is content rather than a registered condition. Most
+    // AFLR keys are content, so `uuidFrom: { cond: "<content key>" }` silently
+    // resolves nothing and the row falls through to whatever icon.cond names.
+    // That shipped in 8.0 on hypno-slave: the row was meant to open the kink and
+    // kept opening Hypnotized instead, because the fix was written in the wrong
+    // field. To point a row at a document, give it a `ckey`.
+    // Stale if uuidFrom is ever taught to ask contentUuid.
     for (const k of (Array.isArray(def.ckey) ? def.ckey : (def.ckey ? [def.ckey] : []))) {
       const byKey = AFLP.system?.contentUuid?.(k);
       if (_uuidIsReal(byKey)) return byKey;
