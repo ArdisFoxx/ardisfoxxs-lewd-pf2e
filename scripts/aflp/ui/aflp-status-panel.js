@@ -238,7 +238,16 @@
     // the last, so exactly one ever renders. Previously hypno-slave read the KINK
     // flag independently, so a conditioned slave also displayed as Hypnotized -
     // and, worse, could display as merely Entranced by someone else.
+    // LINKS TO THE KINK, NOT TO HYPNOTIZED. This row is a KINK - its value asks
+    // hasKink - but it borrows the Hypnotized artwork, and `_uuidFor` tries
+    // `icon.cond` BEFORE anything else, so the click always opened the Hypnotized
+    // condition instead of the kink that is actually on the sheet. `uuidFrom` is
+    // tried first, so naming the kink's own key here wins - and it resolves per
+    // system through contentUuid, rather than pinning one pack's uuid.
+    // MEASURED 4 Sept 2026 in dh-test: contentUuid("hypno-slave") ->
+    // aflr-dh-items.Item.iBvSYqQbWofLBbKu, "Hypno Slave", type feature.
     { key: "hypno-slave", label: "Hypno Slave", color: "#c95fb8", glyph: "\u26AD", band: 0,
+      uuidFrom: { cond: "hypno-slave" },
       icon: { cond: "hypnotized" }, value: a => hasKink(a, "hypno-slave") },
     { key: "hypnotized", label: "Hypnotized", color: "#d264c0", glyph: "\u25C9", band: 0,
       icon: { cond: "hypnotized" },
@@ -290,7 +299,6 @@
     // where the card does not resolve.
     { key: "plugged", label: "Plugged", color: "#c98fd0", glyph: "\u25CF", band: 2,
       icon: { cond: "plugged" }, ckey: "plugged",
-      desc: "Something is seated in a hole - nothing else can go in or out, and you cannot purge Cumflation from it.",
       value: a => AFLP.cond.has(a, "plugged") },
     // NEW 17 Aug 2026. Caged is the third of the gear trio with Chaste and
     // Plugged and it has a real card in the pack, but it had NO ROW HERE AT ALL,
@@ -309,7 +317,6 @@
     // the card does not resolve, so it states the seal and no system's numbers.
     { key: "caged", label: "Caged", color: "#b8a0d8", glyph: "⛓", band: 2,
       icon: { cond: "caged" }, ckey: "caged",
-      desc: "A cage is locked over the cock - it cannot be used while the cage is on.",
       value: a => AFLP.cond.has(a, "caged") },
     // Live on BOTH systems as of 11 Aug 2026. It was Daggerheart-only for most of
     // that day: an audit found PF2e had no Chaste condition at all - the only
@@ -330,23 +337,18 @@
     // and nothing a system might disagree about.
     { key: "chaste", label: "Chaste", color: "#9fb6e0", glyph: "\u26BF", band: 2,
       icon: { cond: "chaste" }, ckey: "chaste",
-      desc: "A lock or shell covers you - nothing can get past the seal in either direction.",
       value: a => AFLP.cond.has(a, "chaste") },
     { key: "gagged", label: "Gagged", color: "#d9a48f", glyph: "\u2298", band: 2,
       icon: { cond: "gagged" },
-      desc: "You cannot speak clearly, and have disadvantage on rolls that rely on talking.",
       value: a => AFLP.cond.has(a, "gagged") },
     { key: "blindfolded", label: "Blindfolded", color: "#8f8fb0", glyph: "\u25D1", band: 2,
       icon: { cond: "blindfolded" },
-      desc: "You cannot see. Rolls relying on sight fail, and rolls targeting you have advantage.",
       value: a => AFLP.cond.has(a, "blindfolded") },
     { key: "hobbled", label: "Hobbled", color: "#b0a07a", glyph: "\u26D3", band: 2,
       icon: { cond: "hobbled" },
-      desc: "You can move no farther than Close range, and cannot run or leap.",
       value: a => AFLP.cond.has(a, "hobbled") },
     { key: "cuffed", label: "Cuffed", color: "#a89b8c", glyph: "\u26D2", band: 2,
       icon: { cond: "cuffed" },
-      desc: "Your hands or arms are bound - disadvantage on rolls that use your hands.",
       value: a => AFLP.cond.has(a, "cuffed") },
     // The two cursed pieces from the Feminizer Glyph. These are the ONLY rows in
     // STATUS_DEFS driven by a worn ITEM rather than a condition, and they have to
@@ -363,16 +365,13 @@
     { key: "cumdump-femboy", label: "Bimbofied Bondage Anal Slave", color: "#c76fd0", glyph: "\u26B2", band: 2,
       ckey: "cock-cage-of-the-cumdump-femboy",
       icon: a => AFLP.actorItemByKey?.(a, "cock-cage-of-the-cumdump-femboy")?.img ?? null,
-      desc: "Locked into the Cock Cage of the Cumdump Femboy. The cock is caged and capped, every climax is anal, and the body changes are kept even after the cage comes off.",
       value: a => _wornKey(a, "cock-cage-of-the-cumdump-femboy") },
     { key: "throat-sleeve-slave", label: "Bimbofied Bondage Throat Sleeve", color: "#d97ac0", glyph: "\u26A7", band: 2,
       ckey: "chastity-harness-of-the-throat-sleeve-slave",
       icon: a => AFLP.actorItemByKey?.(a, "chastity-harness-of-the-throat-sleeve-slave")?.img ?? null,
-      desc: "Belted into the Chastity Harness of the Throat Sleeve Slave. Everything below the waist is sealed, the throat is a sleeve, and the body changes are kept even after the harness comes off.",
       value: a => _wornKey(a, "chastity-harness-of-the-throat-sleeve-slave") },
     { key: "toasted", label: "Toasted", color: "#ec7a8e", glyph: "\u2668", band: 6,
       icon: { cond: "toasted" },
-      desc: "Pacified by aphrodisiacs - disadvantage on non-Carnal damaging actions until the scene ends.",
       value: a => AFLP.cond.has(a, "toasted") },
     { key: "dubious-consent", label: "Dubious Consent", color: "#e08a9a", glyph: "\u2049", band: 3,
       // Reads the EFFECT, not the action. "dubious-consent" is the reaction card's
@@ -382,9 +381,14 @@
       // 2 is cannot gain Defeated.
       icon: { cond: "dubious-consent" }, value: a => AFLP.cond.value(a, "effect-dubious-consent") },
     { key: "masturbating", label: "Masturbating", color: "#e88ac0", glyph: "\u264B", band: 3,
+      // PF2E ONLY from 4 Sept 2026, same ruling. Ardis: "the GM will probably just
+      // give them Vulnerable if they think they would be... and the person will
+      // already be weak to a press because masturbating will naturally drive up
+      // their arousal and horny tokens." The DH card was empty, DH registered no
+      // status for it, and this row never read the condition anyway - its value is
+      // the SCENE state below, which is why setting it by hand did nothing.
       icon: { cond: "masturbating" }, uuidFrom: { cond: "masturbating" },
-      desc: "Lost in self-pleasure - self-absorbed and vulnerable. Pressers, Sexual Advances, and grapples land more easily.",
-      value: a => AFLP.HScene?.isSelfAbsorbed?.(a.id) },
+      value: a => !isDH() && AFLP.HScene?.isSelfAbsorbed?.(a.id) },
 
     // Derived carnal states
     // Creampied / Covered in Cum retired: each filled hole now gets its own row
@@ -455,12 +459,203 @@
       icon: { cond: "swallowed" }, value: a => AFLP.cond.has(a, "swallowed") },
 
     // Buffs
+    // PF2E ONLY from 4 Sept 2026, by Ardis's ruling: "afterglow is more like, in
+    // dh at least, a rule attached to what happens when you climax. so its not
+    // really a condition." On Daggerheart the on-climax outcome IS the Horny or
+    // Defeat token, and naming that outcome as a second thing was "putting a hat
+    // on a hat". PF2e KEEPS IT - there it is a real item carrying a +1 status
+    // bonus, which is a condition by any reading.
+    // The DH adapter has treated applyCondition("afterglow") as a no-op since
+    // June, so nothing on DH ever set this row; it simply showed a switch that
+    // could not turn on.
     { key: "afterglow", label: "Afterglow", color: "#ffd97a", glyph: "\u2600", band: 6,
-      icon: { cond: "afterglow" }, value: a => AFLP.cond.has(a, "afterglow") },
+      icon: { cond: "afterglow" }, value: a => !isDH() && AFLP.cond.has(a, "afterglow") },
     { key: "birth-control", label: "Birth Control", color: "#5fb478", glyph: "\u2298", band: 6,
       icon: { cond: "birth-control" }, uuidFrom: { cond: "birth-control" },
       value: a => AFLP.cond.has(a, "birth-control") },
+
+    // \u2500\u2500 ADDED 4 Sept 2026: THE CONDITIONS THIS PANEL COULD NOT SHOW \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    //
+    // MEASURED, not guessed. `CONFIG.statusEffects` in dh-test carries 29 of our
+    // conditions; this list carried 22 of them. A creature could be Dizzy - and
+    // Dizzy makes every Carnal Press auto-land - with nothing on the panel saying
+    // so. Ardis, 4 Sept: "the status panel and the status manager need to have ALL
+    // AFLR/AFLP conditions in it, otherwise users will think that we are shipping
+    // it broken."
+    //
+    // Coverage runs ONE WAY: every condition needs a row, not every row is a
+    // condition. The 10 derived rows above (hypno-slave, cumdump-femboy, egg-host
+    // and the rest) have no status effect behind them and belong exactly where
+    // they are.
+    //
+    // NO SYSTEM GATE, DELIBERATELY. A row whose `value` is falsy never renders,
+    // and posed/hooked/lustful/nirvana/dizzy cannot be true on PF2e - so a system
+    // check would be a second place for that truth to live and to go stale.
+    // exoskeleton-dry exists on BOTH (DH HUD, and the PF2e Conditions folder).
+    //
+    // Descriptions are the CARDS' own words, read out of the pack rather than
+    // written here. STALE IF a card is reworded.
+    { key: "dizzy", label: "Dizzy", color: "#c9a0dc", glyph: "\u2735", band: 2,
+      icon: { cond: "dizzy" },
+      value: a => AFLP.cond.has(a, "dizzy") },
+    { key: "posed", label: "Posed", color: "#b9a6c9", glyph: "\u26cf", band: 2,
+      icon: { cond: "posed" },
+      value: a => AFLP.cond.has(a, "posed") },
+    { key: "hooked", label: "Hooked", color: "#d08a5a", glyph: "\u2695", band: 3,
+      icon: { cond: "hooked" },
+      value: a => AFLP.cond.has(a, "hooked") },
+    { key: "lustful", label: "Lustful", color: "#e884b4", glyph: "\u2665", band: 3,
+      icon: { cond: "lustful" },
+      value: a => AFLP.cond.has(a, "lustful") },
+    { key: "nirvana", label: "Nirvana", color: "#8fd6e0", glyph: "\u273a", band: 6,
+      icon: { cond: "nirvana" },
+      value: a => AFLP.cond.has(a, "nirvana") },
+    { key: "persona-overridden", label: "Persona Overridden", color: "#9a86c4", glyph: "\u26a1", band: 3,
+      icon: { cond: "persona-overridden" },
+      value: a => AFLP.cond.has(a, "persona-overridden") },
+    // DERIVED, and that is why it is not removable below: the suit runs dry from
+    // Chest Coat, so an X here would clear it and the next sync would put it back.
+    { key: "exoskeleton-dry", label: "Exoskeleton (Dry)", color: "#a8b47a", glyph: "\u2699", band: 6,
+      icon: { cond: "exoskeleton-dry" },
+      value: a => AFLP.cond.has(a, "exoskeleton-dry") },
   ];
+
+  // ── TOOLTIP TEXT: ONE HAND-WRITTEN LINE PER ROW ───────────────────────────
+  //
+  // Ardis, 4 Sept 2026: "i want a blanket rule of a desc text that i write
+  // manually for each one. clicking it goes to the card."
+  //
+  // The panel prefers `desc` over the linked card (see the pointerover handler),
+  // so once every row has one the hover is a consistent short line and the CARD
+  // is what you get when you click through. Before this, 20 rows had no `desc`
+  // and fell back to dumping a whole card into a tooltip, while 19 had one - so
+  // the panel read as two different products depending on which row you hovered.
+  //
+  // THE SHAPE, and it is deliberate:
+  //   one or two lines of flavour, second person
+  //   then one or two lines of MECHANICS
+  //   then "..." AT A CLAUSE THAT ENDS CLEANLY when the card carries more - the
+  //   ellipsis is a promise that clicking gives you the rest, not a truncation
+  //   at some character count.
+  //
+  // A row never opens with its own name: the name is already on the row.
+  //
+  // PER SYSTEM WHERE THE CARDS ACTUALLY DIVERGE. 23 of these rows have a card in
+  // both packs and all 23 texts differ - some of that is real (Mind Break is a
+  // Death Move on Daggerheart and an uncapped penalty track on Pathfinder), and
+  // where it is real the two get different lines. Where the systems say the same
+  // thing, one string serves both.
+  //
+  // STALE IF: a card is reworded. These are summaries of the cards, and the card
+  // is canon - if the two disagree, the card wins and this line is the bug.
+  const _sys2 = (dh, pf2e) => (pf2e === undefined ? dh : () => (isDH() ? dh : pf2e));
+  const STATUS_DESCS = {
+    "mind-break": _sys2(
+      "Your mind has broken under the pleasure, and you've stopped fighting it. You want to be used. A Death Move - your role in the scene becomes a toy for the adversaries to use.",
+      "Your mind has broken under the pleasure, and you've stopped fighting it. You want to be used. You take a status penalty equal to this value on all your checks and DCs. You are Prone and can only Crawl or use actions with the Sexual trait. Struggle Snuggle attempts against you automatically critically succeed..."),
+    "bimbofied": _sys2(
+      "Dumber, hornier, and built for sex - your body reshapes to match. Each token is one disadvantage die on your Carnal Resist rolls. A long rest with no sex in the last day burns one off.",
+      "Dumber, hornier, and built for sex - your body reshapes to match. You take a status penalty equal to this value on Intelligence- and Wisdom-based rolls and DCs, including Will saves, spell attacks and spell DCs..."),
+    "bullified": _sys2(
+      "Bigger, harder, in charge - the dominant counterpart to Bimbofied. Each token grants your Carnal actions an advantage die, and you count as both a PC and an adversary for Carnal actions and H-Scenes...",
+      "Bigger, harder, in charge - the dominant counterpart to Bimbofied. You gain a +1 circumstance bonus per value to grapple checks, and a near-irresistible urge to join in when an ally within 30 feet is Submitting..."),
+    "hypno-slave":
+      "You gave yourself to your Hypno Master, and you never want to come back. You begin every scene in their presence already Entranced, you cannot roll to resist their trance, and each time you drop for them you clear a Stress...",
+    "hypnotized": _sys2(
+      "The trance has sunk deep enough to bend your will - their command feels like your own idea. Rolls against them have disadvantage and you cannot willingly act against them, until you mark 2 Stress to shake free...",
+      "The trance has sunk deep enough to bend your will - their command feels like your own idea. You take -2 to Perception and -4 to saves against your entrancer's Sexual and mental effects, and you cannot take hostile actions against them..."),
+    "entranced": _sys2(
+      "Your eyes have gone glassy and your attention will not leave whatever caught it. Rolls against the source have disadvantage, and it has advantage to command, coax or use Carnal effects on you...",
+      "Your eyes have gone glassy and your attention will not leave whatever caught it. You take -2 to Perception and skill checks, and cannot use concentrate actions unless they target your entrancer..."),
+    "exposed": _sys2(
+      "Stripped or laid bare, with everyone free to look. Every token is disadvantage on Carnal Resist; at two you are near enough naked, which also makes you Vulnerable.",
+      "Stripped or laid bare, with everyone free to look. Your Exposed value is a status bonus to Create a Diversion and a circumstance penalty to your AC and Fortitude saves..."),
+    "defeated": _sys2(
+      "You climaxed while Submitting, and your will to fight it is evaporating. Each token raises the Stress cost of powering through a Carnal Resist to 1 + your Defeat tokens. A short rest can shake one off...",
+      "You climaxed while Submitting, and your will to fight it is evaporating. When your Arousal rises the duration resets and you roll a flat check; on a failure this ends and you gain Mind Break 1."),
+    "denied": _sys2(
+      "Edged and keyed up, held back from the release you are aching for. Each token raises your maximum Arousal by 1, so you last longer before you climax. A rest clears them.",
+      "Edged and keyed up, held back from the release you are aching for. Each level raises your maximum Arousal by 1. You lose every level when you complete a full night's rest."),
+    "plugged":
+      "A plug is seated in your butt, filling you and staying there. Nothing else can get into your ass and you cannot purge Cumflation from it. If you are also Chaste, it cannot come out until the Chaste ends.",
+    "caged":
+      "Your cock is locked in a cage, the sensation a constant reminder of your submission. You cannot get hard, and you cannot climax through it. Cleared when the cage comes off.",
+    "chaste": _sys2(
+      "A locked shell seals your crotch and asshole - untouchable and going without. Nothing gets past the seal in either direction, until the lock comes off.",
+      "A locked shell seals your crotch and asshole - untouchable and going without. The holes it covers cannot be penetrated, anything already seated in one stays put, and you cannot purge Cumflation from them."),
+    "gagged": _sys2(
+      "Your mouth is gagged - nothing comes out but muffled glug-glug noises. You cannot speak clearly, and rolls that rely on talking have disadvantage.",
+      "Your mouth is gagged - nothing comes out but muffled glug-glug noises. You cannot use auditory or sonic actions, which stops you casting anything but a subtle spell..."),
+    // DH-only condition (PF2e's blindfold gear applies the system's own Blinded),
+    // so there is no PF2e half to write.
+    "blindfolded":
+      "Your eyes are covered, your sense of sound and touch heightened in response. You cannot see, which makes you Vulnerable. Cleared when your eyes are uncovered.",
+    "hobbled":
+      "Your legs are bound, shortened or held apart, and you can only shuffle. You can move no farther than Close range, and you cannot run or leap.",
+    "cuffed":
+      "Your hands are bound and useless to you. Rolls that use your hands have disadvantage, until your arms are freed.",
+    "cumdump-femboy":
+      "The cage fused itself to you the moment it closed, and began transforming your body. You are Caged, you gain Ass (Cumfinity) and Bimbofied 1, and the cage takes both a 6th-rank Cleanse Affliction and an Excellent Bondage Lock to remove...",
+    "throat-sleeve-slave":
+      "The harness belts you shut from collar to crotch and leaves only your throat in use. You gain Throat (Deepthroat) and Bimbofied 1, and its built-in collar, plug, piercings and egg cannot be removed while it is worn...",
+    "toasted": _sys2(
+      "Dosed and dreamy on aphrodisiacs, too warm and fuzzy to want a fight. You have disadvantage on non-Carnal actions that deal damage, until the scene ends.",
+      "Dosed and dreamy on aphrodisiacs, too warm and fuzzy to want a fight. You are pacified, and take -2 to attack rolls and to any damaging action without the Sexual trait."),
+    "dubious-consent":
+      "You gave in and offered yourself, either to calm them or to convince yourself that you wanted it. Roll Diplomacy against their Will DC or Deception against your own, at -2. On a success you hold off Defeated while you are Submitting...",
+    "masturbating":
+      "You are too busy getting yourself off to watch your surroundings. You are Off-Guard, Struggle Snuggle lands on you more easily, and a Sexual Advance brings +1 extra Arousal. Ends when you climax, or when someone joins in.",
+    "arousal": _sys2(
+      "The heat you are running on, from nothing to your limit. Arousing effects raise it, and reaching your maximum tips you into a climax that resets it and leaves Afterglow...",
+      "The heat you are running on, from nothing to your limit. Sexual damage raises it by 1, critical Sexual damage by 2, and reaching your maximum makes you cum..."),
+    "horny": _sys2(
+      "Raw, building need that will not sit still. Each token makes Arousal climb faster - every gain is increased by your Horny tokens. A rest clears them.",
+      "Raw, building need that will not sit still. Any Arousal you gain is increased by your Horny value, and climaxing while not Submitting raises it further. Ends at your Daily Preparations."),
+    "breeding":
+      "How readily you take or plant a seed, staged 0 to 3. The highest Fertility between the two of you governs the breeding: at 2 the Brood Roll is easier, at 3 there is no roll at all and it simply takes...",
+    "dominating": _sys2(
+      "You have them, and they know it. An H-Scene role - the counterpart to Submitting, the two of you bound together in control and surrender.",
+      "You have them, and they know it. You are having sex with a creature and you are in control. Ends when you leave its reach."),
+    "submitting": _sys2(
+      "You are bottoming to whoever is pressing you, and they set the pace. You are Restrained and cannot act against them except to break free with a Carnal Escape, or be pulled out by an ally's Carnal Rescue.",
+      "You are bottoming to whoever is pressing you, and they set the pace. If you climax while Submitting you become Defeated. Ends when you leave the creature's reach."),
+    "stuck-submitting": _sys2(
+      "Held fast and used where you stand - pinned, framed, or wedged somewhere you cannot climb out of. You are Restrained and Exposed 2, and a Carnal Press on you is not answered: you give in, with no Resist and no Stress to spend...",
+      "Held fast and used where you stand - pinned, framed, or wedged somewhere you cannot climb out of. You are Exposed and Restrained, others can use Sexual Advance on you without grappling first, and getting free means an Escape against whatever holds you..."),
+    "swallowed": _sys2(
+      "Sealed inside another body, warm and working around you. Nothing outside can reach you and you cannot reach it, and you go where it goes. A Carnal Escape against its Difficulty gets you out.",
+      "Sealed inside a hot, working gullet - milked by slick muscle, not chewed. You are Exposed and Restrained, and each of its turns you gain Arousal instead of taking damage. An Escape against its DC gets you expelled..."),
+    // PF2e only - the row does not render on Daggerheart, so there is no DH half.
+    "afterglow":
+      "The warm, floaty minutes after a climax. You gain a +1 status bonus to attack rolls, Perception, saves and skill checks.",
+    "birth-control": _sys2(
+      "Contraceptive alchemy or wards, staged 1 to 3. Each stage lowers the effective Fertility of any breeding you take part in by 1 - and since everyone is Fertility 1 by default, one stage is enough to stop an unenhanced character conceiving...",
+      "Contraceptive alchemy or magic, staged 1 to 3. Each stage lowers the carrier's effective Fertility by 1. The Elixir gives Birth Control 2 for 24 hours; the Greater Elixir gives 3."),
+    "dizzy":
+      "Something has your head swimming and the floor tilting. You are Vulnerable, and you automatically Give In to Carnal Presses.",
+    "posed":
+      "Set and lacquered everywhere that could resist, left soft and warm everywhere that is wanted. You cannot move or act and take no damage, a Carnal Press needs no Resist, and there is no Carnal Escape - someone else has to free you...",
+    "hooked":
+      "You need your next dose and you know exactly who has it. The GM can spend a Fear to send you looking for it, and you resist that substance's effects at disadvantage. A long rest clean of it clears this...",
+    "lustful":
+      "You are running hot on an aphrodisiac, and the heat fills you with energy. When a feature asks you to mark Stress to activate it, you mark that much Arousal instead. Cleared when you rest.",
+    "nirvana":
+      "Your spirit has floated free of your used body and left it to them. You are immune to damage and every effect, and can cast from your loadout at no cost - but you take no physical action and cannot control your body...",
+    "persona-overridden":
+      "You belong to your master now - not a person, a trained fuck toy. You cannot act unless commanded, you count as Willing for anything they start, and you cannot speak, flee, defend yourself or decide against them...",
+    "exoskeleton-dry": _sys2(
+      "The suit's joints have run dry and its pistons have withdrawn, leaving you open and still bound. You are no longer Plugged, Chaste or Caged, rolls to get the suit off you have advantage, and it walks you to the nearest creature that could grease it again...",
+      "The suit's joints have run dry and its pistons have withdrawn, leaving you open and still bound. You are no longer Plugged, Chaste or Caged, the DC to Force Open it drops by 4, and on initiative it Strides you at the nearest creature that could grease it again..."),
+  };
+  // Applied rather than written into each row so the whole voice lives in one
+  // block and can be reviewed as prose. `impregnated` and `egg-host` keep their
+  // own dynamic descs - they report where the pregnancy actually is, which no
+  // fixed string can do.
+  for (const d of AFLP.STATUS_DEFS) {
+    const t = STATUS_DESCS[d.key];
+    if (t !== undefined) d.desc = t;
+  }
+
 
   // Temporary effects the GM can clear straight from the panel via the hover X.
   // Permanent/structural things (kinks, titles, anatomy features, pregnancy, and
@@ -470,6 +665,12 @@
     "mind-break", "bimbofied", "bullified", "hypnotized", "entranced", "exposed",
     "defeated", "denied", "toasted", "dubious-consent", "masturbating", "horny",
     "dominating", "submitting", "stuck-submitting", "swallowed", "afterglow", "breeding",
+    // Added 4 Sept 2026 with their rows. `exoskeleton-dry` is deliberately NOT
+    // here: it is derived from Chest Coat, so the X would clear it and the next
+    // sync would put it straight back - the same "visibly does nothing" trap the
+    // note below describes for horny and denied. `persona-overridden` is left out
+    // for the same reason: the Doll Maker's persona swap owns it.
+    "dizzy", "posed", "hooked", "lustful", "nirvana",
   ]);
 
   // Clear one temporary status from an actor. stuck-submitting and swallowed run
@@ -1051,9 +1252,38 @@
   // kink cards gained bullet lists on 8 Aug 2026, which would have multiplied it
   // by every list item. Both callers go through here so the next one cannot
   // drift - this logic was duplicated verbatim in _tierFlavour and _summaryFor.
+  // FOUNDRY ENRICHER SYNTAX IS NOT HTML, so flattening tags leaves it behind as
+  // literal text. Reported 4 Sept 2026 with a screenshot of the Loads row reading
+  // "Loads is the number of @UUID[Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items
+  // .Item.JNCgJRCpdbCl8meY]{Cum Shots} you can shoot before you run dry."
+  //
+  // The tooltip is deliberately PLAIN TEXT in our own element - see the note on
+  // _tipEl about Daggerheart replacing the core TooltipManager - so enriching to
+  // real links is not on the table. Unwrapping to the label is: a reader wants
+  // "Cum Shots", and the link itself is one click away on the row.
+  //
+  // THREE SHAPES, and the last two were found by testing rather than by reading:
+  //   labelled   @UUID[...]{Cum Shots} / [[/act request]]{Request}  -> the label
+  //   a check    @Check[flat|dc:11]  -> "DC 11 flat check". Dropping it left
+  //              "succeed at a  to Cast a Spell" - the number IS the content.
+  //   bare       [[/act request]]Diplomacy -> dropped, leaving "Diplomacy"
+  //
+  // NESTED BRACKETS ARE REAL: @Damage[2d6[bleed]]{2d6 bleed}. A [^\]]* argument
+  // matcher stops at the INNER bracket and leaves "]{2d6 bleed}" on screen, which
+  // is what my first version did. _ARGS allows one level of nesting.
+  // STALE IF: Foundry adds an enricher that is neither @Word[...] nor [[...]].
+  const _ARGS = "\\[(?:[^\\[\\]]|\\[[^\\]]*\\])*\\]";
+  const _deEnrich = (s) => String(s ?? "")
+    .replace(/@Check\[([A-Za-z-]+)\|[^\]]*?dc:(\d+)[^\]]*\](?:\{([^}]*)\})?/g,
+      (m, type, dc, label) => label || `DC ${dc} ${type} check`)
+    .replace(new RegExp("@[A-Za-z]+" + _ARGS + "\\{([^}]*)\\}", "g"), "$1")
+    .replace(/\[\[[^\]]*\]\]\{([^}]*)\}/g, "$1")
+    .replace(new RegExp("@[A-Za-z]+" + _ARGS, "g"), "")
+    .replace(/\[\[[^\]]*\]\]/g, "")
+    .replace(/\s{2,}/g, " ");
   const _flatten = (raw) => {
     const div = document.createElement("div");
-    div.innerHTML = String(raw ?? "").replace(/<(?:\/(?:p|li|ul|ol|div|h[1-6]|tr|td)|br\s*\/?|hr\s*\/?)>/gi, "$& ");
+    div.innerHTML = _deEnrich(raw).replace(/<(?:\/(?:p|li|ul|ol|div|h[1-6]|tr|td)|br\s*\/?|hr\s*\/?)>/gi, "$& ");
     let text = (div.textContent ?? "").replace(/\s+/g, " ").trim();
     if (text.length > 240) text = text.slice(0, 240).replace(/\s+\S*$/, "") + "\u2026";
     return text;
@@ -1603,6 +1833,17 @@
         const moved = Math.hypot(e.clientX - _dn.x, e.clientY - _dn.y);
         _dn = null;
         if (moved < 4) {
+          // TOGGLE, NOT OPEN. Clicking the handle again used to stack a second
+          // and third "Manage Conditions" dialog on top of the first, because
+          // nothing checked whether one was already up - reported by Ardis,
+          // 4 Sept 2026. A second click now closes the one that is open.
+          //
+          // Matched by TITLE rather than by a handle we keep, because the dialog
+          // is awaited inside _openConditionManager and never handed back here.
+          // STALE IF: that window title changes.
+          const open = [...(foundry.applications?.instances?.values?.() ?? [])]
+            .find(w => w?.constructor?.name === "DialogV2" && /Manage Conditions/i.test(w?.title ?? ""));
+          if (open) { open.close(); return; }
           const a = _hudActor();
           if (a) AFLP.UI?.SheetTab?._openConditionManager?.(a, null);
         }

@@ -966,7 +966,14 @@ window.AFLP_Arousal = {
     const _afterglowSceneId = scene?.id ?? null;
     const _glowedThisScene  = _afterglowSceneId != null
       && actor.getFlag(FLAG, "afterglowScene") === _afterglowSceneId;
-    if (AFLP.Settings.automation && _partneredClimax && !_glowedThisScene) {
+    // NOT ON DAGGERHEART AT ALL, from 4 Sept 2026. Afterglow was retired as a DH
+    // condition by Ardis's ruling - on DH the on-climax outcome is the Horny or
+    // Defeat token, and Afterglow was only a second name for it. The adapter has
+    // no-opped applyCondition("afterglow") since June, so this block already did
+    // nothing there; the explicit gate means the DH card can be deleted from the
+    // pack without this quietly starting to depend on `contentUuid` returning
+    // null. PF2e is unchanged - the +1 status item is real and still applies.
+    if (AFLP.system?.id !== "daggerheart" && AFLP.Settings.automation && _partneredClimax && !_glowedThisScene) {
       const afterglowUUID = AFLP.system.contentUuid("afterglow");
       if (afterglowUUID) {
         const liveActorAg = canvas?.tokens?.get(tokenId)?.actor ?? actor.token?.actor ?? actor;

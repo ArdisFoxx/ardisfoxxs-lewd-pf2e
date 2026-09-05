@@ -555,7 +555,10 @@
   // PC fails to resist a Carnal action (failed roll or gave in). Marks the scene
   // roles so the card reads right and the role prompt does not fire. Idempotent:
   // startScene find-or-joins the one battlemap scene, so re-calling is safe.
-  async function _startHScene(pcActor, sourceTokenId, sourceName, { deposit = false } = {}) {
+  // `reason` is "posed" or "dizzy" when the press auto-landed because of the
+  // target's own state. It is said HERE because this card posts before the
+  // position picker, and the card that explains the landing posts after it.
+  async function _startHScene(pcActor, sourceTokenId, sourceName, { deposit = false, reason = null } = {}) {
     try {
       if (!AFLP.HScene?.startScene || !AFLP.Settings?.hsceneEnabled) return false;
       const srcTok = sourceTokenId ? canvas?.tokens?.get(sourceTokenId) : null;
@@ -573,8 +576,13 @@
       // because its prompt is fire-and-forget and the position is still unset
       // when the awaited ensureAttackerPosition runs a moment later.
       AFLP.HScene.startScene(_tokenData(srcTok), _tokenData(pcTok), false, { promptPosition: false });
+      const _why = reason === "posed"
+        ? ` They are <strong>Posed</strong>, so this press lands with no Carnal Resist.`
+        : reason === "dizzy"
+        ? ` They are <strong>Dizzy</strong>, so this press lands with no Carnal Resist.`
+        : "";
       await _card(pcActor, "is pulled into an H-Scene", [
-        `${sourceName ? `<strong>${sourceName}</strong>` : "The adversary"} has them now - the encounter becomes an H-Scene. The adversary presses with its H-Scene Action whenever it acts, until they break free or break.`,
+        `${sourceName ? `<strong>${sourceName}</strong>` : "The adversary"} has them now - the encounter becomes an H-Scene. The adversary presses with its H-Scene Action whenever it acts, until they break free or break.${_why}`,
       ]);
       // Bullified urge: a Bull within Close range of an ally being made to Submit to
       // an ADVERSARY feels a near-irresistible pull to join in and top the ally too,
@@ -1143,7 +1151,17 @@
       const posed = opts.landReason === "posed";
       const dizzy = opts.landReason === "dizzy";
       if ((posed || dizzy) && opts.sourceTokenId) {
-        await _startHScene(actor, opts.sourceTokenId, opts.sourceName, { deposit: !!opts.hsa });
+        // `reason` goes with it so the H-Scene card can SAY WHY before the
+        // position picker opens. Measured 4 Sept 2026: the picker is opened by
+        // _startHScene, which runs before the "no Resist" card, so a GM who
+        // auto-landed a Dizzy target saw a bare "Select Position" modal with
+        // nothing explaining it and read the feature as dead.
+        //
+        // THE PICKER IS NOT MOVED, DELIBERATELY. It runs before `_carnalArousal`,
+        // and if that press tips the target into a climax the deposit engine reads
+        // the scene position - deferring the prompt past it would deposit with no
+        // position set. Naming the reason is the cheap half; reordering is not.
+        await _startHScene(actor, opts.sourceTokenId, opts.sourceName, { deposit: !!opts.hsa, reason: opts.landReason });
       }
 
       const res = await _carnalArousal(actor, opts.sourceTokenId, opts.arousal ?? 1);
@@ -1753,6 +1771,42 @@
     // DO NOT ADD ONE BACK. Two engines cannot be kept in step, and the first
     // attempt shipped a load-per-round leak from creatures that never climaxed.
     // If a Carnal deposit needs behaviour the engine lacks, change the engine.
+    // ── WHY A PRESS LANDS WITH NO RESIST, FROM THE TARGET ALONE ─────────────
+    //
+    // Returns "posed", "dizzy" or null. It answers ONLY the reasons that are a
+    // property of the target - not `held`, which depends on the pair and is each
+    // caller's own business (`press` gates on Submitting+Dominating, the dock on
+    // being in the scene).
+    //
+    // THIS EXISTS BECAUSE THERE ARE TWO PRESS PATHS AND THEY DRIFTED. The Scene
+    // Actions dock does not call `press()`; it had its own copy of this gate,
+    // with a comment reading "Keep this gate and press()'s in step". Posed was in
+    // both. Dizzy was added to `press()` on 31 Aug 2026 and never to the dock, so
+    // for four days a Dizzy creature auto-gave-in when pressed from the carnal
+    // dock and was asked for a Carnal Resist when pressed from Scene Actions -
+    // the route a GM actually uses. Reported by Ardis 4 Sept 2026, after a suite
+    // test that drove `press()` passed and proved nothing about the other path.
+    //
+    // ORDER MATTERS: Posed outranks Dizzy where both apply, because Posed also
+    // removes the Carnal Escape and Dizzy does not, and the card must say the
+    // stronger thing.
+    //
+    // STALE IF: a third auto-land condition is added. Add it HERE and both paths
+    // get it - that is the entire point of this function existing.
+    targetAutoLandReason(target) {
+      if (!target) return null;
+      // POSED: three Doll-Maker-set features state it in their own text -
+      // "Against a Posed creature, its Carnal Press calls for no Carnal Resist."
+      // A set body has nothing to resist WITH. The Glazier sets you, the
+      // Marionette cashes it in - so any presser gets it, not just the one who
+      // posed you.
+      if (AFLP.cond?.has?.(target, "posed")) return "posed";
+      // DIZZY: Ardis, 31 Aug 2026 - "While Dizzy they are Vulnerable and
+      // automatically Give In to Carnal Presses." Same reasoning, same scope.
+      if (AFLP.cond?.has?.(target, "dizzy")) return "dizzy";
+      return null;
+    },
+
     async press(presser, opts = {}) {
       // 5e front-loads the roll on the attacker BY DESIGN - do not route it here.
       if (is5e()) return this.actorPress(presser, opts);
@@ -1765,25 +1819,15 @@
       // for a first Press from a new adversary.
       const held = AFLP.cond?.has?.(target, "submitting") && AFLP.cond?.has?.(presser, "dominating");
 
-      // POSED lands the same way, and this is the mechanic three Doll-Maker-set
-      // features state in their text: "Against a Posed creature, its Carnal Press
-      // calls for no Carnal Resist." A set body has nothing to resist WITH.
-      //
-      // Unlike the held case it is NOT gated on the pair - Posed is a property of
-      // the target, not of a hold this presser established, so any presser gets it.
-      // That is the whole point of the set: the Glazier sets you and the Marionette
-      // cashes it in.
-      const posed = AFLP.cond?.has?.(target, "posed");
-      // DIZZY, same gate and the same reason: it is a property of the TARGET, not
-      // of a hold this presser established, so any presser gets it. The Drone
-      // Stinger's venom is the only source today - `Dizzying Venom`, 31 Aug 2026.
-      // Posed wins the label where both apply, because Posed also removes the
-      // escape and Dizzy does not.
-      const dizzy = AFLP.cond?.has?.(target, "dizzy");
-      if (held || posed || dizzy) return this.autoLand(target, {
+      // The target-only reasons come from ONE place now - `targetAutoLandReason`,
+      // below. They used to be written out here AND, separately, in the Scene
+      // Actions dock, whose own comment said to keep the two in step. They were
+      // not: Dizzy was added here on 31 Aug and never there.
+      const reason = this.targetAutoLandReason(target);
+      if (held || reason) return this.autoLand(target, {
         ...opts,
         sourceName: opts.sourceName ?? presser.name,
-        landReason: held ? "held" : (posed ? "posed" : "dizzy"),
+        landReason: held ? "held" : reason,
       });
 
       const presserIsPC = presser.type === "character";
@@ -2342,8 +2386,32 @@
       const dc = srcActor.system?.difficulty ?? 15;
       const clean = (feat?.name || "").replace(/\s*\((?:Mark a Stress|Spend a Fear|Action|Reaction|Passive)\)\s*$/i, "").trim();
       const srcName = clean ? `${srcActor.name}'s ${clean}` : `${srcActor.name}`;
+      const applies = this.featureApplies(feat);
+      const scenePosition = this.featureScenePosition(feat);
+
+      // THE THIRD PRESS PATH, AND IT HAD NO GATE AT ALL. This button drives the
+      // H-Scene loop - the adversary pressing again, round after round - and it
+      // went straight to postPrompt. So a creature the cards say cannot resist was
+      // asked to resist every single round: Posed since it shipped, Dizzy since
+      // 31 Aug 2026. Measured 4 Sept on a rig in dh-test, both of them.
+      //
+      // THE CARD IS THE SPEC, and Ardis quoted it: "If the target is already
+      // Submitting to the presser, there is no roll and no Resist: a Carnal Press
+      // instead causes them each to mark 1 Arousal. The target's way out is when
+      // they take the Spotlight." So the held case belongs here too - a prompt
+      // once the scene is running contradicts the Carnal Press card outright.
+      //
+      // Same pair test as `press`: Submitting is not enough on its own, because a
+      // PC submitting to someone ELSE is still a fresh press from this adversary.
+      const held = AFLP.cond?.has?.(pcActor, "submitting") && AFLP.cond?.has?.(srcActor, "dominating");
+      const reason = this.targetAutoLandReason(pcActor);
+      if (held || reason) return this.autoLand(pcActor, {
+        dc, sourceName: srcName, sourceTokenId, hsa: true, applies, scenePosition,
+        landReason: held ? "held" : reason,
+      });
+
       return this.postPrompt(pcActor, { dc, sourceName: srcName, sourceTokenId, hsa: true,
-        applies: this.featureApplies(feat), scenePosition: this.featureScenePosition(feat) });
+        applies, scenePosition });
     },
 
     // Bind the approach buttons on a rendered chat card. Idempotent per element.

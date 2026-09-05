@@ -2286,7 +2286,16 @@ AFLP.UI.SheetTab = {
     const style = document.createElement("style");
     style.id = "aflp-cm-styles";
     style.textContent = `
-      .aflp-cm { display:flex; flex-direction:column; gap:12px; padding:4px 2px 2px; min-width:264px; font-family:var(--font-primary, serif); }
+      /* SCROLLS RATHER THAN GROWS. 32 rows is taller than a short screen, and a
+         dialog whose Apply button is off the bottom edge is worse than a long
+         one. max-width keeps the chip rows from stretching across a wide monitor
+         into one unreadable line. */
+      .aflp-cm { display:flex; flex-direction:column; gap:12px; padding:4px 2px 2px; min-width:264px; max-width:760px; max-height:68vh; overflow-y:auto; font-family:var(--font-primary, serif); }
+      .aflp-cm-ro-wrap > summary { cursor:pointer; list-style:none; user-select:none; }
+      .aflp-cm-ro-wrap > summary::-webkit-details-marker { display:none; }
+      .aflp-cm-ro-wrap > summary::before { content:"▸ "; opacity:0.7; }
+      .aflp-cm-ro-wrap[open] > summary::before { content:"▾ "; }
+      .aflp-cm-ro-wrap { gap:6px; }
       .aflp-cm-head { display:flex; align-items:center; justify-content:center; gap:8px; padding-bottom:9px; border-bottom:1px solid rgba(201,169,110,0.3); }
       .aflp-cm-head-ico { color:#c9a96e; font-size:13px; opacity:0.8; }
       .aflp-cm-actor { font-weight:700; font-size:15px; color:#e8c46a; letter-spacing:0.3px; }
@@ -2302,6 +2311,27 @@ AFLP.UI.SheetTab = {
       .aflp-cm-chip:hover { border-color:rgba(255,255,255,0.4); background:rgba(255,255,255,0.08); }
       .aflp-cm-chip input { display:none; }
       .aflp-cm-chip-ico { font-size:13px; line-height:1; }
+      /* THE GENERIC ON STATE. Every checked rule below this one is keyed to a
+         class the OLD hand-written markup emitted; the table-driven chips emit
+         aflp-cm-toggle instead, so without this a clicked chip looked identical
+         to an unclicked one and the only way to know it had taken was to press
+         Apply. A toggle that gives no feedback is not a toggle.
+         The per-key accents underneath are colour, not state - this rule is what
+         says ON. */
+      .aflp-cm-chip.aflp-cm-toggle:has(input:checked) {
+        background:rgba(201,169,110,0.2); border-color:#c9a96e; color:#e8c46a;
+        box-shadow:0 0 9px rgba(201,169,110,0.32);
+      }
+      .aflp-cm-chip.aflp-cm-toggle:has(input:checked) .aflp-cm-chip-ico { color:#e8c46a; }
+      /* A few carry their own colour so a full row of gold is still readable. */
+      .aflp-cm-chip.cm-dizzy:has(input:checked)      { background:rgba(201,160,220,0.22); border-color:#c9a0dc; color:#e0c0f0; box-shadow:0 0 9px rgba(201,160,220,0.32); }
+      .aflp-cm-chip.cm-posed:has(input:checked)      { background:rgba(185,166,201,0.22); border-color:#b9a6c9; color:#dcc8ec; box-shadow:0 0 9px rgba(185,166,201,0.32); }
+      .aflp-cm-chip.cm-lustful:has(input:checked)    { background:rgba(232,132,180,0.22); border-color:#e884b4; color:#f4aed0; box-shadow:0 0 9px rgba(232,132,180,0.32); }
+      .aflp-cm-chip.cm-hypnotized:has(input:checked),
+      .aflp-cm-chip.cm-entranced:has(input:checked)  { background:rgba(140,120,200,0.22); border-color:#8c78c8; color:#c0b0ec; box-shadow:0 0 9px rgba(140,120,200,0.32); }
+      .aflp-cm-chip.cm-chaste:has(input:checked),
+      .aflp-cm-chip.cm-caged:has(input:checked),
+      .aflp-cm-chip.cm-plugged:has(input:checked)    { background:rgba(200,90,90,0.22); border-color:#c85a5a; color:#eca0a0; box-shadow:0 0 9px rgba(200,90,90,0.3); }
       .aflp-cm-chip.role-none:has(input:checked)       { background:rgba(201,169,110,0.18); border-color:#c9a96e; color:#e8c46a; }
       .aflp-cm-chip.role-dominating:has(input:checked) { background:rgba(200,64,64,0.22);  border-color:#d05858; color:#ec8e8e; box-shadow:0 0 9px rgba(200,64,64,0.35); }
       .aflp-cm-chip.role-submitting:has(input:checked) { background:rgba(96,128,200,0.22); border-color:#7090d0; color:#a6bcec; box-shadow:0 0 9px rgba(96,128,200,0.35); }
@@ -2328,6 +2358,18 @@ AFLP.UI.SheetTab = {
       }
       .aflp-cm-stepper input:focus { outline:none; border-color:#c9a96e; box-shadow:0 0 6px rgba(201,169,110,0.4); }
       .aflp-cm-step-hint { font-size:10px; opacity:0.5; width:36px; text-align:right; }
+      /* Read-outs: conditions something ELSE owns. Deliberately flat and
+         uninteractive - a dashed border, no hover - because if they look like a
+         control a GM can set, the "why did my change not stick" question just
+         moves here instead of being answered. */
+      .aflp-cm-ro {
+        display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+        padding:6px 10px; border-radius:8px;
+        background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.12);
+      }
+      .aflp-cm-ro-name { font-size:12px; font-weight:600; color:#cabfa6; min-width:104px; }
+      .aflp-cm-ro-val  { font-size:12px; font-weight:700; color:#e8c46a; }
+      .aflp-cm-ro-note { font-size:10px; opacity:0.6; flex:1 1 100%; line-height:1.35; }
       .aflp-cm-tok { display:flex; align-items:center; gap:6px; }
       .aflp-cm-tok input[type="hidden"] { display:none; }
       .aflp-cm-tok-btn {
@@ -2587,136 +2629,261 @@ AFLP.UI.SheetTab = {
       + `<div class="aflp-ms-roleblock" data-ms-role="top"${role === "top" ? "" : ' style="display:none"'}>${gridFor(top)}</div>`;
   },
 
+  // ── THE CONDITION MANAGER IS A TABLE, NOT MARKUP ──────────────────────────
+  //
+  // It used to be hand-written HTML per condition, and it held EIGHT of the
+  // twenty-nine conditions a creature can carry - role, Exposed, Mind Break,
+  // Bimbofied, Bullified, Fertility, Birth Control, Defeat. Nobody noticed,
+  // because nothing in the file said what the full set was. Ardis, 4 Sept 2026:
+  // "the status panel and the status manager need to have ALL AFLR/AFLP
+  // conditions in it, otherwise users will think that we are shipping it broken."
+  //
+  // So the rows are DATA and the dialog is a loop over them. A new condition is
+  // one entry here and it appears in the manager, in its band, with the right
+  // control. That is the whole point; do not add bespoke markup back.
+  //
+  // THREE RULES THIS TABLE ENCODES, all settled with Ardis on 4 Sept:
+  //
+  //  1. The PANEL displays every condition; the MANAGER edits the ones a GM may
+  //     legitimately set. Derived state - Exoskeleton Dry from Chest Coat,
+  //     Persona Overridden from the Doll Maker, Arousal from its own bar - is
+  //     "readout": shown so the manager is complete, not editable, because the
+  //     code that owns it would overwrite a manual set on the next sync.
+  //  2. Horny and Denied stay editable on the SHEET, where the pips are: "users
+  //     like the pips... its kind of part of the arousal suite along with denied".
+  //     Here they are a readout that NAMES THEIR FLOORS AND WHO HOLDS THEM, which
+  //     is the one thing the pips cannot show and the reason clearing them
+  //     sometimes looks broken.
+  //  3. Bands, in the status panel's own order, so the two surfaces read alike.
+  //
+  // CAPS ARE NOT RESTATED HERE. `AFLP.CONDITION_CAPS` is the shared ceiling list
+  // and it already matches the PF2e condition items' badge maxima. A second copy
+  // in the UI is how Exposed 5 got in once. `cap === null/undefined` is uncapped,
+  // which is correct for Mind Break on PF2e.
+  //
+  // `sys` IS MEASURED, NOT ASSUMED. "dh" rows are conditions only Daggerheart can
+  // express - read from `CONFIG.statusEffects` in dh-test on 4 Sept 2026 against
+  // the PF2e Conditions folder. STALE IF a system gains one of the other's.
+  // Re-measure with the audit probe rather than editing this from memory.
+  _managerRows() {
+    return [
+      { band: "Scene Role", key: "role", label: "Scene Role", control: "role", sys: "both" },
+
+      // Imposed on you, or worn. The gear binaries are SETTABLE by Ardis's call:
+      // the Daggerheart token HUD already toggles them, and refusing here while
+      // the HUD allows it reads as broken. Worn gear re-asserts on its next sync,
+      // which is correct - the gear is the reason, not this dialog.
+      { band: "Imposed", key: "dizzy",            label: "Dizzy",        ico: "✵", control: "toggle", sys: "dh" },
+      { band: "Imposed", key: "posed",            label: "Posed",        ico: "⛏", control: "toggle", sys: "dh" },
+      { band: "Imposed", key: "hooked",           label: "Hooked",       ico: "⚕", control: "toggle", sys: "dh" },
+      { band: "Imposed", key: "gagged",           label: "Gagged",       ico: "●", control: "toggle", sys: "both" },
+      // DAGGERHEART ONLY, and this is per-system DESIGN rather than a gap.
+      // MEASURED in pf2e-dev 4 Sept 2026: setting these three did nothing, because
+      // the PF2e pack has no condition item for any of them - `contentUuid` returns
+      // nothing and the apply is a silent no-op. It has no item because it needs
+      // none: on Pathfinder this gear speaks the SYSTEM's language instead. The
+      // Leather Blindfold card says "Wearing this mask makes you Blinded"; Leg
+      // Cuffs give "a -10-foot penalty to your Speed". Daggerheart has no native
+      // equivalents, so AFLR carries its own three there.
+      // Gagged, Plugged, Chaste and Caged are NOT in this group - each has a real
+      // PF2e condition item and each applied correctly in the same sweep.
+      { band: "Imposed", key: "blindfolded",      label: "Blindfolded",  ico: "◑", control: "toggle", sys: "dh" },
+      { band: "Imposed", key: "hobbled",          label: "Hobbled",      ico: "⛓", control: "toggle", sys: "dh" },
+      { band: "Imposed", key: "cuffed",           label: "Cuffed",       ico: "⛓", control: "toggle", sys: "dh" },
+      { band: "Imposed", key: "plugged",          label: "Plugged",      ico: "⬤", control: "toggle", sys: "both" },
+      { band: "Imposed", key: "chaste",           label: "Chaste",       ico: "⛔", control: "toggle", sys: "both" },
+      { band: "Imposed", key: "caged",            label: "Caged",        ico: "⛔", control: "toggle", sys: "both" },
+      // These two own their own teardown - a bare cond.remove leaves the scene
+      // half-dismantled, which is why the panel's X routes them the same way.
+      { band: "Imposed", key: "stuck-submitting", label: "Stuck Submitting", ico: "↓", control: "toggle", sys: "both", free: a => AFLP.stuckSubmitting?.free?.(a) },
+      { band: "Imposed", key: "swallowed",        label: "Swallowed",    ico: "◌", control: "toggle", sys: "both", free: a => AFLP.swallowed?.free?.(a) },
+
+      // State.
+      { band: "State", key: "exposed",    label: "Exposed",    ico: "✦", control: "stepper", sys: "both",
+        title: "0-2. At 2 the panel reads Nude: clothes open means Carnal Resist at disadvantage, near enough naked also makes you Vulnerable." },
+      // MIND BREAK IS TWO DIFFERENT THINGS. On Daggerheart it is a Death Move -
+      // binary, and the old dialog rendered it as a checkbox for that reason. On
+      // PF2e it is an uncapped track. Kept as two rows rather than one lying row.
+      { band: "State", key: "mind-break", label: "Mind Break", ico: "✲", control: "toggle",  sys: "dh" },
+      { band: "State", key: "mind-break", label: "Mind Break", ico: "✲", control: "stepper", sys: "pf2e" },
+      { band: "State", key: "bimbofied",  label: "Bimbofied",  ico: "❀", control: "stepper", sys: "both", tracked: "setBimbofied" },
+      { band: "State", key: "bullified",  label: "Bullified",  ico: "♉", control: "stepper", sys: "both", tracked: "setBullified" },
+      // Defeat on DH is a valued track; PF2e's Defeated is a separate binary
+      // condition with its own key. NOT one row, and not one key.
+      { band: "State", key: "defeat",     label: "Defeat",     ico: "☠", control: "stepper", sys: "dh" },
+      { band: "State", key: "defeated",   label: "Defeated",   ico: "☠", control: "toggle",  sys: "pf2e" },
+      { band: "State", key: "entranced",  label: "Entranced",  ico: "◉", control: "toggle",  sys: "both" },
+      { band: "State", key: "hypnotized", label: "Hypnotized", ico: "◎", control: "toggle",  sys: "both" },
+      { band: "State", key: "lustful",    label: "Lustful",    ico: "♥", control: "toggle",  sys: "dh" },
+      { band: "State", key: "toasted",    label: "Toasted",    ico: "♨", control: "toggle",  sys: "both" },
+      { band: "State", key: "dubious-consent", label: "Dubious Consent", ico: "⁉", control: "toggle", sys: "pf2e" },
+      // PF2E ONLY UNTIL RULED. Reported by Ardis 4 Sept: setting it on Daggerheart
+      // does nothing - and it does nothing on three levels, all measured that day:
+      //   1. the STATUS PANEL row never reads this condition. Its value is
+      //      `AFLP.HScene.isSelfAbsorbed(actorId)`, true only inside a SOLO
+      //      H-Scene, so a hand-set condition cannot light the row on either system;
+      //   2. Daggerheart does not register `masturbating` as a status effect, so
+      //      there is no token icon either;
+      //   3. the DH card exists - aflr-dh-items "Masturbating" - with an EMPTY
+      //      description, so clicking through shows nothing.
+      // On PF2e the condition item is real and carries its own rules (Off-Guard,
+      // easier Struggle Snuggle, +1 Arousal from a Sexual Advance), so there the
+      // toggle does something.
+      // The DH adapter has said since 29 Aug that `masturbating` and `afterglow`
+      // "need Ardis's ruling". This is that open question surfacing in the UI.
+      { band: "State", key: "masturbating",    label: "Masturbating",    ico: "☝", control: "toggle", sys: "pf2e" },
+
+      // Kit, buffs, fertility.
+      { band: "Kit & Buffs", key: "breeding",      label: "Fertility",     ico: "☸", control: "stepper", sys: "both", staged: true,
+        title: "Staged 0-3. Every creature is Fertility 1 by default; 0 clears back to that. 2 = Brood Roll DC -2, 3 = no roll, it just takes." },
+      { band: "Kit & Buffs", key: "birth-control", label: "Birth Control", ico: "⊘", control: "stepper", sys: "both", staged: true,
+        title: "Staged 1-3: each stage reduces effective Fertility by 1, floor 0. 1 blocks an unenhanced character, 2 = the Elixir, 3 = the Greater Elixir." },
+      // PF2E ONLY, and MEASURED rather than assumed: driven on a DH rig 4 Sept
+      // 2026, `AFLP.cond.apply(actor, "afterglow")` returned without throwing and
+      // set nothing. Its registry uuid points into `aflp-lewd-items` - the PF2e
+      // pack - and Daggerheart registers no such status. Offering it here on DH
+      // was a switch wired to nothing.
+      { band: "Kit & Buffs", key: "afterglow",     label: "Afterglow",     ico: "☀", control: "toggle",  sys: "pf2e" },
+      { band: "Kit & Buffs", key: "nirvana",       label: "Nirvana",       ico: "✺", control: "toggle",  sys: "dh" },
+
+      // Owned elsewhere. Shown so the manager is the whole picture; not editable
+      // here, because something else would overwrite the edit.
+      { band: "Held elsewhere", key: "horny",   label: "Horny",   control: "readout", sys: "both", bag: "horny",
+        note: "Set with the pips on the sheet." },
+      { band: "Held elsewhere", key: "denied",  label: "Denied",  control: "readout", sys: "both", bag: "denied",
+        note: "Set with the pips on the sheet." },
+      { band: "Held elsewhere", key: "arousal", label: "Arousal", control: "readout", sys: "both",
+        read: a => `${AFLP.system?.getArousalCurrent?.(a) ?? 0} / ${AFLP.HScene?.calcArousalMax?.(a) ?? "?"}`,
+        note: "The Arousal bar owns this." },
+      { band: "Held elsewhere", key: "exoskeleton-dry", label: "Exoskeleton (Dry)", control: "readout", sys: "both",
+        note: "Derived from Chest Coat - a manual set is undone by the next sync." },
+      { band: "Held elsewhere", key: "persona-overridden", label: "Persona Overridden", control: "readout", sys: "both",
+        note: "The Doll Maker's persona swap owns this." },
+    ];
+  },
+
+  // The floors behind Horny or Denied, and WHO is holding each one. This is the
+  // answer to "why won't it clear" - a floor means the reason is still true, and
+  // until now nothing on screen ever said which reason.
+  _managerFloors(actor, which) {
+    const api = which === "denied" ? AFLP.denied : AFLP.horny;
+    let bag = {};
+    try { bag = api?._bag?.(actor) ?? {}; } catch (e) { bag = {}; }
+    const sources = Object.entries(bag.sources ?? {})
+      .map(([id, v]) => [id, Number(v) || 0]).filter(([, v]) => v > 0);
+    let total = 0, floor = 0;
+    try { total = Number(api?.total?.(actor)) || 0; } catch (e) {}
+    try { floor = Number(api?.permanent?.(actor)) || 0; } catch (e) {}
+    return { total, floor, sources };
+  },
+
   async _openConditionManager(actor, html) {
     if (!game.user.isGM || !actor) return;
     AFLP.UI.SheetTab._ensureConditionManagerCSS();
-    const dhDefeat = game.system?.id === "daggerheart";
-    const cur = {
-      dominating:   AFLP.cond.has(actor, "dominating"),
-      submitting:   AFLP.cond.has(actor, "submitting"),
-      defeat:       dhDefeat ? AFLP.cond.value(actor, "defeat") : (AFLP.cond.has(actor, "defeated") ? 1 : 0),
-      exposed:      AFLP.cond.value(actor, "exposed"),
-      mindBreak:    AFLP.cond.value(actor, "mind-break"),
-      bimbofied:    AFLP.cond.value(actor, "bimbofied"),
-      bullified:    AFLP.cond.value(actor, "bullified"),
-      breeding:     AFLP.cond.value(actor, "breeding") || (AFLP.cond.has(actor, "breeding") ? 3 : 0),
-      birthControl: AFLP.cond.value(actor, "birth-control") || (AFLP.cond.has(actor, "birth-control") ? 3 : 0),
+    const SYS = game.system?.id === "daggerheart" ? "dh" : "pf2e";
+    const rows = AFLP.UI.SheetTab._managerRows().filter(r => r.sys === "both" || r.sys === SYS);
+
+    const capOf = (key) => {
+      const c = AFLP.CONDITION_CAPS?.[key];
+      return (c === undefined || c === null) ? "" : c;
     };
-    const role = cur.dominating ? "dominating" : (cur.submitting ? "submitting" : "none");
-    // Token control: +/- buttons plus left-click-to-mark / right-click-to-clear
-    // on the value. A hidden input preserves the name so the Apply reader below
-    // is unchanged. data-max="" means unbounded (Mind Break on PF2e).
+    const valueOf = (r) => {
+      if (r.control === "stepper") return Number(AFLP.cond.value(actor, r.key)) || 0;
+      if (r.control === "toggle")  return AFLP.cond.has(actor, r.key) ? 1 : 0;
+      return 0;
+    };
+    const esc = (s) => String(s ?? "").replace(/"/g, "&quot;");
+
+    // Token control: +/- plus left-click-to-mark, right-click-to-clear. A hidden
+    // input carries the value so the Apply reader below is a plain querySelector.
     const tok = (name, value, min, max) => `
-      <div class="aflp-cm-tok" data-min="${min}" data-max="${max ?? ""}" title="Left-click to mark, right-click to clear">
+      <div class="aflp-cm-tok" data-min="${min}" data-max="${max}" title="Left-click to mark, right-click to clear">
         <button type="button" class="aflp-cm-tok-btn" data-d="-1">&minus;</button>
         <span class="aflp-cm-tok-val">${value}</span>
         <button type="button" class="aflp-cm-tok-btn" data-d="1">+</button>
-        <input type="hidden" name="${name}" value="${value}"/>
+        <input type="hidden" name="cm:${name}" value="${value}"/>
       </div>`;
+
+    const renderRow = (r) => {
+      if (r.control === "role") {
+        const role = AFLP.cond.has(actor, "dominating") ? "dominating"
+                   : AFLP.cond.has(actor, "submitting") ? "submitting" : "none";
+        return `<div class="aflp-cm-chips">
+          <label class="aflp-cm-chip role-none"><input type="radio" name="aflp-cm-role" value="none" ${role === "none" ? "checked" : ""}/><span class="aflp-cm-chip-txt">None</span></label>
+          <label class="aflp-cm-chip role-dominating"><input type="radio" name="aflp-cm-role" value="dominating" ${role === "dominating" ? "checked" : ""}/><span class="aflp-cm-chip-ico">▲</span><span class="aflp-cm-chip-txt">Dominating</span></label>
+          <label class="aflp-cm-chip role-submitting"><input type="radio" name="aflp-cm-role" value="submitting" ${role === "submitting" ? "checked" : ""}/><span class="aflp-cm-chip-ico">▼</span><span class="aflp-cm-chip-txt">Submitting</span></label>
+        </div>`;
+      }
+      if (r.control === "toggle") {
+        // `aflp-cm-toggle` is what the ON styling hangs off. The pre-existing
+        // checked rules are all keyed to the OLD bespoke classes (fx-exposed,
+        // dm-mind-break...), which this generic markup does not emit - so
+        // without this class a clicked chip changed nothing on screen and only
+        // Apply revealed it had registered. Reported by Ardis, 4 Sept 2026.
+        return `<label class="aflp-cm-chip aflp-cm-toggle cm-${r.key}" title="${esc(r.title ?? "")}">
+          <input type="checkbox" name="cm:${r.key}" ${valueOf(r) ? "checked" : ""}/>
+          <span class="aflp-cm-chip-ico">${r.ico ?? ""}</span><span class="aflp-cm-chip-txt">${r.label}</span>
+        </label>`;
+      }
+      if (r.control === "stepper") {
+        return `<div class="aflp-cm-stepper ${r.key}" title="${esc(r.title ?? "")}">
+          <span class="aflp-cm-step-ico">${r.ico ?? ""}</span>
+          <span class="aflp-cm-step-name">${r.label}</span>
+          ${tok(r.key, valueOf(r), 0, capOf(r.key))}
+          <span class="aflp-cm-step-hint">${capOf(r.key) === "" ? "0 = off" : `0–${capOf(r.key)}`}</span>
+        </div>`;
+      }
+      // readout
+      let body = "";
+      if (r.bag) {
+        const f = AFLP.UI.SheetTab._managerFloors(actor, r.bag);
+        const held = f.sources.length
+          ? f.sources.map(([id, v]) => `${id} ${v}`).join(", ")
+          : "nothing";
+        body = `<span class="aflp-cm-ro-val">${f.total}</span>`
+             + `<span class="aflp-cm-ro-note">floor ${f.floor} held by ${held}${f.floor ? " - it cannot go below that until the source lets go" : ""}. ${r.note ?? ""}</span>`;
+      } else {
+        const on = r.read ? r.read(actor) : (AFLP.cond.has(actor, r.key) ? "yes" : "no");
+        body = `<span class="aflp-cm-ro-val">${on}</span><span class="aflp-cm-ro-note">${r.note ?? ""}</span>`;
+      }
+      return `<div class="aflp-cm-ro"><span class="aflp-cm-ro-name">${r.label}</span>${body}</div>`;
+    };
+
+    // "Pretty heckin big menu" - Ardis, 4 Sept 2026, and he was right: 32 rows is
+    // a tall dialog. Two things keep it in hand without hiding anything a GM came
+    // here to change. The read-outs COLLAPSE, because they are reference rather
+    // than controls and a GM opens this to set something. And the whole thing
+    // scrolls internally rather than growing past the window - see the CSS.
+    const bands = [];
+    for (const band of ["Scene Role", "Imposed", "State", "Kit & Buffs"]) {
+      const mine = rows.filter(r => r.band === band);
+      if (!mine.length) continue;
+      const inner = band === "Scene Role"
+        ? mine.map(renderRow).join("")
+        : `<div class="aflp-cm-chips">${mine.map(renderRow).join("")}</div>`;
+      bands.push(`<div class="aflp-cm-section"><div class="aflp-cm-label">${band}</div>${inner}</div>`);
+    }
+    const ro = rows.filter(r => r.band === "Held elsewhere");
+    if (ro.length) {
+      bands.push(`<details class="aflp-cm-section aflp-cm-ro-wrap">
+        <summary class="aflp-cm-label">Held elsewhere (${ro.length}) - shown, set somewhere else</summary>
+        ${ro.map(renderRow).join("")}
+      </details>`);
+    }
+
     const content = `
       <div class="aflp-cm">
         <div class="aflp-cm-head">
           <span class="aflp-cm-head-ico">⚙</span>
           <span class="aflp-cm-actor">${actor.name}</span>
         </div>
-
-        <div class="aflp-cm-section">
-          <div class="aflp-cm-label">Scene Role</div>
-          <div class="aflp-cm-chips">
-            <label class="aflp-cm-chip role-none">
-              <input type="radio" name="aflp-cm-role" value="none" ${role==="none"?"checked":""}/>
-              <span class="aflp-cm-chip-txt">None</span>
-            </label>
-            <label class="aflp-cm-chip role-dominating">
-              <input type="radio" name="aflp-cm-role" value="dominating" ${role==="dominating"?"checked":""}/>
-              <span class="aflp-cm-chip-ico">▲</span><span class="aflp-cm-chip-txt">Dominating</span>
-            </label>
-            <label class="aflp-cm-chip role-submitting">
-              <input type="radio" name="aflp-cm-role" value="submitting" ${role==="submitting"?"checked":""}/>
-              <span class="aflp-cm-chip-ico">▼</span><span class="aflp-cm-chip-txt">Submitting</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="aflp-cm-section">
-          <div class="aflp-cm-label">Tokens</div>
-          ${dhDefeat ? "" : `
-          <div class="aflp-cm-stepper exposed">
-            <span class="aflp-cm-step-ico">✦</span>
-            <span class="aflp-cm-step-name">Exposed</span>
-            ${tok("aflp-cm-exposed", cur.exposed, 0, 2)}
-            <span class="aflp-cm-step-hint">0&ndash;2</span>
-          </div>`}
-          ${dhDefeat ? "" : `
-          <div class="aflp-cm-stepper mind-break">
-            <span class="aflp-cm-step-ico">✲</span>
-            <span class="aflp-cm-step-name">Mind Break</span>
-            ${tok("aflp-cm-mindbreak", cur.mindBreak, 0, null)}
-            <span class="aflp-cm-step-hint">0 = off</span>
-          </div>`}
-          <div class="aflp-cm-stepper defeat">
-            <span class="aflp-cm-step-ico">☠</span>
-            <span class="aflp-cm-step-name">Defeat</span>
-            ${tok("aflp-cm-defeat", cur.defeat, 0, dhDefeat ? 3 : 1)}
-            <span class="aflp-cm-step-hint">${dhDefeat ? "0&ndash;3" : "0/1"}</span>
-          </div>
-          <div class="aflp-cm-stepper bimbofied">
-            <span class="aflp-cm-step-ico">❀</span>
-            <span class="aflp-cm-step-name">Bimbofied</span>
-            ${tok("aflp-cm-bimbofied", cur.bimbofied, 0, 3)}
-            <span class="aflp-cm-step-hint">0&ndash;3</span>
-          </div>
-          <div class="aflp-cm-stepper bullified">
-            <span class="aflp-cm-step-ico">♂</span>
-            <span class="aflp-cm-step-name">Bullified</span>
-            ${tok("aflp-cm-bullified", cur.bullified, 0, 3)}
-            <span class="aflp-cm-step-hint">0&ndash;3</span>
-          </div>
-        </div>
-
-        ${dhDefeat ? `
-        <div class="aflp-cm-section">
-          <div class="aflp-cm-label">Death Moves</div>
-          <div class="aflp-cm-chips">
-            <label class="aflp-cm-chip dm-mind-break">
-              <input type="checkbox" name="aflp-cm-mindbreak-toggle" ${cur.mindBreak > 0 ? "checked" : ""}/>
-              <span class="aflp-cm-chip-ico">✲</span><span class="aflp-cm-chip-txt">Mind Break</span>
-            </label>
-          </div>
-        </div>` : ""}
-
-        ${dhDefeat ? `
-        <div class="aflp-cm-section">
-          <div class="aflp-cm-label">State</div>
-          <div class="aflp-cm-chips">
-            <label class="aflp-cm-chip fx-exposed">
-              <input type="checkbox" name="aflp-cm-exposed" ${cur.exposed > 0 ? "checked" : ""}/>
-              <span class="aflp-cm-chip-ico">✦</span><span class="aflp-cm-chip-txt">Exposed</span>
-            </label>
-          </div>
-        </div>` : ""}
-
-        <div class="aflp-cm-section">
-          <div class="aflp-cm-label">Pregnancy Modifiers</div>
-          <div class="aflp-cm-chips">
-            <div class="aflp-cm-stepper breeding" title="Staged 0-3. Every creature is Fertility 1 by default; 0 here clears back to that default. 2 = Brood Roll DC -2 (Fertile anatomy), 3 = no roll, it just takes (Breeder anatomy, Potion of Breeding). Fertility 3 also lets a new pregnancy take while carrying and shortens gestation.">
-              <span class="aflp-cm-step-ico">⚸</span>
-              <span class="aflp-cm-step-name">Fertility</span>
-              ${tok("aflp-cm-breeding", cur.breeding, 0, 3)}
-            </div>
-            <div class="aflp-cm-stepper birth-control" title="Staged 1-3: each stage reduces the effective Fertility by 1, floor 0. Birth Control 1 blocks an unenhanced (Fertility 1) character entirely; 2 = the Elixir; 3 = the Greater Elixir, blocking even Breeder anatomy.">
-              <span class="aflp-cm-step-ico">⊘</span>
-              <span class="aflp-cm-step-name">Birth Control</span>
-              ${tok("aflp-cm-birth-control", cur.birthControl, 0, 3)}
-            </div>
-          </div>
-        </div>
+        ${bands.join("")}
         <div class="aflp-cm-section">
           <div class="aflp-cm-label">Token Art</div>
           <div class="aflp-cm-chips">
             <button type="button" class="aflp-cm-exposure-art" data-actor-id="${actor.id}"
               style="padding:4px 10px;background:rgba(201,169,110,0.12);border:1px solid rgba(201,169,110,0.4);color:#e8c46a;border-radius:4px;cursor:pointer;">
-              🎭 Exposure Token Art…
+              \u{1F3AD} Exposure Token Art…
             </button>
           </div>
         </div>
@@ -2743,13 +2910,9 @@ AFLP.UI.SheetTab = {
           set(Number(hidden.value || 0));
           t.querySelectorAll(".aflp-cm-tok-btn").forEach(b =>
             b.addEventListener("click", e => { e.preventDefault(); set(Number(hidden.value || 0) + Number(b.dataset.d)); }));
-          // Left-click the value to mark (+1); right-click to clear.
-          valEl.addEventListener("click",       e => { e.preventDefault(); set(Number(hidden.value || 0) + 1); });
-          valEl.addEventListener("contextmenu",  e => { e.preventDefault(); set(0); });
+          valEl.addEventListener("click",      e => { e.preventDefault(); set(Number(hidden.value || 0) + 1); });
+          valEl.addEventListener("contextmenu", e => { e.preventDefault(); set(0); });
         });
-
-        // Exposure Token Art launcher - a separate small dialog so the big
-        // condition form stays untouched.
         el.querySelector(".aflp-cm-exposure-art")?.addEventListener("click", async (e) => {
           e.preventDefault();
           await AFLP.UI.SheetTab._openExposureArt(actor);
@@ -2760,20 +2923,12 @@ AFLP.UI.SheetTab = {
           action: "apply", label: "Apply", default: true,
           callback: (ev, btn, dlg) => {
             const root = dlg.element;
-            return {
-              role:        root.querySelector('input[name="aflp-cm-role"]:checked')?.value ?? "none",
-              defeat:      Math.max(0, Math.min(dhDefeat ? 3 : 1, Number(root.querySelector('input[name="aflp-cm-defeat"]')?.value ?? 0))),
-              exposed:     dhDefeat
-                ? (root.querySelector('input[name="aflp-cm-exposed"]')?.checked ? 1 : 0)
-                : Math.max(0, Math.min(2, Number(root.querySelector('input[name="aflp-cm-exposed"]')?.value ?? 0))),
-              mindBreak:   dhDefeat
-                ? (root.querySelector('input[name="aflp-cm-mindbreak-toggle"]')?.checked ? 1 : 0)
-                : Math.max(0, Math.min(99, Number(root.querySelector('input[name="aflp-cm-mindbreak"]')?.value ?? 0))),
-              bimbofied:   Math.max(0, Math.min(3, Number(root.querySelector('input[name="aflp-cm-bimbofied"]')?.value ?? 0))),
-              bullified:   Math.max(0, Math.min(3, Number(root.querySelector('input[name="aflp-cm-bullified"]')?.value ?? 0))),
-              birthControl: Math.max(0, Math.min(3, Number(root.querySelector('input[name="aflp-cm-birth-control"]')?.value ?? 0))),
-              breeding:    Number(root.querySelector('input[name="aflp-cm-breeding"]')?.value ?? 0),
-            };
+            const out = { role: root.querySelector('input[name="aflp-cm-role"]:checked')?.value ?? "none", vals: {} };
+            for (const r of rows) {
+              if (r.control === "toggle")  out.vals[r.key] = root.querySelector(`input[name="cm:${r.key}"]`)?.checked ? 1 : 0;
+              if (r.control === "stepper") out.vals[r.key] = Number(root.querySelector(`input[name="cm:${r.key}"]`)?.value ?? 0) || 0;
+            }
+            return out;
           },
         },
         { action: "cancel", label: "Cancel", callback: () => null },
@@ -2785,11 +2940,22 @@ AFLP.UI.SheetTab = {
     // ACTION STRING ("cancel"), not null - only an object is a real Apply.
     if (!result || typeof result !== "object") return;
 
-    // Exact-set a valued condition (create at value if absent, set if present, remove at 0).
+    // Exact-set a valued condition (create at value if absent, set if present,
+    // remove at 0). The cap comes from the shared list, never from this file.
     const setExact = async (slug, target) => {
-      if (target <= 0) return AFLP.cond.remove(actor, slug);
-      if (AFLP.cond.has(actor, slug)) return AFLP.cond.setValue(actor, slug, target);
-      return AFLP.cond.apply(actor, slug, target);
+      const t = AFLP.capCondition(slug, Math.max(0, Number(target) || 0));
+      if (t <= 0) return AFLP.cond.remove(actor, slug);
+      if (AFLP.cond.has(actor, slug)) return AFLP.cond.setValue(actor, slug, t);
+      return AFLP.cond.apply(actor, slug, t);
+    };
+    // Fertility and Birth Control are staged and flag-backed on every system;
+    // 0 clears the stored condition (for Fertility that is back to the implicit
+    // default of 1, for Birth Control it is none).
+    const setStaged = async (slug, target) => {
+      const t = AFLP.capCondition(slug, Math.max(0, Number(target) || 0));
+      const current = AFLP.cond.value(actor, slug) || (AFLP.cond.has(actor, slug) ? 3 : 0);
+      if (t === 0) { if (current > 0 || AFLP.cond.has(actor, slug)) await AFLP.cond.remove(actor, slug); }
+      else if (t !== current) await AFLP.cond.apply(actor, slug, t);
     };
 
     // Role is mutually exclusive (Dominating / Submitting / None).
@@ -2804,42 +2970,51 @@ AFLP.UI.SheetTab = {
       await AFLP.cond.remove(actor, "submitting");
     }
 
-    // Defeat: on Daggerheart this is a valued token track (0-3, the give-in /
-    // climax spiral accelerant); on PF2e it is the boolean Defeated condition
-    // item, so any value > 0 means present.
-    if (dhDefeat) {
-      await setExact("defeat", result.defeat);
-    } else if (result.defeat > 0) {
-      if (!AFLP.cond.has(actor, "defeated")) await AFLP.cond.apply(actor, "defeated");
-    } else {
-      await AFLP.cond.remove(actor, "defeated");
+    for (const r of rows) {
+      const want = result.vals[r.key];
+      if (want === undefined) continue;               // role and readouts write nothing
+      try {
+        if (r.control === "toggle") {
+          const on = !!want;
+          if (on && !AFLP.cond.has(actor, r.key)) await AFLP.cond.apply(actor, r.key);
+          else if (!on && AFLP.cond.has(actor, r.key)) {
+            // Some conditions own their own teardown - a bare remove would leave
+            // the scene half-dismantled.
+            if (r.free) await r.free(actor);
+            else await AFLP.cond.remove(actor, r.key);
+          }
+        } else if (r.control === "stepper") {
+          // Bimbofied and Bullified are token tracks: the adapter's setter keeps
+          // the feature-resource track in step on DH. The guard is on the RETURN
+          // VALUE, not typeof - adapter-base defines both as stubs returning null
+          // on every system, so a typeof guard always passed and the PF2e write
+          // was silently dropped.
+          if (r.tracked)      await AFLP.cond.setTracked(actor, r.key, r.tracked, want);
+          else if (r.staged)  await setStaged(r.key, want);
+          else                await setExact(r.key, want);
+        }
+      } catch (e) {
+        console.warn(`AFLP | condition manager: ${r.key} did not take:`, e?.message);
+        continue;
+      }
+      // AND THEN CHECK IT LANDED. `AFLP.cond.apply` for a condition THIS system
+      // cannot express returns without throwing and sets nothing - measured on
+      // Daggerheart with `afterglow`, whose registry uuid is a PF2e pack item.
+      // A try/catch cannot see that; only reading the value back can. Says so in
+      // the console rather than failing, because the GM's other 25 changes did
+      // land and losing them to one bad row would be worse.
+      try {
+        const got = r.control === "toggle" ? (AFLP.cond.has(actor, r.key) ? 1 : 0)
+                                           : Number(AFLP.cond.value(actor, r.key)) || 0;
+        const expect = r.control === "toggle" ? (want ? 1 : 0) : AFLP.capCondition(r.key, want);
+        // Staged rows legitimately settle elsewhere (Fertility 0 means "back to
+        // the implicit 1"), so they are not compared.
+        if (!r.staged && got !== expect) {
+          console.warn(`AFLP | condition manager: "${r.key}" was set to ${expect} and reads back ${got}`
+            + ` - this system may not express it. If that is right, give the row a sys of "dh" or "pf2e".`);
+        }
+      } catch (e) { /* read-back is diagnostic only */ }
     }
-
-    // Valued conditions (Mind Break create/remove also drives the onset/end automation).
-    await setExact("exposed", result.exposed);
-    await setExact("mind-break", result.mindBreak);
-
-    // Bimbofied / Bullified are token-track conditions: prefer the adapter's
-    // dedicated setter (which keeps the feature-resource track in step on DH) and
-    // fall back to the generic condition path on systems that lack it. The guard
-    // is on the RETURN VALUE, not typeof - adapter-base defines both setters as
-    // stubs returning null on every system, so a typeof guard always passed and
-    // the PF2e write was silently dropped.
-    await AFLP.cond.setTracked(actor, "bimbofied", "setBimbofied", result.bimbofied);
-    await AFLP.cond.setTracked(actor, "bullified", "setBullified", result.bullified);
-
-    // Fertility / Birth Control are both staged (flag-backed on every system;
-    // the cum macro and attemptImpregnation read them via AFLP.cond). Setting
-    // 0 clears the stored condition: for Fertility that means back to the
-    // implicit default of 1, for Birth Control it means none.
-    const setStaged = async (slug, target, max) => {
-      const t = Math.max(0, Math.min(max, Number(target) || 0));
-      const current = AFLP.cond.value(actor, slug) || (AFLP.cond.has(actor, slug) ? 3 : 0);
-      if (t === 0) { if (current > 0 || AFLP.cond.has(actor, slug)) await AFLP.cond.remove(actor, slug); }
-      else if (t !== current) await AFLP.cond.apply(actor, slug, t);
-    };
-    await setStaged("birth-control", result.birthControl, 3);
-    await setStaged("breeding", result.breeding, 3);
 
     // Refresh the sheet panel and any open scene card showing this actor.
     try { if (html) await AFLP.UI.SheetTab._refreshPanel(html, actor, false); } catch (e) {}

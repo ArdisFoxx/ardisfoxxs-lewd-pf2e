@@ -163,17 +163,23 @@
     for(const t of targets){
       const submitting = !!(window.AFLP.cond?.has?.(t,"submitting")) || ((window.AFLP.system?.conditionValue?.(t,"submitting")??0)>0);
       const caught = inScene && submitting;
-      // POSED ALSO LANDS WITH NO RESIST - the Posed card says so, and a set body has
-      // nothing to resist with. THIS DOCK IS A SECOND PRESS PATH: it does not call
-      // AFLP.Carnal.press(), so the same rule has to be stated here or a Posed target
-      // pressed from the Scene Actions dock gets a Resist prompt its own card says it
-      // cannot make. Keep this gate and press()'s in step.
-      const posed = !!(window.AFLP.cond?.has?.(t,"posed"));
-      if(caught || posed){
-        // Already caught in a scene with this presser, or Posed - the CA auto-lands
-        // (no Resist). landReason tells autoLand which card to write, and makes it
-        // open a scene for a Posed target that was never caught in one.
-        try{ await window.AFLP.Carnal.autoLand?.(t,{dc,sourceName:label,sourceTokenId:srcTok?.id??tokenId,hsa,arousal,applies,scenePosition,landReason:(posed&&!caught)?"posed":"held"}); autoLanded++; }catch(err){ console.error("AFLR carnal auto-land",err); }
+      // THIS DOCK IS A SECOND PRESS PATH: it does not call AFLP.Carnal.press().
+      // The target-only reasons a press lands with no Resist therefore have to be
+      // asked for, and this file used to SPELL THEM OUT - with a comment saying
+      // "keep this gate and press()'s in step". They went out of step the day
+      // Dizzy shipped: press() got it, this did not, and Scene Actions - the
+      // button a GM actually uses - asked a Dizzy creature for a Carnal Resist
+      // it cannot make. Reported 4 Sept 2026.
+      //
+      // One question, one answer, both paths. A new auto-land condition goes in
+      // AFLP.Carnal.targetAutoLandReason and arrives here for free.
+      const reason = window.AFLP.Carnal.targetAutoLandReason?.(t) ?? null;
+      if(caught || reason){
+        // Already caught in a scene with this presser, or the target's own state
+        // says no Resist - the CA auto-lands. landReason tells autoLand which card
+        // to write, and makes it open a scene for a target never caught in one.
+        // CAUGHT WINS THE LABEL: being held is the more specific story.
+        try{ await window.AFLP.Carnal.autoLand?.(t,{dc,sourceName:label,sourceTokenId:srcTok?.id??tokenId,hsa,arousal,applies,scenePosition,landReason:caught?"held":reason}); autoLanded++; }catch(err){ console.error("AFLR carnal auto-land",err); }
       } else {
         // Not yet caught - the press calls for a Carnal Resist.
         try{ await t.setFlag(MID,"carnalPrompt",{dc,sourceName:label,sourceTokenId:srcTok?.id??tokenId,hsa,traits,arousal,applies,scenePosition,inScene,ts:Date.now()}); }catch(err){ console.error("AFLR carnal flag",err); }
