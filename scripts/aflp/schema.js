@@ -3089,15 +3089,14 @@ AFLP.subtypeBonuses = (actor) => {
   return { shot, loads };
 };
 
-// Default / cap for Coomer (now the number of loads before a rest).
+// Default for Coomer (the number of loads before a rest).
 AFLP.COOMER_DEFAULT = 4;
-// NO CONSUMER as of 20 Aug 2026 - measured across the whole tree. Its only reader
-// was Pineapple Diet's floor, and it contradicted both guide journals, which say
-// "Loads has no cap". Left declared rather than deleted because it is Ardis's
-// constant to retire, but DO NOT reach for it as a Loads ceiling: there is no
-// such ceiling in the content. A declaration with no consumer is how
-// capabilities.nativeArousal came to describe a bridge that no longer existed.
-AFLP.COOMER_MAX     = 6;
+// AFLP.COOMER_MAX IS GONE, 5 Sept 2026, and must not come back. It was 6, it had
+// no consumer after 20 Aug, and both guides say "Loads has no cap". While it
+// existed it clamped Pineapple Diet, which is how a feat that promised "Loads
+// equal to your character level" quietly stopped paying out above level 5. A
+// declared ceiling in a system with no ceiling is a loaded gun; if you need a
+// number here, the content does not have one.
 
 // Per-shot Cum for an actor: size base + subtype mods, or a per-actor override
 // flag world.cumPerShot. Minimum 1, NO upper cap - big creatures shoot big, and
@@ -3213,26 +3212,53 @@ AFLP.cumfinityAnal = (actor, tokenId = null, opts = {}) => {
   } catch (e) { return false; }
 };
 
-// Effective loads = stored base (trainable, manually editable, uncapped) plus any
-// worn loads gear: loadsBonus adds, loadsOverride sets a floor (e.g. Endless Loads = 20).
+// Effective loads = stored base plus every additive source, floored by any
+// override (Endless Loads = 20). FOUR STORES, and they are deliberately separate:
+//
+//   coomer.level    BASE. The creature's own baseline. Seeded once; Pineapple
+//                   Diet OVERWRITES it at daily preparations. Nothing else
+//                   should write here - anything that does is erased by that
+//                   feat the next time the character rests.
+//   coomer.bonus    THE GM'S FIELD, edited on the sheet. Ardis, 5 Sept 2026:
+//                   "on top of anything else ... persistent ... in case the GM
+//                   wants to apply a homebrew item they made or do a quick
+//                   manual edit". NO AUTOMATION MAY WRITE HERE. It is the one
+//                   number a human owns.
+//   coomer.trained  Size training's permanent gains (Slick pussy / ass, +1 each).
+//                   Its own store precisely so Pineapple Diet cannot overwrite
+//                   it and a GM editing `bonus` cannot wipe it. Before 5 Sept
+//                   2026 this landed in BASE, and a level 11 character trained
+//                   three times lost all three at the next rest.
+//   gear/anatomy    Computed live from items on each read; never stored.
+//
+// Stale if any of those four grows a second writer.
 AFLP.effectiveLoads = (actor) => {
   if (!actor) return AFLP.COOMER_DEFAULT;
   const FLAG = AFLP.FLAG_SCOPE, MOD = "ardisfoxxs-lewd-pf2e";
   let base = Number(actor.getFlag?.(FLAG, "coomer")?.level);
   if (!Number.isFinite(base)) base = AFLP.COOMER_DEFAULT;
-  // A manually entered bonus, edited on the sheet. The BASE stays the creature's
-  // own (4 for a PC), so nothing an existing character has changes value; the
-  // sheet now edits this instead of the absolute, which is what lets a player
-  // count up their gear and type one number rather than doing the sum.
+  // The GM's manual field. Read here, written only by a human.
   let bonus = Number(actor.getFlag?.(FLAG, "coomer")?.bonus);
   if (!Number.isFinite(bonus)) bonus = 0;
+  // Permanent training. Summed alongside `bonus` rather than folded into it, so
+  // the two can never overwrite one another.
+  let trained = Number(actor.getFlag?.(FLAG, "coomer")?.trained);
+  if (!Number.isFinite(trained)) trained = 0;
   let override = 0;
   for (const it of (actor.items ?? [])) {
     // Gear only counts while actually worn and invested - a cock ring in your
     // backpack should not be filling you up. _active returns true for effects
     // and feats, which have no equipped block, so those count on presence.
     if (!AFLP.anatomy._active(it)) continue;
-    const b = Number(it.getFlag?.(MOD, "loadsBonus"));   if (Number.isFinite(b)) bonus += b;
+    // STRETCH KING IS EXCLUDED HERE ON PURPOSE. The PF2e Stretch King effect
+    // carries `loadsBonus: 3` as an item flag, which is untiered - it would pay
+    // out at Signature, where the card grants nothing, and then again on top of
+    // the tier rule below (Greater 3 + flag 3 = 6, Mastery 10 + 3 = 13). The
+    // kink's Loads have ONE source, the tier rule. Reported for removal from the
+    // pack item too; this guard means the code is right either way.
+    if (it.getFlag?.(MOD, "aflrKey") !== "stretch-king") {
+      const b = Number(it.getFlag?.(MOD, "loadsBonus")); if (Number.isFinite(b)) bonus += b;
+    }
     const o = Number(it.getFlag?.(MOD, "loadsOverride")); if (Number.isFinite(o)) override = Math.max(override, o);
     // The draggable Loads effect carries its amount in its counter badge, so
     // dropping "Loads 20" on a token grants 20. Without this the effect is
@@ -3252,23 +3278,30 @@ AFLP.effectiveLoads = (actor) => {
   // (17 Aug 2026) and both cards have to say so; a card still reading "+4" is
   // the tell that the pack half of this change did not land.
   bonus += AFLP.subtypeBonuses(actor).loads;
-  // Stretch King - kink-aware computed read (the effects-layer follow-up; Loads
-  // is our own flag economy, so it reads here rather than storing an effect).
-  // DH item text: Greater "Your Loads reservoir rises by +2", Mastery "rises to
-  // +3" (replaces, not stacks). PF2e item text: Level 7 "You gain Loads 10" -
-  // expressed as an override floor so it dedupes with a dragged Loads 10 item.
+  // Stretch King - ONE RULE FOR BOTH SYSTEMS, read from the cards, 5 Sept 2026.
+  //
+  //   PF2e card: Greater (Level 5) "You permanently gain Bonus Loads 3."
+  //              Mastery (Level 8) "You gain Bonus Loads 10."
+  //   DH card:   "You permanently gain Bonus Loads 3. Your Bonus Loads rises to 10."
+  //
+  // Both say BONUS Loads, and Bonus Loads add (see the Bonus Loads card), so
+  // this is a bonus and not an override - Ardis's ruling, 5 Sept. Mastery
+  // REPLACES Greater's 3 rather than stacking with it: the PF2e card restates
+  // the total and the DH card says "rises to".
+  //
+  // WAS: an override of 10 on PF2e (so base 4 + 3 read 10, not 17, contradicting
+  // the card) and +2/+3 on DH (matching DH card text that no longer exists - it
+  // had been rewritten to 3/10 and the code never followed). Both gone.
+  //
   // Gated on actorHasKink so it stays dormant below Lewd 3 like all kink
-  // automation. Takes effect at the next cum recalculation (rest / sheet edit),
-  // the same semantics as the tier scaling.
+  // automation. Takes effect at the next cum recalculation (rest / sheet edit).
+  // Stale if either card's Greater or Mastery Loads figure changes.
   if (AFLP.actorHasKink?.(actor, "stretch-king")) {
     const skTier = AFLP.getKinkTier?.(actor, "stretch-king") ?? 0;
-    if (AFLP.system?.id === "pf2e") {
-      if (skTier >= 3) override = Math.max(override, 10);
-    } else if (skTier >= 2) {
-      bonus += (skTier >= 3) ? 3 : 2;
-    }
+    if (skTier >= 3)      bonus += 10;   // Mastery, replacing Greater's 3
+    else if (skTier >= 2) bonus += 3;    // Greater
   }
-  return Math.max(1, base + bonus, override);
+  return Math.max(1, base + bonus + trained, override);
 };
 
 // Default loads by tier of play: a flat baseline (all sizes) plus a step per tier.
@@ -3293,8 +3326,31 @@ AFLP.actorLevel = (actor) => {
   if (Number.isFinite(t) && t >= 1) return t >= 4 ? 9 : t === 3 ? 6 : t === 2 ? 3 : 1;
   return 1;
 };
+// TIER SCALING IS FOR MONSTERS. Both guides say so - "monsters scale by their
+// level tier, while a PC can increase theirs through training, kinks, and gear"
+// (PF2e), "adversaries scale by tier of play, while for PCs, training, kinks,
+// and gear push it higher" (DH). A player character therefore starts at the flat
+// baseline and earns the rest.
+//
+// Ardis's ruling, 5 Sept 2026, with the exception that makes the feat matter:
+// **Pineapple Diet is what ties a PC's Loads to their level**, applied at daily
+// preparations. Without it, levelling up never moves a PC's Loads.
+//
+// This is a SEED. `ensureCoreFlags` writes it only when the flag is absent, so
+// it fixes the starting number and nothing re-runs it - which is why a PC taken
+// from level 1 to 11 stays where they started. That is the design, not a bug.
+//
+// Was: the tier table for everyone, so a PC CREATED at level 11 started on 8
+// while one who LEVELLED to 11 sat on 4 - same character, different history,
+// different Loads. Measured on DH, where the bands are tighter, a level 8 PC
+// started on 10.
+//
+// Stale if either guide stops reserving tier scaling for adversaries.
 AFLP.defaultLoadsForActor = (actor) => {
+  if (actor?.type === "character") return AFLP.LOADS_BASE;
   const lvl = AFLP.actorLevel(actor);
+  // Per system, never one shared map: DH runs to level 10 and PF2e to 20, so the
+  // adapter's own bands win and AFLP.tierOfLevel is only the 20-level fallback.
   const tier = AFLP.system?.tierOfActor?.(actor) ?? AFLP.tierOfLevel(lvl);
   return AFLP.LOADS_BASE + (Math.max(1, tier) - 1) * AFLP.LOADS_PER_TIER;
 };
@@ -5511,6 +5567,40 @@ Object.assign(window.AFLP, {
     await this.ensureFlag(actor, "coomer",      { level: AFLP.defaultLoadsForActor(actor) });
     await this.ensureFlag(actor, "arousal",     structuredClone(this.arousalDefaults));
     await this.ensureFlag(actor, "horny",       structuredClone(this.hornyDefaults));
+    // LEGACY ANATOMY MIGRATION - MUST RUN BEFORE ANYTHING SEEDS anatomyFeatURES.
+    //
+    // Actors authored under the old `genitalTypes` flag carry their anatomy there
+    // and nowhere else. This copies it to `anatomyFeatures` and drops the old key.
+    //
+    // IT USED TO SIT BELOW THE THROAT / ASS / CHEST SEEDING, AND THAT DESTROYED
+    // DATA. Those blocks CREATE anatomyFeatures ({throat:true, ass:true}) when it
+    // is absent, so by the time the migration ran its guard - "copy only if
+    // anatomyFeatures does not exist" - was already false. The copy was skipped
+    // and the unconditional unset below then deleted the only copy.
+    //
+    // MEASURED in pf2e-dev 6 Sept 2026 on the shipped path: importing Goblin
+    // Breeding Troop and calling ensureCoreFlags turned
+    //   genitalTypes {cock, cock-fertile, cock-slime}  ->  anatomyFeatures {throat, ass, chest}
+    // Cock, Fertile and Multipenis gone, silently, on import. 101 of the 102
+    // actors in aflp-lewd-actors store their anatomy only in the legacy flag, so
+    // this was every pack monster with anatomy, every time a GM imported one.
+    //
+    // MERGE rather than skip, so it is still correct if anatomyFeatures already
+    // exists: the legacy keys fill in underneath, and anything already recorded
+    // wins. Ordering makes that moot on a clean import - it is here so a partial
+    // or re-run migration cannot lose a key either.
+    //
+    // Stale if anything else starts seeding anatomyFeatures earlier than this.
+    {
+      const _legacyGT = actor.getFlag(this.FLAG_SCOPE, "genitalTypes");
+      if (_legacyGT && typeof _legacyGT === "object") {
+        const _af = actor.getFlag(this.FLAG_SCOPE, "anatomyFeatures");
+        await actor.setFlag(this.FLAG_SCOPE, "anatomyFeatures",
+          { ..._legacyGT, ...(_af && typeof _af === "object" ? _af : {}) });
+      }
+      if (_legacyGT !== undefined) { try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {} }
+    }
+
     // Every body has a throat, so seed it true when the key is absent. This runs
     // for pack actors, for existing world actors on upgrade, and for anything
     // created later - which a one-off migration would not have covered.
@@ -5575,16 +5665,9 @@ Object.assign(window.AFLP, {
     await this.ensureFlag(actor, "pussy",       false);
     await this.ensureFlag(actor, "cock",        false);
     await this.ensureFlag(actor, "sexual.kinks", {});
-    // Legacy migration: actors created under the old "genitalTypes" flag name carry
-    // their data to "anatomyFeatures" (renamed once it covered tits/throats, not just
-    // genitals). One-time - the old flag is removed after copying so it can't drift.
-    {
-      const _legacyGT = actor.getFlag(this.FLAG_SCOPE, "genitalTypes");
-      if (_legacyGT && !actor.getFlag(this.FLAG_SCOPE, "anatomyFeatures")) {
-        await actor.setFlag(this.FLAG_SCOPE, "anatomyFeatures", _legacyGT);
-      }
-      if (_legacyGT !== undefined) { try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {} }
-    }
+    // (The legacy genitalTypes migration used to sit here. It now runs ABOVE the
+    // throat/ass/chest seeding, because those blocks create anatomyFeatures and
+    // silently disarmed it - see the note there.)
     await this.ensureFlag(actor, "anatomyFeatures",
       Object.fromEntries(Object.keys(this.anatomyFeatures).map(k => [k, false]))
     );
@@ -5736,13 +5819,26 @@ Object.assign(window.AFLP, {
     const slickGains   = gainedFrom.filter(t => t === "slick").length;
     const milkingGains = gainedFrom.filter(t => t === "milking").length;
 
-    // Slick -> permanent +1 Loads each.
-    let newLevel = null;
+    // Slick -> permanent +1 Loads each, into `coomer.trained`.
+    //
+    // NOT into `coomer.level`, which is where this used to write. Pineapple Diet
+    // overwrites the base at every daily preparation, so a level 11 character
+    // trained by three Slick partners went to base 7 and was flattened back to
+    // 11 that night - the three trainings gone, not capped, erased.
+    //
+    // NOT into `coomer.bonus` either, which is the GM's own field: automation
+    // writing there would rewrite a number a human typed, and a GM editing it
+    // would wipe accumulated training. Its own store, so neither can happen.
+    //
+    // The card is the spec: Pussy (Slick) and Ass (Slick) both read "permanently
+    // gains Bonus Loads 1". Stale if training ever needs to be spent or removed,
+    // which no card currently allows.
+    let newTrained = null;
     if (slickGains) {
-      const coomer   = live.getFlag(FLAG, "coomer") ?? { level: AFLP.COOMER_DEFAULT };
-      const oldLevel = coomer.level ?? AFLP.COOMER_DEFAULT;
-      newLevel = oldLevel + slickGains; // uncapped; soft limits come from gear/feats
-      await live.setFlag(FLAG, "coomer", { level: newLevel });
+      const coomer     = live.getFlag(FLAG, "coomer") ?? {};
+      const oldTrained = Number(coomer.trained) || 0;
+      newTrained = oldTrained + slickGains; // uncapped; soft limits come from gear/feats
+      await live.setFlag(FLAG, "coomer", { trained: newTrained });
     }
 
     // Milking -> permanent +1 Cum Shot each (the manual cumShotBonus world flag,
@@ -5758,7 +5854,12 @@ Object.assign(window.AFLP, {
     // grant a fresh load on top of whatever is left.
     {
       const perShot = AFLP.cumPerShot(live);
-      const loads   = (live.getFlag(FLAG, "coomer")?.level) ?? AFLP.COOMER_DEFAULT;
+      // effectiveLoads, NOT the raw base. This read `coomer.level` directly,
+      // which ignored the GM's bonus field, worn gear and anatomy - and once
+      // training moved to `coomer.trained` (5 Sept 2026) it would have stopped
+      // seeing the very gain it was recomputing for. recalculateCum already
+      // reads effectiveLoads; this is the same sum, so it must ask the same way.
+      const loads   = AFLP.effectiveLoads?.(live) ?? AFLP.COOMER_DEFAULT;
       const newMax  = perShot * loads;
       const cumNow  = live.getFlag(FLAG, "cum");
       await live.setFlag(FLAG, "cum", { current: Math.min((cumNow?.current ?? newMax) + perShot, newMax), max: newMax });
@@ -5766,7 +5867,9 @@ Object.assign(window.AFLP, {
 
     // Build a chat card describing exactly what was trained.
     const parts = [];
-    if (slickGains)   parts.push(`<strong>Loads +${slickGains}</strong>${newLevel != null ? ` (now Loads ${newLevel})` : ""}`);
+    // Reports the TOTAL the character now has, not the training store on its own -
+    // "now Loads 3" would read as a downgrade to someone sitting on 4 base.
+    if (slickGains)   parts.push(`<strong>Loads +${slickGains}</strong>${newTrained != null ? ` (now Loads ${AFLP.effectiveLoads?.(live) ?? "?"})` : ""}`);
     if (milkingGains) parts.push(`<strong>Cum Shot +${milkingGains}</strong>${newShotBonus != null ? ` (now +${newShotBonus})` : ""}`);
     const lbl  = gainedFrom.map(t => t === "slick" ? "Slick" : "Milking").join(" and ");
     const gains = parts.join(" and ");

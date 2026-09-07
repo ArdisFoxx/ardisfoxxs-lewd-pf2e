@@ -533,7 +533,7 @@ AFLP.UI.SheetTab = {
           : `<span class="aflp-mast-title aflp-mast-title-empty">\u2605 ${AFLP.Settings.titlesShow ? "No Title" : ""}</span>`}
         ${editMode ? `
         <div class="aflp-cum-edit aflp-mast-cum-edit">
-          <span>Cum Shot Bonus</span>${inlineEdit(cumShotBonus, "cumShotBonus")}<span style="opacity:.6;">|</span><span>Loads Bonus</span>${inlineEdit(Number(coomer.bonus) || 0, "coomer.bonus")}<span style="opacity:.55;font-size:11px;" title="Base ${coomer.level ?? AFLP.COOMER_DEFAULT} plus your bonus and any worn gear">= ${perShot} &times; ${loadsCap}</span>
+          <span>Cum Shot Bonus</span>${inlineEdit(cumShotBonus, "cumShotBonus")}<span style="opacity:.6;">|</span><span>Loads Bonus</span>${inlineEdit(Number(coomer.bonus) || 0, "coomer.bonus")}<span style="opacity:.55;font-size:11px;" title="Loads ${loadsCap} = base ${coomer.level ?? AFLP.COOMER_DEFAULT}${Number(coomer.trained) ? ` + ${Number(coomer.trained)} trained` : ""}${Number(coomer.bonus) ? ` + ${Number(coomer.bonus)} your bonus` : ""} plus anatomy, kinks and worn gear. Training is counted separately so this field stays yours.">= ${perShot} &times; ${loadsCap}</span>
         </div>` : `
         <div class="aflp-cum-pill aflp-mast-cum">
           <span class="aflp-label">Cum Shot</span><span>${perShot}</span>

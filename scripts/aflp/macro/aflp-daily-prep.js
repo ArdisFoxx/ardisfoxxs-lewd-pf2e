@@ -95,33 +95,56 @@ for (const { actor } of tokens) {
   }
 
   // Cum refill — use schema values via recalculateCum.
-  // Pineapple Diet feat: coomer floor = 1 + actor level.
-  // If the actor's coomer level has dropped below this floor, restore it first
-  // so recalculateCum uses the correct value.
-  // Pineapple Diet feat. THE CARD IS THE SPEC: "You gain a number of Loads equal
-  // to your character level. This is your natural baseline: however many Loads
-  // you spend, your daily preparations refill you to at least this many."
+  // PINEAPPLE DIET. THE CARD IS THE SPEC: "You gain a number of Loads equal to
+  // your character level. This is your natural baseline: however many Loads you
+  // spend, your daily preparations refill you to at least this many."
   //
-  // Was `Math.min(AFLP.COOMER_MAX, 1 + actorLevel)`, which broke the card in BOTH
-  // directions: one too many below level 6, and clamped from level 6 up so the
-  // promise stopped being kept exactly when it started to matter. Ardis, 20 Aug
-  // 2026: "pineapple diet code should match the card."
+  // This feat is the ONE thing that ties a PC's Loads to their level - Ardis's
+  // ruling, 5 Sept 2026. Tier scaling is for adversaries (see
+  // AFLP.defaultLoadsForActor); a PC without this feat gains no Loads from
+  // levelling at all.
   //
-  // NO CLAMP, and that is the journals talking, not an omission - both guides
-  // say "Loads has no cap: monsters scale by their level tier, while a PC can
-  // increase theirs through training, kinks, and gear." AFLP.COOMER_MAX had
-  // exactly ONE consumer in the whole tree, this line, and it contradicted them.
-  const PD_UUID = "Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.QN1LxhSPqdWxgVk4";
+  // DETECTED BY CONTENT KEY, and it has to be. This read `i.slug` with the PF2e
+  // uuid as its only fallback: Daggerheart items have NO slug, and the DH
+  // Pineapple Diet is a different document, so both arms failed and the feat did
+  // nothing whatsoever on Daggerheart. Measured in dh-test 5 Sept 2026 - a level
+  // 7 character carrying it came out of this macro unchanged. The absence of a
+  // system gate is not the same thing as working on both systems.
+  //
+  // SET, NOT FLOOR. It used to only ever raise, so Loads climbed with level and
+  // never came back down - reported by Ardis after levelling a character down.
+  // Setting is only safe now that size training writes `coomer.trained` instead
+  // of the base (see AFLP.effectiveLoads); before that, lowering the base would
+  // have thrown away training this code cannot tell apart from the feat's own
+  // number.
+  //
+  // FLOORED AT SIX, which is the baseline plus two. This is a LEVEL 1 general
+  // skill feat with no prerequisites, and "Loads equal to your character level"
+  // is worth nothing until level 5 against a baseline of 4 - four dead levels on
+  // a feat you can take at first. Ardis's ruling, 5 Sept 2026: floor it two
+  // above baseline, and the card reads "set to your character level or 6,
+  // whichever is higher". LOADS_BASE + 2 rather than a literal 6 so the two
+  // move together if the baseline ever does; if you change one, change the card.
+  //
+  // The defaultLoadsForActor term keeps an ADVERSARY carrying this feat from
+  // being pulled DOWN to 6 from its tier baseline - it only ever raises them.
+  // For a PC, whose baseline is the flat 4, it resolves to exactly the card's 6.
+  //
+  // The GM's `coomer.bonus` and training's `coomer.trained` are untouched and
+  // add on top of whatever this writes.
+  //
+  // Stale if the card stops saying "your character level or 6, whichever is
+  // higher", or if AFLP.LOADS_BASE moves without the card following.
   const hasPineappleDiet = actor.items?.some(i =>
-    i.slug === "pineapple-diet" ||
-    (i.flags?.core?.sourceId ?? i.sourceId) === PD_UUID
+    i.getFlag?.("ardisfoxxs-lewd-pf2e", "aflrKey") === "pineapple-diet" ||
+    i.slug === "pineapple-diet"
   );
   if (hasPineappleDiet) {
-    const actorLevel   = AFLP.actorLevel(actor);
-    const pdFloor      = Math.max(0, actorLevel);
-    const coomer       = structuredClone(actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults);
-    if ((coomer.level ?? 0) < pdFloor) {
-      coomer.level = pdFloor;
+    const pdFloor = Math.max(AFLP.defaultLoadsForActor(actor), AFLP.LOADS_BASE + 2);
+    const pdBase  = Math.max(pdFloor, AFLP.actorLevel(actor));
+    const coomer  = structuredClone(actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults);
+    if ((coomer.level ?? 0) !== pdBase) {
+      coomer.level = pdBase;
       await actor.setFlag(FLAG, "coomer", coomer);
     }
   }
@@ -258,10 +281,15 @@ for (const { actor } of tokens) {
   } catch (e) { console.warn("AFLR | chastity drain failed", e); }
 
   if (hasPineappleDiet) {
-    const actorLevel = AFLP.actorLevel(actor);
-    const pdFloor    = 1 + actorLevel;
-    const coomerNow  = actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults;
-    message += `<br>Pineapple Diet: Loads set to <strong>${coomerNow.level}</strong> (floor: ${pdFloor}).`;
+    // Reports what was ACTUALLY written, and the total after bonus, training and
+    // gear. This used to print "(floor: N)" computed as `1 + actorLevel` - its
+    // own formula, not the one applied above - so it could name a floor of 12
+    // while the code had clamped the value to 6. A message that recomputes is a
+    // message that can lie; both numbers here are read back from the actor.
+    const baseNow = (actor.getFlag(FLAG, "coomer") ?? AFLP.coomerDefaults).level;
+    const total   = AFLP.effectiveLoads?.(actor) ?? baseNow;
+    message += `<br>Pineapple Diet: baseline Loads set to <strong>${baseNow}</strong>`
+             + (total !== baseNow ? ` (<strong>${total}</strong> with bonuses).` : ".");
   }
 
   if (hasAlcumist) {
