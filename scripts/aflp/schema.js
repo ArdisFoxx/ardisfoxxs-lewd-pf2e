@@ -5585,20 +5585,118 @@ Object.assign(window.AFLP, {
     // actors in aflp-lewd-actors store their anatomy only in the legacy flag, so
     // this was every pack monster with anatomy, every time a GM imported one.
     //
-    // MERGE rather than skip, so it is still correct if anatomyFeatures already
-    // exists: the legacy keys fill in underneath, and anything already recorded
-    // wins. Ordering makes that moot on a clean import - it is here so a partial
-    // or re-run migration cannot lose a key either.
+    // WHEN BOTH STORES EXIST, THE QUESTION IS WHETHER ANYONE EVER AUTHORED THE
+    // LIVE ONE. That is answerable from the data, and it is not a judgement call.
     //
-    // Stale if anything else starts seeding anatomyFeatures earlier than this.
+    // A plain merge was tried first (legacy underneath, anatomyFeatures on top)
+    // and it is wrong. A blanket refusal was tried second and it is wrong the
+    // other way. Measured in dh-test 8 Sept 2026: 35 actors carry both stores and
+    // 23 disagree in the direction that matters, and those 23 are TWO DIFFERENT
+    // PROBLEMS:
+    //
+    //   14 STRIPPED    anatomyFeatures holds nothing but base-part keys - 1 to 6
+    //                  of {pussy, cock, tits, throat, chest, ass} - while the
+    //                  legacy store holds a full authored record. This is the
+    //                  import data-loss bug's own footprint. Bondage Mimic
+    //                  Ovidepositor: live {ass, chest, cock, throat}, legacy
+    //                  carrying breeder, girthy, ovidepositor and slime, all of
+    //                  which its own pack record claims.
+    //
+    //    9 DIVERGENT   anatomyFeatures holds 68-69 keys - the whole registry,
+    //                  explicit true and false - and contradicts the legacy
+    //                  store because somebody edited the live one.
+    //
+    // THE DISCRIMINATOR IS EXACT, not a heuristic, and here is why:
+    //
+    //   - **A sheet save writes the ENTIRE registry.** sheet-tab.js builds
+    //     `Object.fromEntries(Object.keys(AFLP.anatomyFeatures).map(k => [k, false]))`
+    //     and then overwrites from the checkboxes, so any store a human has ever
+    //     saved carries all 69 keys. A store of 6 or fewer has never been through
+    //     the sheet.
+    //   - **The only writers that produce a small store write base parts only.**
+    //     The throat/ass/chest seeding below, and `dev-aflr-dh-base-anatomy.js`,
+    //     whose header says it in as many words: "NEVER INVENTS: tits, pussy and
+    //     cock default OFF and are body decisions", "this changes no behaviour
+    //     today". Neither makes a subtype decision.
+    //   - Therefore **"deliberately plain" is not representable as a small
+    //     store.** A GM who wants a creature with no subtypes saves the sheet and
+    //     gets 69 keys of explicit false, which lands in DIVERGENT and is
+    //     protected. Restoring a stripped store cannot overwrite a choice,
+    //     because no choice can look like that.
+    //
+    // Restoring copies only the legacy keys that are `true` AND absent from the
+    // live store. It never overwrites an explicit value, in either direction -
+    // the rule dev-aflr-dh-base-anatomy.js states as "an explicit NO is the GM's,
+    // never overwritten". Legacy `false`s are dropped with the flag: a subtype
+    // false is the default anyway, and a base-part false in that store is the old
+    // "Special Throat" checkbox meaning "not special" rather than "no throat" -
+    // see the throat block below, which already clears exactly those.
+    //
+    // The divergent case still refuses, still keeps the legacy flag, and still
+    // says so once. Nothing reads it, so keeping it changes no behaviour, and it
+    // is the only record of what the creature used to be.
+    //
+    // Ordering is what fixes the import bug; this branch is what keeps the fix
+    // from stranding the actors it was written for.
+    //
+    // GOES STALE IF: the sheet stops writing the full registry on save (the
+    // discriminator is built on that and nothing else), a base part gains
+    // `parent`, or something starts writing subtype keys into a small store.
     {
       const _legacyGT = actor.getFlag(this.FLAG_SCOPE, "genitalTypes");
-      if (_legacyGT && typeof _legacyGT === "object") {
-        const _af = actor.getFlag(this.FLAG_SCOPE, "anatomyFeatures");
-        await actor.setFlag(this.FLAG_SCOPE, "anatomyFeatures",
-          { ..._legacyGT, ...(_af && typeof _af === "object" ? _af : {}) });
+      const _af       = actor.getFlag(this.FLAG_SCOPE, "anatomyFeatures");
+      const _isObj    = (o) => !!o && typeof o === "object";
+      if (_isObj(_legacyGT) && !_af) {
+        await actor.setFlag(this.FLAG_SCOPE, "anatomyFeatures", { ..._legacyGT });
+        try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {}
+      } else if (_isObj(_legacyGT) && _isObj(_af)) {
+        // Nothing STRANDED means nothing to decide. The 6 Sept pack sweep wrote
+        // anatomyFeatures from the legacy flag on 101 PF2e and 2 DH pack actors,
+        // so those arrive carrying two stores that AGREE - and the legacy copy is
+        // then provably redundant rather than evidence. Clearing it silently is
+        // what stops a warning firing on every pack import for the rest of time.
+        // Only a legacy `true` counts: a legacy `false` is either a subtype's
+        // default or the old "Special Throat" checkbox, neither of which is data.
+        const _stranded = Object.entries(_legacyGT)
+          .filter(([k, v]) => v === true && _af[k] !== true).map(([k]) => k);
+        if (!_stranded.length) {
+          try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {}
+        } else {
+        // Base parts are the ones with no `parent` in the registry. Anything else
+        // in the live store means a subtype decision was written there.
+        const _base = new Set(Object.entries(this.anatomyFeatures)
+          .filter(([, d]) => !d?.parent).map(([k]) => k));
+        const _authored = Object.keys(_af).some(k => !_base.has(k));
+        if (!_authored) {
+          // Bookkeeping-only store: the legacy record is the only authored one.
+          const _next = { ..._af };
+          const _restored = [];
+          for (const [k, v] of Object.entries(_legacyGT)) {
+            if (v === true && _next[k] === undefined) { _next[k] = true; _restored.push(k); }
+          }
+          if (_restored.length) {
+            await actor.setFlag(this.FLAG_SCOPE, "anatomyFeatures", _next);
+            console.log(`AFLP | ${actor.name}: restored ${_restored.join(", ")} from the legacy `
+              + `anatomy store - the live one held base parts only, so nothing had been authored `
+              + `there to overwrite.`);
+          }
+          try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {}
+        } else {
+          if (!AFLP._twoStoreWarned) AFLP._twoStoreWarned = new Set();
+          if (!AFLP._twoStoreWarned.has(actor.id)) {
+            AFLP._twoStoreWarned.add(actor.id);
+            console.warn(`AFLP | ${actor.name}: carries BOTH anatomyFeatures and the legacy `
+              + `genitalTypes, and the live one has been authored - it holds subtype keys. The `
+              + `legacy store claims ${_stranded.join(", ")}, which the live one does not. Left `
+              + `as-is; anatomyFeatures is what everything reads. Reconcile by hand if the legacy `
+              + `copy is the one you want.`);
+          }
+        }
+        }
+      } else if (_legacyGT !== undefined) {
+        // Present but empty or not an object: nothing to carry, safe to drop.
+        try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {}
       }
-      if (_legacyGT !== undefined) { try { await actor.unsetFlag(this.FLAG_SCOPE, "genitalTypes"); } catch (e) {} }
     }
 
     // Every body has a throat, so seed it true when the key is absent. This runs
