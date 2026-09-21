@@ -41,8 +41,8 @@ const HOLES = [
   // `bodyCoat` since the chest pools were merged - `applyCumflation` remaps the
   // key - so `cumflation.paizuri` has had no writer, and this row could never be
   // offered no matter how coated the creature was. The chest coat had no way to be
-  // purged at all. Ardis, 29 Aug 2026: "Purge cumflation has no line for clearing
-  // body coat? Shouldn't it?"
+  // purged at all. Purge Cumflation has to be able to clear the body coat too
+  // (29 Aug 2026).
   // The label is the sheet's, not the pool key's.
   { key: "bodyCoat", label: "Chest Coat" },
   // Tits (Onahole) fills a reservoir inside the tits. Its own text says

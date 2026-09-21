@@ -130,7 +130,7 @@ window.AFLP_Pregnancy = {
   //
   // Before 14 Aug 2026 only the BEARER's conditions were read. The sire's anatomy
   // arrived through `cockTypes` and nothing else about them did, so a sire's own
-  // Fertility condition, their Potion of Breeding and - the reason Ardis raised it -
+  // Fertility condition, their Potion of Breeding and - the case that exposed it -
   // their BIRTH CONTROL were all ignored. A sire on contraception bred normally.
   //
   // BOTH SIDES USE MAX, deliberately and symmetrically: the highest Fertility

@@ -146,8 +146,7 @@
         // its own chain, so routing this single-field bump through it costs nothing
         // and removes one unchained writer.
         //
-        // THE OTHER THREE SITES IN THIS FILE ARE NOT FIXED BY THIS and are the
-        // subject of `claude/sexual-flag-serialisation-2026-08-23.md`: they batch
+        // THE OTHER THREE SITES IN THIS FILE ARE NOT FIXED BY THIS: they batch
         // several fields into one write on purpose, and a closure cannot cross the
         // socket, so they need a delta op rather than a per-key call.
         try {
@@ -257,9 +256,9 @@
         } else if (posEntry) {
           const hole = posEntry.hole ?? posEntry.holeId ?? null;
           // A POSITION THAT NAMES NO DESTINATION IS AN ANSWER, NOT A GAP. The
-          // creature climaxed; the load exists and has to land. Ardis, 15 Aug:
-          // "if they climax with no penetrative position it should still spend a
-          // load - it just means that load goes onto the ground."
+          // creature climaxed; the load exists and has to land. A climax with no
+          // penetrative position still spends a load - that load simply goes onto
+          // the ground (15 Aug 2026).
           //
           // Two shapes reach here and BOTH used to fall through to the manual
           // hole dialog, which is the wrong question - the GM already answered it
@@ -289,7 +288,7 @@
         //
         // Their partner's position IS the answer. It describes the fiction BOTH
         // creatures are in, and `bottomFills` is exactly the field that says
-        // where the bottom's own load goes in it. Ardis authored all 86.
+        // where the bottom's own load goes in it. All 86 positions carry it.
         //
         // NOTE THIS RUNS THROUGH THE ORDINARY FORWARD PATH. The climaxing
         // creature is always the SOURCE here - `_onArousalMax` hands the cummer
@@ -1150,10 +1149,13 @@
     // A breeding ass carries in the gut. The four Ass fertility features say a load
     // finished there triggers a Brood Roll the same as a pussy would, so anal counts
     // as a breeding hole when the target has one of them - and only then.
-    const _assBreeds = (() => {
-      const af = targetActor?.getFlag?.(FLAG, "anatomyFeatures") ?? {};
-      return !!(af["ass-fertile"] || af["ass-breeder"] || af["ass-clutch"] || af["ass-litter"]);
-    })();
+    //
+    // This was an inline IIFE here and nowhere else, which is why the sheet could
+    // not ask the same question and hid the pregnancy it produced. Called PLAINLY,
+    // not optional-chained: on a missing helper an optional call answers false
+    // forever and this creature silently stops breeding, which is the exact bug
+    // the helper was extracted to fix.
+    const _assBreeds = AFLP.hasBreedingAss(targetActor);
     const _breedingHole = (hole === "vaginal" && hasPussy) || (hole === "anal" && _assBreeds);
     // PER SOURCE, not once for the scene: the sire is half of the answer now, and
     // in a gangbang each sire is a different half.

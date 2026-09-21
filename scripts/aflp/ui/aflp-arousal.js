@@ -51,11 +51,10 @@ window.AFLP_Arousal = {
     // AND THE SAME GOES FOR HISTORICAL DATA. This block used to end by saying
     // titles, pregnancy and partner history "only ever live on linked/named
     // actors - mooks are disposable, so they don't track it." That is not the
-    // design. Ardis, 18 Aug 2026: "unlinked tokens are things like monsters,
-    // where the lifetime stats need to be saved against the token not the actor.
-    // because we might have a scene with several of the same actor duplicated in
-    // a scene to make a group of goblins ... and we need their arousal and what
-    // not to be tracked separately."
+    // design (18 Aug 2026). Unlinked tokens are things like monsters, whose
+    // lifetime stats are saved against the token, not the actor, because a scene
+    // can hold several copies of one actor - a group of goblins - and each needs
+    // its Arousal and the rest tracked separately.
     //
     // Measured the same day on two unlinked tokens built from ONE base: both
     // report the SAME `id`, so `game.actors.get(id)` collapses them onto the
@@ -214,7 +213,7 @@ window.AFLP_Arousal = {
     // Masturbating. Their solo climax then auto-resolved instead of offering
     // Cum/Edge, because `markReadyToCum` force-resolves when it finds no scene.
     //
-    // Ardis, 23 Aug 2026: "a player should be able to open their own self-scene."
+    // A player can open their own self-scene (23 Aug 2026).
     // The start is routed to the GM (see the `startSelfScene` op registration at
     // the foot of this file) because scene state is GM-authoritative; the sync
     // brings the card back to every client including the player's.
@@ -773,8 +772,8 @@ window.AFLP_Arousal = {
       // Measured in dh-test, 17 Aug 2026: one climax on a mind-broken DH PC
       // announced "Mind Break deepens to 2" - Pathfinder's rule, in Pathfinder's
       // words - and opened TWO "Mind Break - Creature Fetish" dialogs, a
-      // Pathfinder subsystem, on a Daggerheart character. Reported by Ardis the
-      // same day: "not a thing in dh... pf2e code leaking?". It was.
+      // Pathfinder subsystem, on a Daggerheart character - Pathfinder code leaking
+      // into a system that has no such thing.
       //
       // Daggerheart's own answer to "you climax while mind-broken" is NOT YET
       // DESIGNED. Suppressing the wrong behaviour is deliberate and is not the
@@ -967,7 +966,7 @@ window.AFLP_Arousal = {
     const _glowedThisScene  = _afterglowSceneId != null
       && actor.getFlag(FLAG, "afterglowScene") === _afterglowSceneId;
     // NOT ON DAGGERHEART AT ALL, from 4 Sept 2026. Afterglow was retired as a DH
-    // condition by Ardis's ruling - on DH the on-climax outcome is the Horny or
+    // condition - on DH the on-climax outcome is the Horny or
     // Defeat token, and Afterglow was only a second name for it. The adapter has
     // no-opped applyCondition("afterglow") since June, so this block already did
     // nothing there; the explicit gate means the DH card can be deleted from the
@@ -1040,8 +1039,8 @@ window.AFLP_Arousal = {
     // back to chat when there is no scene log to write to, so the resolution
     // posts exactly as it would in a scene.
     //
-    // Ardis, 14 Aug 2026: "it should just auto resolve and post the cum resolution
-    // to the chat output like normal."
+    // It auto-resolves and posts the cum resolution to chat like normal
+    // (14 Aug 2026).
     //
     // The one case that still cannot resolve is an actor with NO TOKEN on the
     // canvas: the macro resolves its cummer from a token, and with none it falls
@@ -1228,7 +1227,7 @@ AFLP.gm?.register?.("arousalDecrement", (a, amount, source) => AFLP_Arousal.decr
 
 // A player raising their OWN Arousal must get the self-scene too.
 //
-// Ardis, 23 Aug 2026: "a player should be able to open their own self-scene."
+// A player can open their own self-scene (23 Aug 2026).
 //
 // It cannot simply be started on their client: scene state is GM-authoritative
 // (`_saveSceneState` returns early for a non-GM, and `startScene` only broadcasts

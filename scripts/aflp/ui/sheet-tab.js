@@ -1613,9 +1613,25 @@ AFLP.UI.SheetTab = {
   // Breeding tab is gone). Completed ones are filtered out here and listed under
   // History instead. The edit-mode save is dirty-diff based, so omitting the
   // completed rows from this table never drops their data.
-  _renderActivePregnancy(actor, pregnancy, editMode, hasPussy) {
+  // GATED ON "CAN THIS BODY CARRY", NOT ON "DOES IT HAVE A PUSSY".
+  //
+  // It took `hasPussy` until 18 Sept 2026, which is flags.world.pussy - a BASE
+  // PART - while macro/aflp-cum.js has always bred a breeding ass. So an
+  // ass-breeder was impregnated, the record was written to flags.world.pregnancy,
+  // and this returned "" - taking the table, the Advance Gestation Day button and
+  // the edit-mode Add Pregnancy button with it, since _renderPregnancy has no
+  // other caller. Measured both directions on two rigs carrying the identical
+  // record.
+  //
+  // ONE SECTION, not one per hole: the Ass fertility cards say that where a gut
+  // womb and a real womb both exist "the two connect and you carry in the one
+  // womb rather than two".
+  //
+  // The 4th parameter is kept and IGNORED so an old caller cannot silently
+  // reintroduce the pussy-only gate by passing false.
+  _renderActivePregnancy(actor, pregnancy, editMode, _ignoredHasPussy) {
     try {
-      if (!hasPussy) return "";
+      if (!AFLP.canCarry(actor)) return "";
       const all = pregnancy ?? {};
       const active = {};
       for (const [id, p] of Object.entries(all)) {
@@ -1637,10 +1653,9 @@ AFLP.UI.SheetTab = {
     return g === "Complete" || (typeof g === "number" && g <= 0);
   },
 
-  // "On your Spotlight" was a read-only panel here until 30 Aug 2026. REMOVED at
-  // Ardis's instruction: *"why is that spotlight reminder even there? we shouldn't
-  // have that on the sheet. even for player characters it doesn't belong in an AFLR
-  // sheet."*
+  // "On your Spotlight" was a read-only panel here until 30 Aug 2026. REMOVED: a
+  // Spotlight reminder does not belong on an AFLR sheet, even for player
+  // characters.
   //
   // It quoted any card mentioning the Spotlight back at the reader and applied
   // nothing. On an adversary it was quoting Daggerheart's OWN statblock - the
@@ -1713,8 +1728,8 @@ AFLP.UI.SheetTab = {
       </ul>`;
     // CHEST HAD NO CHECKBOX AT ALL until 30 Aug 2026. It was added to
     // `AFLP.anatomyFeatures` on 29 Aug as a base part and this panel was not
-    // updated, so the torso pane offered Tits and nothing else - which is what
-    // Ardis hit while editing the Brimstone Harem Drake.
+    // updated, so the torso pane offered Tits and nothing else - found while
+    // editing the Brimstone Harem Drake.
     //
     // Default-ON like `ass` and `throat` (`!== false`), because every body has a
     // chest unless a GM turns it off. Rendered ABOVE Tits because Tits OVERRIDE
@@ -1902,8 +1917,8 @@ AFLP.UI.SheetTab = {
     // kept as a legacy path), or if the pool already holds cum.
     const _hasTits = (actor?.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits"] === true;
     const _hasOnahole = (actor?.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {})["tits-onahole"] === true;
-    // EVERY BODY HAS A CHEST. Ardis, 29 Aug 2026: *"all actors do have a body coat,
-    // just not all have a chest coat"* - so the section must exist for a
+    // EVERY BODY HAS A CHEST (29 Aug 2026). All actors have a body coat, even if
+    // not all have a chest coat - so the section must exist for a
     // flat-chested character too, not appear only once cum has landed on them.
     //
     // Gated the way `ass` is and for the same reason: `anatomyFeatures.chest`
@@ -1929,7 +1944,7 @@ AFLP.UI.SheetTab = {
     // Both keep the "or the pool already holds cum" escape, for the same reason
     // showOnahole has it: an existing fill must never vanish off the sheet.
     //
-    // Reported by Ardis 15 Aug 2026. The Bondage Mimic Chest is a maw with no
+    // Found 15 Aug 2026. The Bondage Mimic Chest is a maw with no
     // pussy and no ass and still showed vaginal and anal pips, which reads as
     // "these holes exist and are empty" rather than "these do not exist".
     const showVaginal = !!actor?.getFlag(AFLP.FLAG_SCOPE, "pussy") || (cumflation.vaginal ?? 0) > 0;
@@ -1947,13 +1962,13 @@ AFLP.UI.SheetTab = {
     // is the chest SURFACE (cum on) and always reads "Chest", including on an actor
     // with tits. Two rows both labelled "Tits" told apart only by their Cumflated /
     // Coated heading was too easy to misread at a glance.
-    // `bodyCoat` reads "Chest Coat", not "Chest". Ardis, 29 Aug 2026: the card text
-    // must name this pool exactly as the user sees it on their own sheet. It
+    // `bodyCoat` reads "Chest Coat", not "Chest" (29 Aug 2026): the card text must
+    // name this pool exactly as the user sees it on their own sheet. It
     // rendered as "Chest \u00b7 coated", so a card saying "Chest Coat" would have
     // quoted a string that does not appear anywhere - the label is brought to the
     // card's words rather than the other way round.
     // `facial` reads "Facial Coat" for the same reason `bodyCoat` reads "Chest
-    // Coat" - Ardis, 29 Aug 2026: the two coats are the same kind of thing and a
+    // Coat" - the two coats are the same kind of thing, and a
     // card that names one has to be able to name the other the same way. The row
     // already carries "· coated" beside it; the label is what a card quotes.
     const HOLE_LABEL = { oral: "Oral", vaginal: "Vaginal", anal: "Anal", facial: "Facial Coat", bodyCoat: "Chest Coat", onahole: "Tits" };
@@ -1975,9 +1990,11 @@ AFLP.UI.SheetTab = {
 
       let link = "";
       if (tier > 0) {
-        // The chest pool is one pool but reads two ways: a tits-having actor gets
-        // the tits ladder, everyone else the neutral body-coat one.
-        const wordHole = (hole === "bodyCoat" && _hasTits) ? "tits" : hole;
+        // A pool can read more than one ladder: the chest pool gets the tits
+        // ladder on a tits-having actor, the anal pool the breeding ladder on a
+        // gut that carries. AFLP.cfWordHole owns that rule - this file and the
+        // status panel each used to carry their own copy of the tits half.
+        const wordHole = AFLP.cfWordHole?.(actor, hole) ?? hole;
         const w = AFLP.cumflationWordForTier?.(tier, wordHole);
         const wordHtml = w
           ? `<span style="color:${w.color};font-weight:600;">${w.word}</span>`
@@ -2019,8 +2036,7 @@ AFLP.UI.SheetTab = {
       // face, CoatedTits for a chest with tits. CumflatedTits is a DIFFERENT set -
       // the nipple reservoir, filled from inside. The rest keep Cumflated* names;
       // there is no CoatedBodyCoat or CoatedPaizuri on disk.
-      // `CoatedChest` for a body without tits, added 29 Aug 2026 when Ardis supplied
-      // the art. The old fallback was `CumflatedBodyCoat`, and **that set has never
+      // `CoatedChest` for a body without tits, added 29 Aug 2026 with its art. The old fallback was `CumflatedBodyCoat`, and **that set has never
       // existed on disk** - measured, 404 at every tier including 0 - so a
       // flat-chested actor with a chest coat has always rendered with the icon
       // hidden by its own onerror handler. The `Coated*` name is also the correct
@@ -2634,15 +2650,15 @@ AFLP.UI.SheetTab = {
   // It used to be hand-written HTML per condition, and it held EIGHT of the
   // twenty-nine conditions a creature can carry - role, Exposed, Mind Break,
   // Bimbofied, Bullified, Fertility, Birth Control, Defeat. Nobody noticed,
-  // because nothing in the file said what the full set was. Ardis, 4 Sept 2026:
-  // "the status panel and the status manager need to have ALL AFLR/AFLP
-  // conditions in it, otherwise users will think that we are shipping it broken."
+  // because nothing in the file said what the full set was. The status panel and
+  // the status manager carry ALL AFLR/AFLP conditions (4 Sept 2026) - anything
+  // less reads to a user as shipping it broken.
   //
   // So the rows are DATA and the dialog is a loop over them. A new condition is
   // one entry here and it appears in the manager, in its band, with the right
   // control. That is the whole point; do not add bespoke markup back.
   //
-  // THREE RULES THIS TABLE ENCODES, all settled with Ardis on 4 Sept:
+  // THREE RULES THIS TABLE ENCODES, all settled on 4 Sept:
   //
   //  1. The PANEL displays every condition; the MANAGER edits the ones a GM may
   //     legitimately set. Derived state - Exoskeleton Dry from Chest Coat,
@@ -2669,7 +2685,7 @@ AFLP.UI.SheetTab = {
     return [
       { band: "Scene Role", key: "role", label: "Scene Role", control: "role", sys: "both" },
 
-      // Imposed on you, or worn. The gear binaries are SETTABLE by Ardis's call:
+      // Imposed on you, or worn. The gear binaries are SETTABLE, deliberately:
       // the Daggerheart token HUD already toggles them, and refusing here while
       // the HUD allows it reads as broken. Worn gear re-asserts on its next sync,
       // which is correct - the gear is the reason, not this dialog.
@@ -2717,7 +2733,7 @@ AFLP.UI.SheetTab = {
       { band: "State", key: "lustful",    label: "Lustful",    ico: "♥", control: "toggle",  sys: "dh" },
       { band: "State", key: "toasted",    label: "Toasted",    ico: "♨", control: "toggle",  sys: "both" },
       { band: "State", key: "dubious-consent", label: "Dubious Consent", ico: "⁉", control: "toggle", sys: "pf2e" },
-      // PF2E ONLY UNTIL RULED. Reported by Ardis 4 Sept: setting it on Daggerheart
+      // PF2E ONLY UNTIL RULED. Found 4 Sept: setting it on Daggerheart
       // does nothing - and it does nothing on three levels, all measured that day:
       //   1. the STATUS PANEL row never reads this condition. Its value is
       //      `AFLP.HScene.isSelfAbsorbed(actorId)`, true only inside a SOLO
@@ -2729,8 +2745,8 @@ AFLP.UI.SheetTab = {
       // On PF2e the condition item is real and carries its own rules (Off-Guard,
       // easier Struggle Snuggle, +1 Arousal from a Sexual Advance), so there the
       // toggle does something.
-      // The DH adapter has said since 29 Aug that `masturbating` and `afterglow`
-      // "need Ardis's ruling". This is that open question surfacing in the UI.
+      // The DH adapter flagged `masturbating` and `afterglow` as needing a ruling
+      // from 29 Aug. This is that open question surfacing in the UI.
       { band: "State", key: "masturbating",    label: "Masturbating",    ico: "☝", control: "toggle", sys: "pf2e" },
 
       // Kit, buffs, fertility.
@@ -2819,7 +2835,7 @@ AFLP.UI.SheetTab = {
         // checked rules are all keyed to the OLD bespoke classes (fx-exposed,
         // dm-mind-break...), which this generic markup does not emit - so
         // without this class a clicked chip changed nothing on screen and only
-        // Apply revealed it had registered. Reported by Ardis, 4 Sept 2026.
+        // Apply revealed it had registered. Found 4 Sept 2026.
         return `<label class="aflp-cm-chip aflp-cm-toggle cm-${r.key}" title="${esc(r.title ?? "")}">
           <input type="checkbox" name="cm:${r.key}" ${valueOf(r) ? "checked" : ""}/>
           <span class="aflp-cm-chip-ico">${r.ico ?? ""}</span><span class="aflp-cm-chip-txt">${r.label}</span>
@@ -2849,8 +2865,7 @@ AFLP.UI.SheetTab = {
       return `<div class="aflp-cm-ro"><span class="aflp-cm-ro-name">${r.label}</span>${body}</div>`;
     };
 
-    // "Pretty heckin big menu" - Ardis, 4 Sept 2026, and he was right: 32 rows is
-    // a tall dialog. Two things keep it in hand without hiding anything a GM came
+    // 32 rows is a tall dialog (4 Sept 2026). Two things keep it in hand without hiding anything a GM came
     // here to change. The read-outs COLLAPSE, because they are reference rather
     // than controls and a GM opens this to set something. And the whole thing
     // scrolls internally rather than growing past the window - see the CSS.

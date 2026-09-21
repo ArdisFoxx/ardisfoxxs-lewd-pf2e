@@ -191,6 +191,21 @@ Hooks.once("ready", async () => {
     };
     Hooks.on("createItem", onGear);
     Hooks.on("deleteItem", onGear);
+    // A GM EDITING ONE OF THESE FLAGS ON GEAR SOMEONE IS ALREADY WEARING.
+    // Added 12 Sept 2026 with the homebrew panel. `affectsCum` reads the item's
+    // CURRENT flags, so a flag being cleared no longer matches it - hence the
+    // separate check on the change payload, which catches the `-=` delete
+    // spelling as well. Without this leg, writing a Loads bonus onto a worn ring
+    // changed nothing until it was taken off and put back on.
+    Hooks.on("updateItem", (it, changes) => {
+      if (!game.user.isGM || !it?.actor) return;
+      const f = changes?.flags?.[MOD];
+      const touched = f && ["loadsBonus", "loadsOverride", "cumShotBonus", "oneCockRing"]
+        .some(k => (k in f) || (`-=${k}` in f));
+      if (!touched && !affectsCum(it)) return;
+      if (!touched && changes?.system?.equipped === undefined) return;
+      AFLP.recalculateCum?.(it.actor.getWorldActor?.() ?? it.actor);
+    });
   }
 
   // ── Potion of Breeding effect -> Fertility condition binding ─────────────
@@ -280,6 +295,10 @@ Hooks.once("ready", async () => {
   await import("./ui/aflp-status-panel.js" + _v);
   await import("./ui/aflp-exposure-art.js" + _v);
   if (["pf2e", "sf2e"].includes(game.system.id)) await import("./ui/aflp-runes.js" + _v);
+  // The homebrew item panel is NOT system-gated: every field it writes is read by
+  // a cross-system engine (chastityGear.worn, effectiveLoads, cumPerShot,
+  // gearArousalBonus). It gates itself on GM instead.
+  await import("./ui/aflp-homebrew-panel.js" + _v);
 
   // Register the AFLP sheet opener (header button -> self-contained popout).
   // Replaces the old in-sheet tab so it works across PF2e, D&D 5e, and Daggerheart.

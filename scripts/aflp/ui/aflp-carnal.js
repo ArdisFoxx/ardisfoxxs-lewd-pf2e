@@ -161,7 +161,7 @@
     // player prompt and the GM override alike. rollApproach then took its
     // named-traits branch and silently rolled the better of Presence and
     // Instinct, which reads at the table as "it picked a trait at random".
-    // Reported by Ardis 17 Aug 2026; reproduced in dh-test the same day, where
+    // Found 17 Aug 2026 and reproduced in dh-test the same day, where
     // reactionTraits() on a feature naming nothing returned the pair.
     //
     // WHAT WOULD MAKE THIS STALE: a Daggerheart feature that legitimately
@@ -518,9 +518,9 @@
   // It hand-applied the duality for the four carnal rolls, and it was fixed on 21 Aug
   // to bank a player's Fear through the GM proxy (the pool is a world SETTING, so a
   // player client cannot write one; measured across two clients, GM seat 0 -> 1,
-  // Brakka's seat 0 -> 0 three times). Then Ardis ruled on 22 Aug: "both escape and
-  // rescue should just have arousal changes be the extra aflr effect and otherwise
-  // just offer whatever the dh native effects for the roll is" - and porting the
+  // Brakka's seat 0 -> 0 three times). Then the 22 Aug ruling: for both escape and
+  // rescue, the Arousal change is AFLR's only extra effect, and otherwise the roll
+  // offers whatever Daggerheart's native effects are - and porting the
   // Bullified urge to the system roller the same day took its last caller.
   //
   // All four carnal duality rolls now go through `_systemDualityRoll`, so Daggerheart
@@ -529,7 +529,7 @@
   // THE `bankFear` GM OP IS STILL REGISTERED and now has ZERO consumers. Left in
   // place deliberately rather than deleted: it works, it is asserted by the suite,
   // and it is the only route a player client has to the Fear pool if any future
-  // carnal path needs one. Deleting it is Ardis's call, not a tidy-up.
+  // carnal path needs one. Deleting it is a design decision, not a tidy-up.
 
   function _card(actor, title, lines, extra = "") {
     const body = lines.filter(Boolean).map(l => `<p>${l}</p>`).join("");
@@ -686,17 +686,15 @@
 
   // ── THE SYSTEM'S OWN DUALITY ROLL ────────────────────────────────────────
   //
-  // Ardis, 21 Aug 2026: "we want the native roll dialog so the player can use all
-  // those things on their sheet on the roll. they can add their trait bonus like
-  // they would to any other roll, using the picker" - and "good that we leverage
-  // the system's own roller system as much as possible. keeps the player
-  // experience consistent."
+  // The native roll dialog is used (21 Aug 2026) so the player can bring
+  // everything on their sheet to the roll, adding their trait bonus with the
+  // picker like any other roll. Leaning on the system's own roller as much as
+  // possible keeps the player experience consistent.
   //
   // So a Carnal Rescue is an ordinary Daggerheart Action roll: the player gets
   // Experiences, Hope spends, Rally, advantage dice and the Trait Modifier picker,
   // and the system posts its own duality card. Everything below is MEASURED in
-  // dh-test on daggerheart 2.6.4, 21 Aug 2026 - see
-  // claude/system-duality-roll-draft-2026-08-21.md for the readings.
+  // dh-test on daggerheart 2.6.4, 21 Aug 2026.
   //
   // Returns the same shape `_dualityResist` returns, so a call site swaps one line.
   // Returns null when this system has no such pipeline (the caller falls back),
@@ -1146,7 +1144,7 @@
       // and - on an hSceneAction - nowhere to deposit.
       // DIZZY arrives the same way and for the same reason: the Drone Stinger's
       // venom can catch someone who was never in a scene, so it needs the scene
-      // opened here too. Ardis, 31 Aug 2026: "While Dizzy they are Vulnerable and
+      // opened here too. Dizzy (31 Aug 2026): "While Dizzy they are Vulnerable and
       // automatically Give In to Carnal Presses."
       const posed = opts.landReason === "posed";
       const dizzy = opts.landReason === "dizzy";
@@ -1217,7 +1215,7 @@
         else await _markArousal(actor, cost);
         const after = AFLP.system?.getArousalCurrent?.(actor) ?? 0;
         const climaxed = after <= before && cost > 0;
-        // Ardis's wording, 17 Aug 2026. "on appetite rather than grit" made it
+        // Wording revised 17 Aug 2026. "on appetite rather than grit" made it
         // sound like a choice the character is making; Lustful is something
         // happening TO them.
         const lines = [`is <strong>Lustful</strong> and pushes through despite their body betraying them, marking <strong>${cost}</strong> Arousal instead of Stress`
@@ -1231,7 +1229,7 @@
       const lines = [`grits through the Carnal action, marking <strong>${cost}</strong> Stress` +
         (cost > 1 ? ` (1 + ${_defeat(actor)} Defeat).` : `.`)];
       if (res.lastHp) lines.push(`That was their last Hit Point - they make their only available death move: <strong>Mind Break</strong>.`);
-      // Ardis's wording, 17 Aug 2026. "Stress overflowed into HP" described the
+      // Wording revised 17 Aug 2026. "Stress overflowed into HP" described the
       // plumbing; Daggerheart's name for the state is Stressed out, and the
       // rule a player needs is what happens NEXT, not what just moved.
       else if (res.hp != null && res.stress != null) lines.push(`They are now <strong>Stressed out</strong> (HP will be marked in lieu of Stress).`);
@@ -1353,8 +1351,8 @@
       // forgets to prompt must not fall into a default. It asks, and a declined
       // prompt aborts rather than rolling something the player did not choose.
       // THE SYSTEM'S DIALOG IS THE TRAIT PROMPT NOW, so AFLR only asks when it is
-      // going to roll the dice itself. Ardis, 21 Aug 2026: "they can add their
-      // trait bonus like they would to any other roll, using the picker."
+      // going to roll the dice itself: the player adds their trait bonus with the
+      // picker like any other roll (21 Aug 2026).
       //
       // The old silent-default warning still stands and is why this is written the
       // way it is: a default trait that NOBODY SEES is the bug that comment
@@ -1453,9 +1451,9 @@
         // SAY WHAT THE DICE DO, not the arithmetic that produced the count.
         // This read "net -3 d6", and "net" reads as a SUM to a player, so the
         // card looked like it was subtracting 3d6 added together. It never was:
-        // _dualityResist rolls `- 3d6kh` and takes the HIGHEST single die. Ardis
-        // reported it as suspected stacking on 17 Aug 2026, from this line
-        // rather than from the roll. A chat card reporting a roll must name every
+        // _dualityResist rolls `- 3d6kh` and takes the HIGHEST single die. It was
+        // read as suspected stacking on 17 Aug 2026, from this line rather than
+        // from the roll. A chat card reporting a roll must name every
         // die that fed it, in the terms the dice were actually rolled in.
         lines.push(`<em style="font-size:11px;color:#a05050;">(Rolled at ${dir}: ${n}d6, `
           + `keeping the highest single die - ${srcs.join(", ")}. Extra dice widen the swing, they do not add up.)</em>`);
@@ -1567,13 +1565,13 @@
       let hadAdv = false;
       try { hadAdv = !!actor.getFlag?.(SCOPE(), "struggleAdvantage"); } catch (e) { /* none */ }
       if (hadAdv) { try { await actor.unsetFlag?.(SCOPE(), "struggleAdvantage"); } catch (e) { /* non-fatal */ } }
-      // CARNAL ESCAPE IS AN ACTION - Ardis, 21 Aug 2026: "Carnal Escape and Carnal
-      // Rescue are actions. Carnal Resist is the reaction." The guide says the same
+      // CARNAL ESCAPE IS AN ACTION (21 Aug 2026). Carnal Escape and Carnal Rescue
+      // are actions; Carnal Resist is the reaction. The guide says the same
       // four separate ways ("a single action on your turn ... make an Action roll"),
       // so this one DOES generate Hope and Fear.
       //
-      // THE SLICK'S ESCAPE BONUS RIDES HERE - Ardis, 29 Aug 2026: it applies to "all
-      // escape attempt rolls". Carnal Escape is Daggerheart's escape, so this is the
+      // THE SLICK'S ESCAPE BONUS RIDES HERE (29 Aug 2026): it applies to all escape
+      // attempt rolls. Carnal Escape is Daggerheart's escape, so this is the
       // roll it has to reach on this system; the bare-Roll escapes in schema.js add
       // the same number by hand and PF2e gets it from a rule element instead.
       //
@@ -1601,9 +1599,9 @@
       // without the system dialog would silently lose the bonus on the one roll it
       // was built for.
       if (!res) res = await _dualityResist(actor, dc, (hadAdv ? 1 : 0) + _purity(actor), tMod + slick);
-      // AFLR PAYS NOTHING OF THE DUALITY. Ardis, 22 Aug 2026: "both escape and
-      // rescue should just have arousal changes be the extra aflr effect and
-      // otherwise just offer whatever the dh native effects for the roll is."
+      // AFLR PAYS NOTHING OF THE DUALITY (22 Aug 2026). For both escape and rescue
+      // the Arousal change is AFLR's only extra effect; otherwise the roll offers
+      // whatever Daggerheart's native effects are.
       //
       // So the Arousal swing below is AFLR's whole contribution. The Hope, the
       // Fear and the crit's Stress clear are Daggerheart's own action-roll
@@ -1784,8 +1782,8 @@
     // both. Dizzy was added to `press()` on 31 Aug 2026 and never to the dock, so
     // for four days a Dizzy creature auto-gave-in when pressed from the carnal
     // dock and was asked for a Carnal Resist when pressed from Scene Actions -
-    // the route a GM actually uses. Reported by Ardis 4 Sept 2026, after a suite
-    // test that drove `press()` passed and proved nothing about the other path.
+    // the route a GM actually uses. Found 4 Sept 2026, after a suite test that
+    // drove `press()` passed and proved nothing about the other path.
     //
     // ORDER MATTERS: Posed outranks Dizzy where both apply, because Posed also
     // removes the Carnal Escape and Dizzy does not, and the card must say the
@@ -1801,8 +1799,8 @@
       // Marionette cashes it in - so any presser gets it, not just the one who
       // posed you.
       if (AFLP.cond?.has?.(target, "posed")) return "posed";
-      // DIZZY: Ardis, 31 Aug 2026 - "While Dizzy they are Vulnerable and
-      // automatically Give In to Carnal Presses." Same reasoning, same scope.
+      // DIZZY (31 Aug 2026): "While Dizzy they are Vulnerable and automatically
+      // Give In to Carnal Presses." Same reasoning, same scope.
       if (AFLP.cond?.has?.(target, "dizzy")) return "dizzy";
       return null;
     },
@@ -1892,7 +1890,7 @@
       const tMod  = trait ? _traitMod(bullActor, trait) : 0;
 
       // THE SYSTEM ROLLS IT, and this was the last carnal duality caller that did
-      // not. Ardis, 22 Aug 2026: "port the bullified urge to the system roller."
+      // not. The Bullified urge goes through the system roller (22 Aug 2026).
       //
       // A Bullified press is an ACTION roll by the presser - a PC taking a Carnal
       // action on a target - so `actionType: "action"`, the same as Carnal Escape
@@ -1903,8 +1901,8 @@
       // that the dice SUM instead of keeping the highest, which is the doubled-swing
       // bug AFLR already fixed once in `_dualityResist`.
       //
-      // AND IT PAYS NO DUALITY, by the rule the other two already follow. Ardis,
-      // 22 Aug: "just offer whatever the dh native effects for the roll is."
+      // AND IT PAYS NO DUALITY, by the rule the other two already follow: the roll
+      // offers whatever Daggerheart's native effects are (22 Aug).
       // Arousal is AFLR's contribution; the Hope, the Fear and the crit's Stress
       // clear are Daggerheart's, applied by its automation or by the table.
       //
@@ -2041,7 +2039,7 @@
     // Ally intervention: a rescuer steps in to free a target pinned by a Carnal
     // predicament. The campaign frame governs the outcome:
     // THE CARD IS THE TABLE, and the rescuer carries the cost on three of the five
-    // rungs in the BASE rules - Ardis, 20 Aug 2026: "lets make it a base rule."
+    // rungs in the BASE rules - made a base rule 20 Aug 2026.
     //
     //   crit           ally breaks free, ally's Arousal clears to 0
     //   success-hope   ally breaks free and clears 2 Arousal
@@ -2072,16 +2070,16 @@
       // No kink advantage here: Dominant/Submissive/Switch were removed from the
       // DH roster (the Carnal action set already covers both roles by default).
       // THE SYSTEM ROLLS IT, and falls back to AFLR's own roller only where the
-      // pipeline is not there. Carnal Rescue is an ACTION - Ardis, 21 Aug 2026:
-      // "Carnal Escape and Carnal Rescue are actions. Carnal Resist is the
-      // reaction." The guide agrees, four separate ways.
+      // pipeline is not there. Carnal Rescue is an ACTION (21 Aug 2026): Carnal
+      // Escape and Carnal Rescue are actions, Carnal Resist is the reaction. The
+      // guide agrees, four separate ways.
       let res = await _systemDualityRoll(rescuer, { trait, dc, adv: 0, actionType: "action" });
       if (res?.cancelled) return null;          // dialog dismissed: no roll, no payout, no card
       if (!res) res = await _dualityResist(rescuer, dc, 0, tMod);
       // AFLR PAYS NOTHING OF THE DUALITY - the same rule as Carnal Escape, and for
-      // the same reason. Ardis, 22 Aug 2026: "both escape and rescue should just
-      // have arousal changes be the extra aflr effect and otherwise just offer
-      // whatever the dh native effects for the roll is."
+      // the same reason (22 Aug 2026): the Arousal change is AFLR's only extra
+      // effect, and otherwise the roll offers whatever Daggerheart's native effects
+      // are.
       //
       // MEASURED 22 Aug 2026: the guide journal's worked rescue example and the
       // `Carnal Rescue` pack card both deal ONLY in Arousal - "Coming free with
@@ -2111,10 +2109,9 @@
         await AFLP.gm.run("setArousal", target, 0, _arousalMax(target)); targetArousal = 0;
         const d = _defeat(target);
         if (d > 0) await AFLP.cond.setValue(target, "defeat", Math.max(0, d - 1));
-        // NO STRESS CLEAR AND NO HOPE HERE. Ardis, 20 Aug 2026: "on a crit in dh
-        // its native that they gain a hope and clear a stress so we shouldn't make
-        // that clear 1 rescuer stress in the code as dh already has them clear 1."
-        // The Stress half went then; the Hope half and the sentence describing both
+        // NO STRESS CLEAR AND NO HOPE HERE (20 Aug 2026). On a DH crit, gaining a
+        // Hope and clearing a Stress is already native, so the code must not clear
+        // a rescuer Stress on top of it. The Stress half went then; the Hope half and the sentence describing both
         // went on 22 Aug under the wider ruling above. A critical success's Hope and
         // Stress clear are BASE Daggerheart, applied by the system or by the table,
         // and this card no longer narrates rules it does not apply.
@@ -2143,8 +2140,7 @@
         // Card: "Your ally stays caught AND the captor seizes you too - you are
         // caught and mark 2 Arousal."
         //
-        // RESCUE CONTAGION IS THE BASE RULE - Ardis, 20 Aug 2026: "lets make it a
-        // base rule." It used to be gated on the Lust Haze frame, with the default
+        // RESCUE CONTAGION IS THE BASE RULE (20 Aug 2026). It used to be gated on the Lust Haze frame, with the default
         // frame marking a Stress instead and the header comment promising that
         // "the rescuer takes no risk". The card puts the risk in the base rules on
         // three of five rungs, and the card is the specification.
@@ -2395,7 +2391,7 @@
       // asked to resist every single round: Posed since it shipped, Dizzy since
       // 31 Aug 2026. Measured 4 Sept on a rig in dh-test, both of them.
       //
-      // THE CARD IS THE SPEC, and Ardis quoted it: "If the target is already
+      // THE CARD IS THE SPEC: "If the target is already
       // Submitting to the presser, there is no roll and no Resist: a Carnal Press
       // instead causes them each to mark 1 Arousal. The target's way out is when
       // they take the Spotlight." So the held case belongs here too - a prompt
@@ -2538,9 +2534,9 @@
           if (!rescuer.isOwner && !game.user?.isGM) { ui.notifications?.warn("AFLR | You don't own the selected character."); return; }
           // ONE DIALOG, NOT TWO. On Daggerheart the system's own roll dialog
           // carries a Trait Modifier picker, so AFLR's trait prompt in front of it
-          // would be a second window asking the same question - Ardis, 21 Aug 2026:
-          // "they can add their trait bonus like they would to any other roll,
-          // using the picker". 5e has no such dialog and keeps AFLR's, which also
+          // would be a second window asking the same question - the player adds
+          // their trait bonus with the picker like any other roll. 5e has no such
+          // dialog and keeps AFLR's, which also
           // picks the intervention MODE there.
           let trait = null;
           if (game.system?.id !== "daggerheart") {

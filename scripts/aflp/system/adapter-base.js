@@ -183,8 +183,8 @@
     //
     // Added 17 Aug 2026 after a sweep of every player-facing string found "DC" in
     // six Carnal cards on Daggerheart, plus both escape flavours, the Brood roll
-    // and two macros. Ardis spotted the same class from the other end ("there are
-    // no turns in dh"). Sixteen hand edits would have been sixteen chances to
+    // and two macros. The same class shows up from the other end too - there are
+    // no turns in Daggerheart. Sixteen hand edits would have been sixteen chances to
     // drift, so it lives here beside markVerb and clearVerb, which exist for
     // exactly this reason.
     //
@@ -201,6 +201,72 @@
 
     // How a reset-to-zero reads. DH "Arousal clears to 0"; others "resets to 0".
     resetText(label = "Arousal") { return `${label} resets to 0`; }
+
+    // What this system calls ONE STEP of a valued condition. Added 13 Sept 2026
+    // for the homebrew item panel, and MEASURED off the shipped cards rather than
+    // assumed - 505 PF2e items and 506 Daggerheart items, read offline:
+    //
+    //   PF2e   "each LEVEL of Denied", "You lose all LEVELS of Denied",
+    //          "you gain one LEVEL of Horny" - 95 hits, ZERO for "token"
+    //   DH     "you hold 3 Denied TOKENS", "mark a Horny TOKEN",
+    //          "tracked in tokens" - 64 hits, and its only two "level" hits are
+    //          character level, not a condition
+    //
+    // Beside markVerb and dcWord for the same reason they are here: a word a
+    // player reads, in one place, so sixteen hand edits cannot drift.
+    //
+    // D&D 5e INHERITS THIS AND THAT IS A CLAIM TO CHECK, not a decision - the 5e
+    // pack does not yet carry the cards that would settle it. Set it there when
+    // they exist rather than leaving the default to be discovered.
+    //
+    // A WORD, never an identifier: the flag is still `denied`.
+    get unitWord()  { return "level"; }
+    get unitsWord() { return "levels"; }
+
+    // "3 levels" / "1 token". Plural by the number, so a label can be built
+    // without every caller repeating the test.
+    unitText(n) {
+      const k = Number(n) || 0;
+      return `${k} ${Math.abs(k) === 1 ? this.unitWord : this.unitsWord}`;
+    }
+
+    // WHEN GEAR UPKEEP HAPPENS, in this system's own words. Added 13 Sept 2026:
+    // "at rest" is a Daggerheart term. PF2e has no rest - it has daily
+    // preparations - and Daggerheart has short and long rests, so anything that
+    // resets has to name the reset this system actually has, or it says
+    // something untrue.
+    //
+    // MEASURED, off each system's own cards:
+    //   PF2e  "When you make your daily preparations, your Arousal is reduced to
+    //         0" (Arousal), "shed this feature at a daily preparation" (Throat
+    //         Goat) - six hits for daily preparations, ZERO for "short rest"
+    //   DH    "When you have a rest, these tokens are cleared" (Horny), "While
+    //         worn, mark 1 Arousal each rest" (Living Shibari Harness) - EACH
+    //         rest, short or long. Zero hits for "short rest" as a phrase, and
+    //         "long rest" only where something is long-rest ONLY (Defeat, Curse
+    //         of Exposure).
+    //
+    // And the CODE agrees with the cards: `chastityGear.drainAtRest` is called
+    // from `macro/aflp-daily-prep.js` (the PF2e path) and from `ui/aflp-rest.js`,
+    // which is Daggerheart-only and fires on ANY rest.
+    //
+    // Distinct from `dailyResetText`, which is about the DAILY upkeep - on
+    // Daggerheart that rides on a long rest, while gear drains on every rest.
+    //
+    // GOES STALE IF: the drain moves to a different call site, or a card changes
+    // which rest it names.
+    get gearUpkeepPhrase() { return "at daily preparations"; }
+
+    // When a WORN item's rules are live on this system. PF2e has carryType and
+    // investment; Daggerheart loot has neither and counts on presence, which is
+    // why the same sentence cannot serve both. Measured 12 Sept 2026:
+    // `AFLP.anatomy._active` returns true for every DH loot item in inventory.
+    //
+    // GOES STALE IF: Daggerheart gains an equipped state for loot, or AFLR stops
+    // gating worn gear on `anatomy._active`.
+    get wornNote() {
+      return "Gear counts only while worn and invested; effects and feats count on presence.";
+    }
 
     // --- Arousal backing ---
     // Arousal is AFLP's core resource. By default it lives in an AFLP world
@@ -368,7 +434,34 @@
       const item = live?.items?.find(c =>
         c.slug === key || (uuid && (c.flags?.core?.sourceId ?? c.sourceId) === uuid)
       );
-      if (item) await item.update({ "system.badge.value": value });
+      if (!item) return;
+      // A BINARY CONDITION HAS NO BADGE, AND ASKING IT FOR A VALUE IS NOT AN ERROR.
+      //
+      // AFLR models on/off conditions the way PF2e models Grabbed - no entry in
+      // CONDITION_CAPS and no badge on the effect - and that table's own comment
+      // says so: "PF2e's `defeated` is a separate, binary condition and takes no
+      // cap." Writing `system.badge.value` onto an effect whose badge is null is
+      // refused by PF2e's schema, so this line threw a DataModelValidationError
+      // into the console on every such call and changed nothing.
+      //
+      // FAILING DIRECTION, NAMED: a value asked of a binary condition is dropped
+      // here, silently and on purpose. The end state is already correct - the
+      // creature stays Swallowed - and the caller has nothing to do about it.
+      // Reached live by the condition-card drag, which computes `before + 1` and
+      // so asks for 2 when a card is dragged onto someone who already has it.
+      //
+      // SAFE BECAUSE IT ONLY SKIPS WRITES THAT ALREADY FAILED. Measured across
+      // all 21 registered conditions, 18 Sept 2026: 6 carry a counter badge and
+      // write fine, 6 are flag-backed and have no effect item so `item` is
+      // already null, and the remaining 9 - afterglow, defeated, entranced,
+      // hypnotized, persona-overridden, stuck-submitting, swallowed, toasted,
+      // masturbating - have an item with a null badge and were rejected 100% of
+      // the time. No condition changes behaviour; the console goes quiet.
+      //
+      // STALE IF: one of those 9 gains a badge, which is what making it valued
+      // would mean - it would then take the write on this same line.
+      if (!item.system?.badge) return;
+      await item.update({ "system.badge.value": value });
     }
 
     // --- Resolution ---

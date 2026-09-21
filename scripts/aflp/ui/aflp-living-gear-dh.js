@@ -4,9 +4,9 @@
 // The machinery is in `aflp-living-gear-core.js`. This file is rows, and every
 // row is a claim about a card in `aflr-dh-items`, read on 27 August 2026.
 //
-// DAGGERHEART IS WHERE LIVING BONDAGE WAS INVENTED. Ardis, 27 Aug 2026: "dh was
-// the world where i invented it. dh has mundane bondage and living bondage. pf2e
-// has mundane bondage, living bondage, and magical cursed bondage." The old
+// DAGGERHEART IS WHERE LIVING BONDAGE WAS INVENTED. DH has mundane bondage and
+// living bondage; PF2e has mundane bondage, living bondage, and magical cursed
+// bondage. The old
 // combined file carried a header saying the opposite - "PF2e ONLY, deliberately.
 // Living bondage is a PF2e line" - and that false sentence is why the thirty-odd
 // DH living pieces got no automation at all, and why a Deepthroat its own card
@@ -14,9 +14,9 @@
 //
 // TWO DELIBERATE DIFFERENCES FROM THE PF2e FILE:
 //
-// 1. NO CURSES TABLE. Ardis: "the cursed items have been built in dh as living
-//    items, so there's no need to make them into curses. they work the same as
-//    the other living items." A DH piece that keeps a body change says so in its
+// 1. NO CURSES TABLE. The cursed items were built in DH as living items, so
+//    they do not need to be curses - they work the same as the other living
+//    items. A DH piece that keeps a body change says so in its
 //    own sentence and gets a `KEEPS` row here. It is a property of the piece,
 //    not a second category of magic.
 //
@@ -46,7 +46,7 @@ window.AFLP_LivingGear_DH = Object.assign(Object.create(window.AFLP_LivingGearCo
   // Gagged, even though the Sensory Hood two items away says "you are Gagged"
   // outright. Reading the first as the second is the whole failure mode this file
   // exists to stop; those are listed under "REPORTED, NOT BUILT" as card-wording
-  // questions, for Ardis to rule on one at a time.
+  // questions, to be ruled on one at a time.
   //
   // THE LEATHER BLINDFOLD USED TO BE ON THAT LIST and no longer is - its card was
   // rewritten on 27 Aug to name the condition, so the row below is the card's
@@ -143,15 +143,13 @@ window.AFLP_LivingGear_DH = Object.assign(Object.create(window.AFLP_LivingGearCo
     // to those holes, and you are Plugged."
     //
     // PLUGGED ONLY, AND THAT IS THE CARD'S DOING, not an oversight. PF2e's twin
-    // grants Plugged plus Chaste and Caged, because Ardis edited THAT card on 28 Aug
+    // grants Plugged plus Chaste and Caged, because THAT card was edited on 28 Aug
     // to name all three ("You are Plugged, and also Chaste and Caged if you have a
     // pussy or cock respectively"). **The Daggerheart card was not edited with it**
     // and names only Plugged - measured 29 Aug, zero hits for "chaste" or "caged" in
     // its whole description - so the row states what this system's card states.
     //
-    // ARDIS, 29 AUG 2026: "yes in pf2e we added to the description about and chaste
-    // or caged if you have a pussy or cock respectively, we could add that here too."
-    // The DH card gained the same clause the PF2e one carries, so the row carries the
+    // 29 AUG 2026: the DH card gained the same clause the PF2e one carries, so the row carries the
     // same two anatomy branches. **The card was edited FIRST and this row follows
     // it** - the order matters, because a row that grants what no card states is the
     // Throat Sleeve Slave defect, and a card that promises what no row grants is the
@@ -225,15 +223,12 @@ window.AFLP_LivingGear_DH = Object.assign(Object.create(window.AFLP_LivingGearCo
     "living-femboy-cage": {
       label:   "Living Femboy Cage",
       anatomy: ["cock-micro", "ass-cumfinity"],
-      // STATED INTENT, and NOT a gap in the card. Ardis, 27 Aug 2026: "the femboy
-      // cage's requiresCock is because in order to wear a cage, they need a cock.
-      // dh generally needs less explicitly technical language in its card text
-      // because its a game ruled by the fiction-first approach - players dont need
-      // to be told that a cage requires a cock because the fiction tells them it
-      // is so. but pf2e generally requires more technically clinically explicit
-      // language like that. the fact that dh doesn't state that the cage
-      // requiresCock doesn't make that requirement any less true - so the
-      // automation should of course reflect that intended truth."
+      // STATED INTENT, and NOT a gap in the card (27 Aug 2026). To wear a cage you
+      // need a cock. DH card text is less technical than PF2e's because DH is
+      // fiction-first - players do not need to be told a cage requires a cock
+      // because the fiction tells them so - while PF2e wants the clinically
+      // explicit version. The DH card not stating it does not make the
+      // requirement any less true, so the automation reflects it.
       //
       // SO: "the card does not say it" is NOT sufficient grounds to drop a
       // requirement on Daggerheart. PF2e's Cock Cage of the Cumdump Femboy spells
@@ -323,7 +318,7 @@ window.AFLP_LivingGear_DH = Object.assign(Object.create(window.AFLP_LivingGearCo
   //
   // 2. CARD WORDING, seven pieces. These describe a condition's effect without
   //    naming it, so they get no row - the reading has to be the card's, not
-  //    mine. Each is a one-line card fix if Ardis wants the automation:
+  //    the code's. Each is a one-line card fix if the automation is wanted:
   //      living-ring-gag           "cannot speak clearly"     -> Gagged?
   //      living-leather-mitts      "cannot hold items"        -> Cuffed?
   //      living-leather-armbinder  "cannot use your hands"    -> Cuffed?
@@ -366,6 +361,16 @@ window.AFLP_LivingGear_DH = Object.assign(Object.create(window.AFLP_LivingGearCo
     // GM only, so a player client cannot double-apply.
     if (!game.user.isGM) return;
 
+        // STAMPED ONLY WHEN THIS TABLE ACTUALLY REGISTERS HERE, so a reader can ask
+    // "is this table live in THIS world" instead of re-deriving the system rule.
+    // `index.js` points the back-compat alias `AFLP_LivingGear` at the PF2e object
+    // on every system that is not Daggerheart - INCLUDING D&D 5e - so a reader that
+    // trusts the alias reads Pathfinder's rows on a 5e world. Measured 16 Sept 2026
+    // in dnd-test: the homebrew panel's `grantsFor("living-exoskeleton")` returned
+    // PF2e's plugged/caged/chaste row there. Latent only because 5e has no gear to
+    // attach yet, and the 5e build is next.
+    this._liveFor = AFLP.system?.id ?? null;
+
     const touch = async (item) => {
       if (!item?.actor) return;
       // Kept body changes land on donning and are never taken back, so they are
@@ -383,6 +388,15 @@ window.AFLP_LivingGear_DH = Object.assign(Object.create(window.AFLP_LivingGearCo
       await this.sync(item.actor);
     });
     Hooks.on("updateItem", async (item, changes) => {
+      // A GM WRITING OR REMOVING A GRANT ROW ON THEIR OWN ITEM. Without this leg
+      // the row is read by `_isGrantItem` and triggered by nothing - the largest
+      // class of dead feature in this project, and the exact leg the Denied floor
+      // needed when the homebrew panel first shipped. BOTH spellings matter:
+      // `-=homebrewGrant` is how a removal arrives, and taking the row off has to
+      // hand the conditions back.
+      const f = changes?.flags?.["ardisfoxxs-lewd-pf2e"];
+      if (f && ("homebrewGrant" in f || "-=homebrewGrant" in f)) { await this.sync(item.actor); return; }
+
       // Daggerheart uses a BOOLEAN `system.equipped` on weapons and armor and has
       // no equip block at all on loot - the core's `_isOn` -> `AFLP.anatomy._active`
       // is what reads all three shapes. Watching the same path still works,

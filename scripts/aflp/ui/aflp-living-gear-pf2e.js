@@ -12,9 +12,9 @@
 // Bimbofied levels gained from wearing it." Putting a curse in GRANTS would
 // strip everything the moment it came off, against its own card.
 //
-// DAGGERHEART HAS NO CURSES. Ardis, 27 Aug 2026: "the cursed items have been
-// built in dh as living items, so there's no need to make them into curses. they
-// work the same as the other living items." A DH piece that keeps a body change
+// DAGGERHEART HAS NO CURSES (27 Aug 2026). The cursed items were built in DH as
+// living items, so they do not need to be curses - they work the same as the
+// other living items. A DH piece that keeps a body change
 // says so on its own card and carries a `keeps` row in the DH file - it is not
 // a second category over there. Nothing in this file describes a DH item, and
 // nothing in the DH file describes one of these.
@@ -97,7 +97,7 @@ window.AFLP_LivingGear_PF = Object.assign(Object.create(window.AFLP_LivingGearCo
       removalNoun: "harness",
       // No anatomical requirement on the card. The harness belts on and seals
       // whatever is under it, so unlike the cage there is nothing to refuse.
-      // Reworked by Ardis on 10 Aug 2026: the harness grants Throat (Deepthroat)
+      // Reworked 10 Aug 2026: the harness grants Throat (Deepthroat)
       // where it used to grant Ass (Cumfinity). The key is `throat-deep`; the
       // DISPLAY name is "Deepthroat", which is not the same string.
       anatomy:     ["throat-deep", "tits-heavy"],
@@ -124,7 +124,7 @@ window.AFLP_LivingGear_PF = Object.assign(Object.create(window.AFLP_LivingGearCo
 
     // ── THE LIVING EXOSKELETON ──────────────────────────────────────────────
     //
-    // Its card, after Ardis's 28 Aug 2026 edit: **"You are Plugged, and also
+    // Its card, as edited 28 Aug 2026: **"You are Plugged, and also
     // Chaste and Caged if you have a pussy or cock respectively."**
     //
     // Read literally, and the conditional half is the point: the suit plugs
@@ -135,8 +135,8 @@ window.AFLP_LivingGear_PF = Object.assign(Object.create(window.AFLP_LivingGearCo
     // ON PF2e THESE ARE CONDITION *ITEMS*, not flags. Measured here 28 Aug on a
     // scratch rig: `AFLP.cond.apply(a, "chaste")` embeds the `Chaste` effect from
     // the Conditions folder and `cond.has` reads it back. **Daggerheart keeps the
-    // same three in a flag bag instead** - Ardis: *"dont assume pf2e is laid out
-    // like dh, its a completely different system."* `AFLP.cond` is what hides that
+    // same three in a flag bag instead** - PF2e is not laid out like Daggerheart;
+    // they are completely different systems. `AFLP.cond` is what hides that
     // difference, which is exactly why this row names conditions and not storage.
     //
     // NOT A `chastityGear.ITEMS` CONCERN: that row already carries this suit's
@@ -183,9 +183,8 @@ window.AFLP_LivingGear_PF = Object.assign(Object.create(window.AFLP_LivingGearCo
     //
     // So the gate's guarantee was void on Pathfinder while these rows existed. Two
     // writers of one rule, and only one of them asked the card. That is exactly
-    // what Ardis warned about: *"the moment that our code breaks the intended
-    // function of the card's mechanic in the name of efficiency, is the moment
-    // where it loses its usefulness completely."*
+    // what the design forbids: the moment the code breaks the card's intended
+    // mechanic in the name of efficiency, it has lost its usefulness completely.
     //
     // DAGGERHEART NEVER HAD THEM - `aflp-living-gear-dh.js` has no denied rows -
     // which is why the same test passed there and failed here. **A duplicate
@@ -433,6 +432,16 @@ window.AFLP_LivingGear_PF = Object.assign(Object.create(window.AFLP_LivingGearCo
     // GM only, so a player client cannot double-apply.
     if (!game.user.isGM) return;
 
+        // STAMPED ONLY WHEN THIS TABLE ACTUALLY REGISTERS HERE, so a reader can ask
+    // "is this table live in THIS world" instead of re-deriving the system rule.
+    // `index.js` points the back-compat alias `AFLP_LivingGear` at the PF2e object
+    // on every system that is not Daggerheart - INCLUDING D&D 5e - so a reader that
+    // trusts the alias reads Pathfinder's rows on a 5e world. Measured 16 Sept 2026
+    // in dnd-test: the homebrew panel's `grantsFor("living-exoskeleton")` returned
+    // PF2e's plugged/caged/chaste row there. Latent only because 5e has no gear to
+    // attach yet, and the 5e build is next.
+    this._liveFor = AFLP.system?.id ?? null;
+
     const touch = async (item) => {
       if (!item?.actor) return;
       // A curse lands on donning and is never taken back, so it is checked
@@ -452,6 +461,15 @@ window.AFLP_LivingGear_PF = Object.assign(Object.create(window.AFLP_LivingGearCo
       await this.sync(item.actor);
     });
     Hooks.on("updateItem", async (item, changes) => {
+      // A GM WRITING OR REMOVING A GRANT ROW ON THEIR OWN ITEM. Without this leg
+      // the row is read by `_isGrantItem` and triggered by nothing - the largest
+      // class of dead feature in this project, and the exact leg the Denied floor
+      // needed when the homebrew panel first shipped. BOTH spellings matter:
+      // `-=homebrewGrant` is how a removal arrives, and taking the row off has to
+      // hand the conditions back.
+      const f = changes?.flags?.["ardisfoxxs-lewd-pf2e"];
+      if (f && ("homebrewGrant" in f || "-=homebrewGrant" in f)) { await this.sync(item.actor); return; }
+
       // Any equip-shape change at all. PF2e moves carryType inside an object,
       // so watching `changes.system.equipped` covers worn, held and stowed.
       if (changes?.system?.equipped === undefined) return;

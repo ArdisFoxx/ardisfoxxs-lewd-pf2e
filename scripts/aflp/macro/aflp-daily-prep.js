@@ -20,6 +20,16 @@ const FLAG = AFLP.FLAG_SCOPE;
 // A programmatic run - e.g. auto-fired by a Daggerheart Long Rest - hands the
 // actor in via a global so we don't depend on the GM's on-screen token selection.
 const _autoActor   = window._aflpDailyPrepActor   ?? null;
+// READ BEFORE CLEARING. `_aflpDailyPrepContext` was set by `ui/aflp-rest.js` and
+// then thrown away here unread - a dead read, found 13 Sept 2026. It matters now:
+// on a Daggerheart LONG rest, `aflp-rest.js` drains worn gear for the rest and
+// then runs this macro, which drained it a SECOND time. No shipped row has a
+// non-zero `drain` today (the exoskeleton moved to `coatWipe`, which is
+// idempotent), so nothing shipped wrong - but the homebrew panel now lets a GM
+// set a drain, which makes it reachable.
+//
+// GOES STALE IF: `aflp-rest.js` stops draining, or stops setting this context.
+const _dpContext   = window._aflpDailyPrepContext ?? null;
 window._aflpDailyPrepActor   = null;
 window._aflpDailyPrepContext = null;
 const tokens = _autoActor ? [{ actor: _autoActor }] : canvas.tokens.controlled;
@@ -99,8 +109,8 @@ for (const { actor } of tokens) {
   // your character level. This is your natural baseline: however many Loads you
   // spend, your daily preparations refill you to at least this many."
   //
-  // This feat is the ONE thing that ties a PC's Loads to their level - Ardis's
-  // ruling, 5 Sept 2026. Tier scaling is for adversaries (see
+  // This feat is the ONE thing that ties a PC's Loads to their level (ruled
+  // 5 Sept 2026). Tier scaling is for adversaries (see
   // AFLP.defaultLoadsForActor); a PC without this feat gains no Loads from
   // levelling at all.
   //
@@ -112,7 +122,7 @@ for (const { actor } of tokens) {
   // system gate is not the same thing as working on both systems.
   //
   // SET, NOT FLOOR. It used to only ever raise, so Loads climbed with level and
-  // never came back down - reported by Ardis after levelling a character down.
+  // never came back down - found by levelling a character down.
   // Setting is only safe now that size training writes `coomer.trained` instead
   // of the base (see AFLP.effectiveLoads); before that, lowering the base would
   // have thrown away training this code cannot tell apart from the feat's own
@@ -121,8 +131,8 @@ for (const { actor } of tokens) {
   // FLOORED AT SIX, which is the baseline plus two. This is a LEVEL 1 general
   // skill feat with no prerequisites, and "Loads equal to your character level"
   // is worth nothing until level 5 against a baseline of 4 - four dead levels on
-  // a feat you can take at first. Ardis's ruling, 5 Sept 2026: floor it two
-  // above baseline, and the card reads "set to your character level or 6,
+  // a feat you can take at first. Ruled 5 Sept 2026: floor it two above
+  // baseline, and the card reads "set to your character level or 6,
   // whichever is higher". LOADS_BASE + 2 rather than a literal 6 so the two
   // move together if the baseline ever does; if you change one, change the card.
   //
@@ -274,11 +284,16 @@ for (const { actor } of tokens) {
   // Gear with moving parts burns lubricant. See AFLP.chastityGear. Placed after
   // `message` is declared - an earlier insert threw a temporal dead zone error
   // that node --check reports as valid syntax.
-  try {
-    const drained = await AFLP.chastityGear?.drainAtRest?.(actor);
-    const holes = drained ? Object.keys(drained.took) : [];
-    if (holes.length) message += `<br>The joints drink: ${actor.name} loses ${drained.rate} Cumflation from ${holes.join(", ")}.`;
-  } catch (e) { console.warn("AFLR | chastity drain failed", e); }
+  // Skipped when this run IS a Daggerheart long rest: `aflp-rest.js` already
+  // drained for that rest before handing the actor over. One rest, one drain -
+  // which is what the DH cards say ("each rest").
+  if (_dpContext !== "longRest") {
+    try {
+      const drained = await AFLP.chastityGear?.drainAtRest?.(actor);
+      const holes = drained ? Object.keys(drained.took) : [];
+      if (holes.length) message += `<br>The joints drink: ${actor.name} loses ${drained.rate} Cumflation from ${holes.join(", ")}.`;
+    } catch (e) { console.warn("AFLR | chastity drain failed", e); }
+  }
 
   if (hasPineappleDiet) {
     // Reports what was ACTUALLY written, and the total after bonus, training and

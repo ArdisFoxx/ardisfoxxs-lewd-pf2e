@@ -53,9 +53,9 @@ window.AFLP_Cumflation = {
       // pumps cum INTO the tit - the internal onahole reservoir, distinct from the
       // external coat - so nipples routes to its own pool.
       let poolKey = hole === "paizuri" ? "bodyCoat" : hole === "nipples" ? "onahole" : hole;
-      // THE DRY EXOSKELETON TAKES THE LOAD FOR ITSELF. Ardis, 28 Aug 2026: while
-      // the suit needs lubricating it "smears the cum over the body to lubricate
-      // itself", so a deposit anywhere on a Dry-suited wearer routes to the chest
+      // THE DRY EXOSKELETON TAKES THE LOAD FOR ITSELF (28 Aug 2026). While the
+      // suit needs lubricating it smears the cum over the body to lubricate
+      // itself, so a deposit anywhere on a Dry-suited wearer routes to the chest
       // coat and greases the joints instead of filling a hole.
       //
       // This is the SAME KIND OF LINE as the two remaps above - one pool key
@@ -397,7 +397,7 @@ async function _applyFacialVision(actor, facialTier) {
 
 // THE ESCAPE BONUS CARRIER, PF2e ONLY.
 //
-// Ardis, 29 Aug 2026: the slick grants a circumstance bonus to Escape - +1 at
+// Since 29 Aug 2026 the slick grants a circumstance bonus to Escape - +1 at
 // half chest coat, +2 at full - rather than lowering AFLR's own escape DC.
 //
 // PF2e's Escape action is the system's roll, not ours: it is whichever of

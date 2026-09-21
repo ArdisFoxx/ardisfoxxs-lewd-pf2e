@@ -1167,8 +1167,8 @@ AFLP.Kinks = {
     if (window.AFLP_Lovense) AFLP_Lovense.emitEdge(actor);
   },
 
-  // Normal DC by level. Ardis, 20 Aug 2026: "the edge card says it uses a normal
-  // dc" - so the CONCEPT was always right and only the numbers were wrong.
+  // Normal DC by level. The Edge card says it uses a normal DC, so the CONCEPT
+  // was always right and only the numbers were wrong.
   //
   // This used to carry its own table, [14,15,15,16,17,17,18,19,19,20,21,21,...],
   // under a comment claiming it "matches PF2e Simple DC table (GMG p.503)". It
@@ -2474,7 +2474,7 @@ Object.assign(AFLP.Kinks, {
     // Stage 2+: mind-fog. PF2e applies Stupefied 1; DH has no Stupefied, so
     // the conditioning fogs the mind into Bimbofied instead (spirit-ported - the
     // same dazed, pliable state the Bimbomancer mapping uses). (Was stage 3 pre-
-    // condense; his prose puts Stupefied at stage 2.)
+    // condense; the card's prose puts Stupefied at stage 2.)
     if (counters >= 2) {
       if (AFLP.system.id === "daggerheart") {
         if ((AFLP.cond?.value?.(liveActor, "bimbofied") ?? 0) < 1) {

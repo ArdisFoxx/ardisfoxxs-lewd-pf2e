@@ -44,12 +44,32 @@ AFLP.HScene = (() => {
 
   // Per-hole descriptor ladders (tiers 1-8). Each hole shows its own escalating
   // word; colours reuse the overall ramp by tier so the sheet stays consistent.
-  // Keys are cumflation POOL keys (what the sheet stores), not position ids - the
-  // old "paizuri" position folded into the single bodyCoat chest pool, so its
-  // words live under "tits" now and are picked when the actor has tits.
+  // MOST keys are cumflation POOL keys (what the sheet stores), but not all: a
+  // key here is a LADDER, and a pool can read more than one of them depending on
+  // the body. The old "paizuri" position folded into the single bodyCoat chest
+  // pool, so its words live under "tits" and are picked when the actor has tits;
+  // "analBreeding" is the same idea for a gut that carries. AFLP.cfWordHole below
+  // is the ONLY place that chooses, so do not re-derive the rule in a consumer.
+  //
+  // Every key here becomes a column in the Cumflation Labels editor for free -
+  // CumflationLabelsApp._holeKeys() is Object.keys(AFLP.CF_HOLE_WORDS). Give a new
+  // key a COL_TITLES entry in ui/aflp-messages.js or the column is title-cased
+  // from the key ("AnalBreeding").
   const CF_HOLE_WORDS = {
     vaginal: ["Seeded Snatch","Splattered Cunt","Filled Womb","Bred Baby-Maker","Packed Womb","Heavy-Bred Oven","Brimming Broodpot","Bulging Baby-Batter Bunker"],
     anal:    ["Used Backdoor","Sloppy Tailpipe","Leaking Rear","Filled Ass","Anal Cum Twinkie","Anal Gaped Cum Glutton","Cream-Filled Ass Destruction","Internal Cum Ass to Mouth"],
+    // The breeding-ass read of the SAME anal pool. Built on the vaginal ladder's
+    // skeleton (seeded / splattered / filled / bred / packed / heavy-bred /
+    // brimming / bulging) wearing the anal ladder's anatomy, because the Ass
+    // fertility cards say "a womb forms in your gut to carry it" - it is a
+    // breeding hole, and the neutral anal ladder never says so.
+    //
+    // Rungs 4, 6 and 7 were revised 18 Sept 2026 - "Baby-Backdoor" read as a
+    // baby's, and "bowels" is not a sexy word. The nouns are deliberately spread - Backdoor,
+    // Tailpipe, Gut-Womb, Seed-Sleeve, Gut-Womb, Ass-Oven, Brood-Butt, Backdoor -
+    // with Gut-Womb doubled the way Pussy reuses Womb at 3 and 5. The old 6 and 7
+    // repeated "Bowels" back to back, which is part of what made them drag.
+    analBreeding: ["Seeded Backdoor","Splattered Tailpipe","Filled Gut-Womb","Bred Seed-Sleeve","Packed Gut-Womb","Heavy-Bred Ass-Oven","Brimming Brood-Butt","Bulging Backdoor Baby-Batter Barrel"],
     oral:    ["Fed a Mouthful","Throat-Slicked","Swallowing Hard","Throat Full","Gullet-Stuffed","Force-Fed Maw","Cum-Drunk Belly","Throat Sleeve"],
     facial:  ["Splattered Lips","Glazed Nose","Painted Face","Cum-Blinded","Dripping Chin","Frosted Mug","Bukkake Mask","Glazed Donut Face"],
     tits:    ["Speckled Breasts","Glazed Tits","Thickly Creamed Cleavage","Pearl-Strung Pillows","Drenched Jugs","Sloppy Sweater Stretchers","Knocked-Up Knockers","Lil Miss Bukkake Boobs"],
@@ -72,6 +92,35 @@ AFLP.HScene = (() => {
     } catch { return base; }
   }
   AFLP._getCFHoleWords = _getHoleWords;
+
+  // WHICH LADDER DOES THIS ACTOR'S POOL READ?
+  //
+  // A pool is what the sheet STORES; a ladder is what it says. Two pools read a
+  // second ladder when the body warrants it:
+  //
+  //   bodyCoat + tits            -> "tits"          (the chest coat on a chest with tits)
+  //   anal     + breeding ass    -> "analBreeding"  (a gut that carries)
+  //
+  // The tits rule already existed as the SAME line copied into sheet-tab.js and
+  // aflp-status-panel.js. Adding a second branch to two copies is how they drift,
+  // so both now call this. A consumer that re-derives the rule inline is a bug.
+  //
+  // Takes the ACTOR, not a precomputed boolean, so a caller cannot answer half of
+  // it. Returns the pool key unchanged when nothing applies, so it is always safe
+  // to pass any hole through.
+  //
+  // STALE IF: a third pool gains a body-conditional ladder and is added only to
+  // one consumer instead of here.
+  AFLP.cfWordHole = function (actor, hole) {
+    try {
+      if (hole === "bodyCoat") {
+        const af = actor?.getFlag?.(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {};
+        if (af["tits"] === true) return "tits";
+      }
+      if (hole === "anal" && AFLP.hasBreedingAss(actor)) return "analBreeding";
+    } catch (e) { /* a missing body reads as the plain pool */ }
+    return hole;
+  };
 
   function _getCFLabels() {
     try {
@@ -933,8 +982,7 @@ AFLP.HScene = (() => {
 
   // WHICH SEAT ROLLS THIS CHARACTER'S EDGE.
   //
-  // Ardis, 23 Aug 2026: "a player should be able to roll their own edge." Until
-  // then `resolveEdge` routed every non-GM click to the GM, so a player clicked
+  // A player rolls their own Edge (23 Aug 2026). Until then `resolveEdge` routed every non-GM click to the GM, so a player clicked
   // Edge on their own PC and a Fortitude save dialog opened on the GM's screen
   // and blocked there - measured, and it resolved correctly only once the GM
   // answered it.
@@ -2119,10 +2167,9 @@ AFLP.HScene = (() => {
     // `_userCanControl` answers "may this user drive the SCENE" - and in a
     // DOMINATED scene that is the Dominating attacker's owner, not the bottom's.
     // So the character being brought to climax was the one whose player had no
-    // Cum or Edge button at all, in the scene where it matters most. Ardis,
-    // 23 Aug 2026: "a player should be able to roll their own edge" - which is
-    // not reachable by routing alone, because there was nothing for them to
-    // press.
+    // Cum or Edge button at all, in the scene where it matters most. A player
+    // rolling their own Edge is not reachable by routing alone, because there was
+    // nothing for them to press.
     //
     // This widens the ROW only. Positions, hole chips and every other control
     // still ask `_userCanControl`, and the row is per-participant, so this grants
@@ -6675,7 +6722,7 @@ AFLP.HScene = (() => {
       // other client's `_scenes` map forever. The receiving handler has existed the
       // whole time; only this emit was missing.
       //
-      // REPORTED BY ARDIS, 21 Aug 2026, with a screenshot: after a harness run on
+      // FOUND 21 Aug 2026: after a harness run on
       // the GM tab, the player tab still showed "H-SCENE IN PROGRESS" with "No
       // scene actors" - the dock for a scene whose rig actors had since been
       // deleted. Measured on that client: `_scenes.size` 1, holding participants
@@ -7738,9 +7785,9 @@ AFLP.HScene = (() => {
         // just Foreplay - so a carnal action without the `penetrates` flag could
         // only ever open on a tease. That is how a Goblin Breeding Troop, whose
         // one carnal feature is Grasping Hands, offered nothing but foreplay:
-        // breeders that cannot be pointed at sex. Reported by Ardis 17 Aug 2026.
-        // "we don't want it to restrict the picker to only show some options, we
-        // just want it to favour one as the preselected one."
+        // breeders that cannot be pointed at sex (17 Aug 2026). The picker must not
+        // be restricted to some options - it only favours one as the preselected
+        // one.
         //
         // So the flag now only decides WHICH SECTION STARTS OPEN. Every section
         // is always rendered and every position stays one click away, whatever

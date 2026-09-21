@@ -619,6 +619,13 @@ AFLP.capCondition = (key, value) => {
 
 // Every key in the Bondage Gear folder. A living piece and its dormant twin are
 // both here, since both are bondage while worn.
+//
+// PLUS the spell effects at the bottom, which are not gear. A binding SPELL never
+// binds its caster - `BINDING_ITEM_TYPES` refuses the type, deliberately - so the
+// only way a spell can bind its TARGET is to leave an effect on them. On PF2e
+// those effects carry the `bondage` trait and this set is redundant for them; on
+// Daggerheart there are no traits at all, so if these are ever ported the key is
+// the whole signal. Listed now so the port cannot silently do nothing.
 AFLP.BONDAGE_KEYS = new Set([
   "manacles", "leg-cuffs", "rope-bindings", "shibari-harness", "leather-gag",
   "posture-collar", "slave-collar", "slave-leash", "slave-harness",
@@ -695,6 +702,22 @@ AFLP.BONDAGE_KEYS = new Set([
   // bondage-scene tally would count, for carrying it. If a "bound by cords" state is
   // ever wanted it belongs on the Restrained the cords APPLY, not on the item
   // in the user's inventory. Do not add it.
+  //
+  // Added 9 Sept 2026 - THE SPELL EFFECTS, and the point the cords note above
+  // makes in the abstract is exactly what these are in practice: the bound state
+  // belongs on the thing that lands on the TARGET, never on the ability in the
+  // caster's spellbook.
+  //
+  // MEASURED before building them: of the eight non-gear bondage-trait items in
+  // the PF2e pack, only `Bound and Fucked` left anything a Bondage Princess could
+  // feel, because it hands over real gear. The three SPELLS left conditions or
+  // nothing, and the kink scans items, so being tied up by any of them paid out
+  // nothing at all.
+  //
+  // On PF2e these three carry the `bondage` trait and are found by that; these
+  // keys are the Daggerheart path if they are ever ported, since DH has no
+  // traits. Redundant on PF2e ON PURPOSE - one signal per system, both present.
+  "effect-shibari-trap", "effect-bondage-trap", "effect-bad-dragon-gag",
 ]);
 
 AFLP.chastityGear = {
@@ -780,6 +803,33 @@ AFLP.chastityGear = {
     "chastity-harness":                    { holes: ["vaginal", "anal"], drain: 0 },
     "chastity-harness-of-the-throat-sleeve-slave":{ holes: ["vaginal", "anal"], drain: 0 },
 
+    // THE TATTOO OF DENIAL - A FLOOR AND NOTHING ELSE. Added 14 Sept 2026.
+    //
+    // Found by walking all 510 items in `aflp-lewd-items` against this table
+    // rather than by a bug report: its card says *"While invested to the tattoo,
+    // they are Denied 3"* and it was in NEITHER table, so **the floor its card
+    // promised was not mechanised at all** - a wearer got nothing. It now works as
+    // intended both as an item and as a preset.
+    //
+    // It is not chastity gear and it seals nothing. The row exists for the same
+    // reason the cages and codpieces have one - so the piece is RECOGNISED, which
+    // is what `worn()` needs before the floor in `DENIED` can reach it. Everything
+    // else that reads `worn()` sees holes [] and drain 0 and does nothing.
+    //
+    // "WHILE INVESTED" NEEDED NO CODE, and that was measured rather than assumed:
+    // the item carries PF2e's `invested` trait, so its `system.equipped.invested`
+    // is null before investing, true after, and false when deliberately withdrawn -
+    // and `anatomy._active` already returns false on `invested === false`. So the
+    // gate the card words is the gate the engine applies.
+    //
+    // PF2e ONLY, and checked in the packs rather than inferred from the name: the
+    // Daggerheart pack holds 529 items and its only tattoos are
+    // `tattoo-of-the-beast-cock` and `tattoo-of-predicaments`, neither mentioning
+    // Denied; the 5e pack holds 28 and no tattoo at all. So this row is inert on
+    // both, exactly like `chastity-harness-of-the-throat-sleeve-slave`, and the
+    // card gate below would drop it there anyway.
+    "tattoo-of-denial":       { holes: [], drain: 0 },
+
     // ADDED 26 Aug 2026. THE MUNDANE PIECES WERE NEVER REGISTERED AT ALL - only
     // their living twins were - so a belt, a cage and a codpiece claimed a seal
     // on their cards that the purge path did not enforce on either system.
@@ -806,8 +856,7 @@ AFLP.chastityGear = {
     // no row at all, so it sealed nothing - Pathfinder's twin is
     // `gemstone-buttplug`, a DIFFERENT KEY, and the single row registered that one
     // and left this one inert. Found 27 Aug 2026 by reading every DH bondage item
-    // rather than trusting the names, at Ardis's instruction; he confirmed it
-    // should seal. Same class as `living-codpiece`/`cursed-codpiece` above and
+    // rather than trusting the names; confirmed that it should seal. Same class as `living-codpiece`/`cursed-codpiece` above and
     // `living-cock-cage`/`living-femboy-cage`.
     // GOES STALE IF: the two keys are ever unified - then one row does both.
     "gemstone-plug":          { holes: ["anal"], drain: 0 },
@@ -825,7 +874,7 @@ AFLP.chastityGear = {
     // is the mechanism Daggerheart runs with a Fear. The distinction being
     // reached for was CURSED PF2e gear
     // (`chastity-harness-of-the-throat-sleeve-slave`), which is a different item.
-    // Corrected by Ardis 14 Aug 2026.
+    // Corrected 14 Aug 2026.
     //
     // The DH pack item was rekeyed to `living-chastity-harness` in `dh-test`
     // before this row was removed, and no actor in that world or in any AFLR
@@ -894,17 +943,111 @@ AFLP.chastityGear = {
     return null;
   },
 
+  // A GM's own item, declaring what it does on ITSELF rather than in this table.
+  //
+  // 1 Sept 2026: an injected menu for adding AFLR effects to homebrew items that
+  // exist in a user's world data, so a GM can make an item that behaves like a
+  // Chastity Cage without duplicating the Chastity Cage item.
+  //
+  // WHY THERE WAS NOTHING TO COPY. The Denied 1 on the Cock Cage is not an
+  // ActiveEffect and not on the item - it is two rows in a code table plus a card
+  // check. `_keyOf` answers null for anything not in `ITEMS`, so a homebrew item
+  // could never be seen at all. This reads a per-ITEM row instead.
+  //
+  //     flags.ardisfoxxs-lewd-pf2e.homebrew = {
+  //       holes: ["anal"], drain: 0, coatWipe: false, denied: 1,
+  //     }
+  //
+  // Shaped exactly like an `ITEMS` row so every reader downstream - `sealed`,
+  // `drainAtRest`, the purge macro, the Denied floor - needs no change: they all
+  // go through `worn()`.
+  //
+  // THE KEY IS SYNTHETIC AND PER ITEM. `homebrew:<id>` can never collide with a
+  // real key, and two homebrew items on one actor stay distinct, which the Denied
+  // floor needs - it records what the wearer had before each source.
+  //
+  // AN AFLR KEY ALWAYS WINS. If `_keyOf` answered, the item IS that piece and its
+  // own table row is the truth; a homebrew block on a keyed item is ignored rather
+  // than merged, because merging would let a GM silently re-specify shipped gear.
+  //
+  // GOES STALE IF: `ITEMS` rows grow a field the panel does not write, or
+  // `anatomy._active` stops being the worn test.
+  _homebrewRow(item) {
+    const hb = item?.getFlag?.("ardisfoxxs-lewd-pf2e", "homebrew")
+            ?? item?.flags?.["ardisfoxxs-lewd-pf2e"]?.homebrew ?? null;
+    if (!hb || typeof hb !== "object") return null;
+    const holes = Array.isArray(hb.holes) ? hb.holes.filter(h => typeof h === "string") : [];
+    const drain = Number(hb.drain) || 0;
+    const denied = Number(hb.denied) || 0;
+    const coatWipe = hb.coatWipe === true;
+    // `holesUnless` names a condition that SUSPENDS this row's holes while it is
+    // on - the Living Exoskeleton's rule. It rides along so that COPYING a preset
+    // into a homebrew item copies the gate with it; without this line a copied
+    // exoskeleton would seal unconditionally, which is a rule its own card denies.
+    // Read generically by `_holesSuspended`, so nothing else needs to change.
+    const holesUnless = typeof hb.holesUnless === "string" && hb.holesUnless ? hb.holesUnless : null;
+    // An empty declaration is not a chastity item. Refusing here is what stops a
+    // stray `{}` from putting an item on every worn-gear list in the module.
+    // `holesUnless` alone is not a declaration either - it gates holes, and with
+    // no holes there is nothing to gate.
+    if (!holes.length && drain <= 0 && denied <= 0 && !coatWipe) return null;
+    const row = { holes, drain, coatWipe, denied };
+    if (holesUnless) row.holesUnless = holesUnless;
+    return row;
+  },
+
   worn(actor) {
     const out = [];
     for (const it of (actor?.items ?? [])) {
       if (!AFLP.anatomy._active(it)) continue;
       const k = this._keyOf(it);
-      if (!k) continue;
       // `__actor` rides along so a row-level gate (`holesUnless`) can ask about the
       // wearer without every caller passing the actor down a second time.
-      out.push({ key: k, item: it, __actor: actor, ...this.ITEMS[k] });
+      if (k) { out.push({ key: k, item: it, __actor: actor, ...this.ITEMS[k] }); continue; }
+      const hb = this._homebrewRow(it);
+      if (hb) out.push({ key: `homebrew:${it.id}`, item: it, __actor: actor, homebrew: true, ...hb });
     }
     return out;
+  },
+
+  // ── DOES THIS CREATURE HAVE AFLR'S PIECE `key` ON THEM, RIGHT NOW? ──────────
+  //
+  // THE ONE PLACE THAT QUESTION IS ANSWERED, and it exists because the obvious
+  // answer is wrong now. Asking `_keyOf(item) === key`, or `itemHasKey`, means "is
+  // this item that AFLR piece" - and a GM's own item that ATTACHED that piece as a
+  // preset carries its rules while being a different item with a key of its own.
+  // Every such reader answers NO for a copy.
+  //
+  // MEASURED, 15 Sept 2026, with a control on an identical body: a homebrew item
+  // that attached Living Exoskeleton read `wearing false / isDry false` at coat 0,
+  // where a real Living Exoskeleton read `true / true`. So the suit's rider -
+  // "the pistons withdraw when the suit needs lubricating" - was DECORATIVE on
+  // every copy from the day the panel shipped: the seal never suspended.
+  //
+  // `exoDry` was the first reader to need this and got a private copy of it.
+  // It is a shared helper (15 Sept) before a second reader copies the same
+  // mistake, which is the whole point of putting it
+  // here rather than there.
+  //
+  // READS THE ITEMS, NOT `worn()`, deliberately. `worn()` only returns a homebrew
+  // row that DECLARES something, and a preset could one day carry conditions and no
+  // seal - at which point a copy would be invisible to a `worn()`-based answer
+  // while still applying the piece's rules. Asking the items directly cannot drift
+  // that way.
+  //
+  // GATED ON `_active`, so it means HAVE ON, not merely own - which is what every
+  // caller so far wants, and what `worn()` means too.
+  //
+  // GOES STALE IF: attachments stop being recorded in `homebrew.presets`.
+  hasPiece(actor, key) {
+    if (!actor || !key) return false;
+    for (const it of (actor.items ?? [])) {
+      if (!AFLP.anatomy?._active?.(it)) continue;
+      if (this._keyOf(it) === key) return true;
+      const list = it.getFlag?.("ardisfoxxs-lewd-pf2e", "homebrew")?.presets;
+      if (Array.isArray(list) && list.includes(key)) return true;
+    }
+    return false;
   },
 
   // A row whose `holesUnless` condition is currently ON seals nothing. One piece
@@ -934,9 +1077,8 @@ AFLP.chastityGear = {
 
   // ── THE WHILE-WORN DENIED FLOOR, ON EVERY SYSTEM ────────────────────────────
   //
-  // Ardis, 27 Aug 2026: *"the code should support them holding those denied tokens
-  // and not clearing them on rest."* Approved shape:
-  // `claude/dh-chastity-floor-draft-2026-08-27.md`.
+  // The code supports them holding those Denied tokens and not clearing them on
+  // rest (27 Aug 2026).
   //
   // WHY IT LIVES HERE AND NOT IN THE LIVING-GEAR TABLES. `chastityGear` runs on
   // every system and already owns the SEAL half of these same cards, so it owns
@@ -946,8 +1088,8 @@ AFLP.chastityGear = {
   // deleted because the false version is what did the damage. It said
   // `AFLP_LivingGear` was "PF2e only, and deliberately - its header says so",
   // which is what that file's header claimed and what the 26 Aug chastity test
-  // was blamed on. **Daggerheart is where living bondage was invented** (Ardis,
-  // 27 Aug) and carries thirty-odd living pieces; the file is now split into
+  // was blamed on. **Daggerheart is where living bondage was invented**
+  // (27 Aug) and carries thirty-odd living pieces; the file is now split into
   // `aflp-living-gear-{core,pf2e,dh}.js` and each system has its own table.
   //
   // The conclusion still holds and the reasoning is now the right one: a floor
@@ -979,8 +1121,10 @@ AFLP.chastityGear = {
   //     exists to prevent.
   //   - `codpiece` exists in BOTH packs and neither card mentions Denied. Absent.
   //   - THE CAGE IS 1, NOT 3, on both packs' cards.
+  //   - ADDED 14 Sept 2026: `tattoo-of-denial`, PF2e only, card-read the same way.
+  //     It is not chastity gear; see its `ITEMS` row for why it is here.
   //
-  // GOES STALE IF: a card's Denied number changes, or a seventh chastity piece is
+  // GOES STALE IF: a card's Denied number changes, or an eighth piece is
   // added. The check is `dev-aflr-audit-chastity-floor.js`, which reads every card
   // in the loaded pack and reports any disagreement with this table in BOTH
   // directions - a card whose number is not here, and a row with no card.
@@ -992,6 +1136,11 @@ AFLP.chastityGear = {
     "cock-cage":                                   1,
     // PF2e only - see above. Its card gained the line on 27 Aug.
     "chastity-harness-of-the-throat-sleeve-slave": 3,
+    // THE SEVENTH PIECE, and the first that is not chastity gear. PF2e only - the
+    // Daggerheart and 5e packs hold no such item, checked offline 14 Sept 2026.
+    // Its card: "While invested to the tattoo, they are Denied 3". See the note on
+    // its `ITEMS` row above for why a curse tattoo lives in this table at all.
+    "tattoo-of-denial":                            3,
   },
 
   // The ownership record: what the wearer's Denied total was BEFORE each piece
@@ -1013,10 +1162,10 @@ AFLP.chastityGear = {
 
   // ── THE TABLE IS THE INTENT. THE CARD IN THIS WORLD IS THE GATE. ────────────
   //
-  // Ardis, 27 Aug 2026: *"the shared table is good but we need to be clear that dh
-  // and pf2e are different systems with different interpretations of similar items,
-  // so the table needs to not enforce the wrong code or let pf2e automation leak
-  // onto dh items in ways that the dh item card doesn't agree with."*
+  // The shared table is sound, but DH and PF2e are different systems with
+  // different interpretations of similar items (27 Aug 2026), so the table must
+  // never enforce the wrong code or let PF2e automation leak onto DH items in
+  // ways the DH item card does not agree with.
   //
   // A COMMENT SAYING "these were read off the cards" IS A CLAIM THAT ROTS. This
   // makes it a mechanism instead: at registration every row is checked against the
@@ -1032,10 +1181,10 @@ AFLP.chastityGear = {
   // A row with NO card here is inert, not an error - that is the other system's
   // subset, which is the whole point of a shared table. `chastity-harness-of-the-
   // throat-sleeve-slave` has no Daggerheart item at all and simply never matches
-  // there. (Ardis, on DH's Living Chastity Harness: *"inspired by the
-  // chastity-harness-of-the-throat-sleeve-slave, so its sort of that item but not.
-  // dh is a different system so items are less direct copies and more inspirations."*
-  // They are separate keys carrying separate cards, and this gate is what keeps
+  // there. (DH's Living Chastity Harness is inspired by the
+  // chastity-harness-of-the-throat-sleeve-slave - sort of that item, but not. DH
+  // is a different system, so its items are inspirations rather than direct
+  // copies. They are separate keys carrying separate cards, and this gate is what keeps
   // them separate in code as well as in fiction.)
   //
   // GOES STALE IF: a card's Denied sentence is reworded into a shape `_cardDenied`
@@ -1054,10 +1203,41 @@ AFLP.chastityGear = {
   async _buildDeniedFloor() {
     const MOD = "ardisfoxxs-lewd-pf2e";
     const active = {}, dropped = [], absent = [];
+    // EVERY AFLR KEY THIS WORLD ACTUALLY HOLDS, as a by-product of the same walk.
+    //
+    // `ITEMS` and `DENIED` are SHARED tables - they carry Pathfinder's rows and
+    // Daggerheart's together, which is the whole point of a shared reader, and the
+    // card gate below is what stops one system's reading reaching the other's item.
+    // But anything that wants to LIST AFLR's pieces to a GM needs the other
+    // question: does this piece exist here at all?
+    //
+    // The presets match the system that is loaded, and presets matching another
+    // system's items are never offered at all (14 Sept 2026). Measured in dh-test
+    // the same day: the homebrew panel was offering 24
+    // presets and EIGHT of them were Pathfinder items with no Daggerheart card -
+    // `chastity-harness-of-the-throat-sleeve-slave` among them, which the comment
+    // on `DENIED` above says in as many words does not exist on Daggerheart.
+    //
+    // Built here rather than in a second pass because this loop already opens every
+    // document in every AFLR item pack, and doing it twice is the expensive half of
+    // world load run twice.
+    //
+    // GOES STALE IF: a consumer needs this before `_deniedReady` resolves. It is
+    // undefined until then, and a reader must treat undefined as "not known yet",
+    // never as "empty" - the two look identical and mean opposite things.
+    const worldKeys = new Set();
+    // AND THE NAME THE PACK GIVES EACH KEY. A label derived from the key by
+    // title-casing gets seven of Pathfinder's twenty-four wrong - measured 14 Sept
+    // 2026: "Bagsluts Buttplug Type I" for "Bagslut's Buttplug (Type I)", "Chastity
+    // Harness Of The Throat Sleeve Slave", "Tattoo Of Denial", "Bitchsuit Living"
+    // for "Bitchsuit, Living". The pack item's own name is the authority and it is
+    // already open in this loop.
+    const worldNames = new Map();
     for (const p of game.packs.filter(x => /ardisfoxxs/.test(x.collection) && x.documentName === "Item")) {
       let docs; try { docs = await p.getDocuments(); } catch (e) { continue; }
       for (const d of docs) {
         const key = d.getFlag?.(MOD, "aflrKey") ?? d.system?.slug ?? null;
+        if (key) { worldKeys.add(key); if (!worldNames.has(key) && d.name) worldNames.set(key, d.name); }
         if (!key || !Object.hasOwn(this.DENIED, key) || Object.hasOwn(active, key)) continue;
         const want = this.DENIED[key];
         const said = this._cardDenied(d.system?.description?.value ?? d.system?.description);
@@ -1068,6 +1248,8 @@ AFLP.chastityGear = {
     for (const key of Object.keys(this.DENIED)) if (!Object.hasOwn(active, key) && !dropped.some(x => x.startsWith(key + " "))) absent.push(key);
 
     this._deniedActive = active;
+    this._worldKeys = worldKeys;
+    this._worldNames = worldNames;
     if (dropped.length) console.warn(`AFLP | chastity Denied floor - ${dropped.length} row(s) DROPPED because this world's card disagrees:\n  ` + dropped.join("\n  "));
     // THE CHECK THAT WAS MISSING. Failing closed and being BROKEN produce the same
     // artifact - an empty table - so "no rows" cannot be allowed to look like the
@@ -1080,10 +1262,46 @@ AFLP.chastityGear = {
     console.log(`AFLP | chastity Denied floor on ${AFLP.system?.id}: ${Object.keys(active).length} row(s) card-confirmed`,
       Object.keys(active).length ? Object.entries(active).map(([k, v]) => `${k}=${v}`).join(", ") : "(none)",
       `| ${absent.length} row(s) have no card here (the other system's):`, absent.join(", ") || "-");
+    console.log(`AFLP | this world holds ${worldKeys.size} AFLR key(s);`,
+      `${Object.keys(this.ITEMS).filter(k => !worldKeys.has(k)).length} chastity row(s) belong to another system and are not offered here.`);
     return active;
   },
 
+  // ONE RUN PER ACTOR AT A TIME. This is not decoration - it is the reason the
+  // floor arithmetic has been wrong three times.
+  //
+  // `createItem` fires this hook, and callers (the purge macro, the harness, a
+  // GM script) call it directly straight afterwards. Both runs then read the
+  // SAME stale record and a fresh `permanent`, so the second one captures the
+  // wearer's own tokens as `total - permanent` = 0 - the first run has already
+  // raised the floor but has not yet written the record that would tell the
+  // second to stand down.
+  //
+  // MEASURED 12 Sept 2026 in the harness, which is what finally exposed it:
+  //
+  //     own 2/0  {}                       <- 2 earned, no floor
+  //     +belt    3/3  {__own: 0, ...}     <- captured ZERO. Should be 2.
+  //
+  // The same sequence with a 400ms pause between the create and the call is
+  // correct, which is exactly what makes this the kind of bug that hides: every
+  // hand-run reproduction inserts the pause.
+  //
+  // A promise chain per actor, not a boolean - a dropped call would be worse
+  // than a serialised one, and the chain preserves ordering.
+  //
+  // GOES STALE IF: the floor stops being derived from a record on the actor, or
+  // callers start needing the pre-write value back synchronously.
   async syncDeniedFloor(actor) {
+    const id = actor?.id;
+    if (!id) return;
+    if (!this._floorLocks) this._floorLocks = new Map();
+    const prev = this._floorLocks.get(id) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(() => this._syncDeniedFloorNow(actor));
+    this._floorLocks.set(id, next.catch(() => {}));
+    return next;
+  },
+
+  async _syncDeniedFloorNow(actor) {
     if (!actor || !AFLP.denied) return;
     // The hooks below are GM-gated, but a stray call from a player client must not
     // half-write: bail rather than proxy, because the GM's own hook will run.
@@ -1093,43 +1311,179 @@ AFLP.chastityGear = {
     // is awaited so an item created in the first moments after `ready` cannot slip
     // past the gate - without it this would silently do nothing on that item.
     if (this._deniedReady) { try { await this._deniedReady; } catch (e) { /* logged there */ } }
-    const rows = this._deniedActive;
-    if (!rows) return;                       // gate not built: apply nothing, fail closed
+    const baseRows = this._deniedActive;
+    if (!baseRows) return;                   // gate not built: apply nothing, fail closed
 
-    const rec  = foundry.utils.deepClone(actor.getFlag(AFLP.FLAG_SCOPE, this.FLAG_DENIED) ?? {});
-    const worn = new Set(this.worn(actor).map(g => g.key));
+    const rec     = foundry.utils.deepClone(actor.getFlag(AFLP.FLAG_SCOPE, this.FLAG_DENIED) ?? {});
+    const wornAll = this.worn(actor);
+    const worn    = new Set(wornAll.map(g => g.key));
+
+    // THE CARD GATE DOES NOT APPLY TO A GM'S OWN ITEM, deliberately.
+    //
+    // `_deniedActive` exists so AFLR's shared table cannot apply Pathfinder's
+    // reading of a piece to a Daggerheart card - it only keeps rows a card in THIS
+    // world states. A GM declaring a floor on their own homebrew item IS the
+    // authority; there is no second card to disagree with, and no table row to
+    // gate against. So homebrew rows join here, after the gate, rather than being
+    // checked by it.
+    //
+    // Everything below is untouched: these rows are keyed `homebrew:<id>`, so the
+    // record-what-they-had-before arithmetic treats each item as its own source,
+    // which is what makes two floors resolve as a MAX rather than a sum.
+    const rows = { ...baseRows };
+    for (const g of wornAll) {
+      if (g.homebrew && Number(g.denied) > 0) rows[g.key] = Number(g.denied);
+    }
+    // Rows for homebrew items NO LONGER WORN still have to be iterated or their
+    // floor would never come off - the loop below only withdraws what it can see.
+    // `__own` is a record, never a source, so it is never a row.
+    for (const key of Object.keys(rec)) {
+      if (key === "__own") continue;
+      if (key.startsWith("homebrew:") && !Object.hasOwn(rows, key)) rows[key] = 0;
+    }
+    // THE WEARER'S OWN TOKENS ARE RECORDED ONCE, NOT PER SOURCE.
+    //
+    // REWRITTEN 12 Sept 2026. This arithmetic has now been wrong three times and
+    // each rewrite fixed the previous one's direction, so the shape is the
+    // problem rather than the sums:
+    //
+    //   26 Aug  recorded the raw TOTAL, so a floor handed back its own grant
+    //   28 Aug  recorded `total - permanent`, per source
+    //   12 Sept both above are too high or too low the moment a SECOND piece is
+    //           involved, because `total - permanent` is evaluated when that
+    //           source goes on - by which time the first floor has already
+    //           absorbed the wearer's own tokens and the answer is 0.
+    //
+    // MEASURED on shipped gear in pf2e-dev, 600ms settles so no hook race can
+    // explain it - `total (permanent)`:
+    //
+    //   own 2 -> belt on 3 (3) -> cage on 3 (3) -> belt off 2 (1) -> cage off 1 (0)
+    //                                                                       ^ want 2
+    //
+    // The cage recorded 0 because `3 - 3 = 0`, and handed 0 back when it came off
+    // last. The wearer's own 2 was gone.
+    //
+    // THE FIX: capture the wearer's own tokens ONCE, when the first floor goes
+    // on, under a reserved key that is not a source. Restore it when the LAST
+    // floor comes off. Sources themselves become markers - the number they
+    // grant already lives in `rows`, and storing it twice is what let the two
+    // copies disagree.
+    //
+    // A floor still ABSORBS rather than stacks: `raiseTo` never lowers, so the
+    // restore hands back the max of what remains and what they earned. That is
+    // the 26 Aug rule and it is unchanged.
+    //
+    // GOES STALE IF: `AFLP.denied.permanent` stops being the MAX of its sources,
+    // or a card ever says two chastity floors should sum.
+    const OWN = "__own";
+    const heldKeys = () => Object.keys(rec).filter(k => k !== OWN);
     const add = {}, del = [];
+    let ownSnapshot = Object.hasOwn(rec, OWN) ? Math.max(0, Number(rec[OWN]) || 0) : null;
 
+    // MIGRATION. Actors mid-pin from before today carry per-source numbers and no
+    // `__own`. The largest of them is the closest surviving record of what the
+    // wearer had, and it is what the old code would have restored on a single
+    // piece - so nobody loses tokens by upgrading.
+    if (ownSnapshot === null && heldKeys().length) {
+      const legacy = heldKeys().map(k => Number(rec[k]) || 0).filter(n => n > 0);
+      if (legacy.length) ownSnapshot = Math.max(...legacy);
+    }
+
+    // A HELD ROW WHOSE VALUE MOVED counts as a withdrawal when it moved DOWN, so
+    // the wearer's own tokens come back out from under it. Set below.
+    let lowered = false;
     for (const [key, value] of Object.entries(rows)) {
       const on   = worn.has(key);
       const held = Object.hasOwn(rec, key);
+      if (on && held) {
+        // THE VALUE OF A WORN ROW CAN MOVE. Added 12 Sept 2026 with the homebrew
+        // panel, and it is the reason membership alone was never enough: an AFLR
+        // key's floor is a constant in a table, but a GM editing `denied` on their
+        // own item changes the number while the item stays exactly where it is.
+        // Before this, the panel wrote 3 over 1 and nothing happened - the row was
+        // already held, so both branches below were skipped.
+        //
+        // Read what is actually sustained rather than trusting the record: the
+        // record holds bare markers on purpose, because storing the number twice
+        // is what let the two copies disagree (see the note above).
+        const src = this._deniedSource(key);
+        const cur = Number(AFLP.denied._bag(actor)?.sources?.[src]) || 0;
+        // A WORN ROW LENDING NOTHING IS NOT A LENDER, and must leave the record.
+        //
+        // FOUND BY CLICKING, 14 Sept 2026, in pf2e-dev on a player-owned character.
+        // Removing an attached preset takes a homebrew row's `denied` to 0 while
+        // the item STAYS WORN - it still seals a hole, so `worn()` still returns
+        // it. That state could not exist before the panel, because an AFLR key's
+        // floor is a constant in a table.
+        //
+        // Only the `!on && held` branch below deletes the record entry, so the
+        // marker survived. `__own` is released and RE-CAPTURED on the strength of
+        // `heldKeys()`, and capture only happens in `on && !held` - so with a
+        // stale marker sitting there:
+        //
+        //   floor on, wearer has 0 of their own   __own captured as 0
+        //   preset removed, gear stays on         marker stays, __own stays 0
+        //   wearer EARNS 2 of their own           nothing re-captures it
+        //   GM attaches a floor again             on && held: only sets sustained
+        //   floor removed                         raiseTo(__own = 0) restores nothing
+        //                                         -> the wearer's own 2 is GONE
+        //
+        // Withdrawing here makes "worn but lending 0" identical to "not worn" as
+        // far as the record is concerned, which is what the record is for: it
+        // remembers who is lending a floor, and a row lending 0 lends none.
+        //
+        // GOES STALE IF: `worn()` stops returning rows whose `denied` is 0, at
+        // which point the `!on && held` branch handles this on its own.
+        if (value <= 0) {
+          if (cur > 0) { await AFLP.denied.setSustained(actor, src, 0); lowered = true; }
+          delete rec[key];
+          del.push(key);
+          continue;
+        }
+        if (cur !== value) {
+          if (value < cur) lowered = true;
+          await AFLP.denied.setSustained(actor, src, value);
+        }
+        continue;
+      }
       if (on && !held) {
-        // Record what they had BEFORE the floor absorbs it.
-        // RECORD THE WEARER'S OWN TOKENS, NOT THE TOTAL.
-        //
-        // `total` includes any floor ALREADY standing from another piece, so the
-        // second chastity item recorded the FIRST one's 3 as "what they had
-        // before" and handed it back when it came off last. Measured 28 Aug 2026:
-        // belt on, harness on, belt off, harness off -> permanent 0 and total 3,
-        // a floor nobody was wearing. The suite caught it the moment the card gate
-        // started granting for real - before the enricher fix it granted nothing,
-        // so this arithmetic had never actually run.
-        //
-        // `total - permanent` is the part the wearer earned themselves: the floors
-        // live in `permanent` (the MAX of the sources) and anything above it is
-        // theirs. That is the number the 26 Aug restore was always about - a floor
-        // of 3 ABSORBS a pre-existing 2 - and the raw total only looked right
-        // while exactly one piece could ever be worn at a time.
-        add[key] = Math.max(0, AFLP.denied.total(actor) - AFLP.denied.permanent(actor));
+        // First floor of any kind: this is the only moment their own tokens are
+        // still visible, because nothing has absorbed them yet.
+        if (!heldKeys().length && ownSnapshot === null) {
+          ownSnapshot = Math.max(0, AFLP.denied.total(actor) - AFLP.denied.permanent(actor));
+          add[OWN] = ownSnapshot;
+        }
+        add[key] = 1;                     // a marker. The value lives in `rows`.
+        rec[key] = 1;                     // so heldKeys() sees it within this pass
         await AFLP.denied.setSustained(actor, this._deniedSource(key), value);
       } else if (!on && held) {
-        const prev   = Number(rec[key]) || 0;
-        const before = AFLP.denied.total(actor);
         await AFLP.denied.setSustained(actor, this._deniedSource(key), 0);
-        // Only give back what was absorbed, and only if nothing else moved the
-        // total meanwhile - the same guard AFLP_LivingGear._revoke uses.
-        if (prev > 0 && before === value) await AFLP.denied.raiseTo(actor, prev);
+        delete rec[key];
         del.push(key);
+      }
+    }
+
+    // ANY FLOOR OFF: give back what they earned. `raiseTo` never lowers, so while
+    // a higher floor is still standing this is a no-op, and the moment the
+    // remaining floors fall below what they earned it re-emerges.
+    //
+    // ON EVERY WITHDRAWAL, NOT ONLY THE LAST. The first version of this fix
+    // restored only when the last piece came off, and the intermediate state was
+    // visibly wrong: measured 12 Sept, own 2 with a belt (3) and a cage (1), the
+    // belt coming off read Denied 1 - below the 2 they had earned - and only
+    // corrected itself when the cage came off too. A player would see their own
+    // tokens vanish and come back.
+    //
+    // `__own` is kept until the last floor leaves, because a second piece may
+    // still absorb it again before then.
+    // `lowered` is here for the same reason `del` is: `setSustained` drops the
+    // total by exactly what the floor lost, which can leave the wearer below what
+    // they earned. Measured 12 Sept: own 2 under a homebrew floor of 3, edited
+    // down to 1, read Denied 1.
+    if (del.length || lowered) {
+      if (ownSnapshot > 0) await AFLP.denied.raiseTo(actor, ownSnapshot);
+      if (!heldKeys().length && (Object.hasOwn(rec, OWN) || Object.hasOwn(add, OWN))) {
+        del.push(OWN); delete add[OWN];
       }
     }
 
@@ -1161,14 +1515,33 @@ AFLP.chastityGear = {
 
     const touch = async (item) => {
       if (!item?.actor) return;
-      // Cheap gate first: only items that could be in the table at all.
+      // Cheap gate first: only items that could be in the table at all...
       const k = this._keyOf?.(item);
-      if (!k || !Object.hasOwn(this.DENIED, k)) return;
-      await this.syncDeniedFloor(item.actor);
+      if (k && Object.hasOwn(this.DENIED, k)) { await this.syncDeniedFloor(item.actor); return; }
+      // ...or a GM's own item declaring a floor on itself. Without this leg the
+      // homebrew row would be read by `worn()` and never triggered by anything:
+      // equipping the item would do nothing until some OTHER chastity piece moved.
+      // That is the "reader with no caller" shape this codebase keeps producing.
+      if (Number(this._homebrewRow?.(item)?.denied) > 0) { await this.syncDeniedFloor(item.actor); return; }
+      // ...and a declaration that has just been REMOVED cannot answer the question
+      // above, because there is nothing left on the item to read. Added 12 Sept
+      // 2026: clearing the row in the panel left the floor standing and the
+      // record holding a source for an item that no longer declared anything.
+      // The record is the only thing that still remembers, so ask it.
+      const held = item.actor.getFlag?.(AFLP.FLAG_SCOPE, this.FLAG_DENIED) ?? {};
+      if (Object.hasOwn(held, `homebrew:${item.id}`)) await this.syncDeniedFloor(item.actor);
     };
     Hooks.on("createItem", (item) => { touch(item); });
     Hooks.on("deleteItem", (item) => { touch(item); });
     Hooks.on("updateItem", (item, changes) => {
+      // A GM EDITING THE HOMEBREW ROW ON AN ITEM SOMEONE IS ALREADY WEARING.
+      // Added 12 Sept 2026 with the homebrew panel. Without this leg the flag is
+      // written, `worn()` reads it, and nothing recomputes until the piece is
+      // taken off and put back on - the reader-with-no-caller shape again. Both
+      // directions matter: `-=homebrew` is how a deletion arrives, and clearing
+      // the row has to hand the floor back.
+      const f = changes?.flags?.["ardisfoxxs-lewd-pf2e"];
+      if (f && ("homebrew" in f || "-=homebrew" in f)) { touch(item); return; }
       // Any equip-shape change. PF2e nests carryType in an object; Daggerheart
       // uses a boolean on weapons/armor and nothing at all on loot, which
       // `_keyOf` -> `anatomy._active` already accounts for.
@@ -1185,9 +1558,9 @@ AFLP.chastityGear = {
   // Lubricant burn-off at daily preparations / long rest. Returns what it took.
   //
   // TWO MECHANISMS NOW, and the second is the live one. `drain` takes its rate off
-  // every pool; `coatWipe` takes the whole CHEST COAT and nothing else. Ardis,
-  // 28 Aug 2026: "lets make the coat dry completely during daily prep. that way they
-  // definitely need to grease it daily. facial doesn't count, only bodyCoat."
+  // every pool; `coatWipe` takes the whole CHEST COAT and nothing else (28 Aug
+  // 2026). The coat dries completely during daily preparations, so the suit
+  // definitely needs greasing daily. Facial does not count, only bodyCoat.
   //
   // The exoskeleton moved from the first to the second, and it was the only row with
   // a non-zero `drain`, so in practice this function now wipes a coat. The rate half
@@ -1227,9 +1600,9 @@ AFLP.chastityGear = {
 
 // ── THE EXOSKELETON'S DYNAMIC SEAL ────────────────────────────────────────────
 //
-// Ardis, 28 Aug 2026: "greased while coat is 4 or more is good. and lets make the
-// coat dry completely during daily prep... facial doesn't count, only bodyCoat."
-// Settled design: `work/exoskeleton-dry-redline-2026-08-28.md`.
+// Settled design, 28 Aug 2026: greased while the coat is 4 or more, and the
+// coat dries completely during daily preparations. Facial does not count, only
+// bodyCoat.
 //
 // The suit is GREASED while the chest coat is at half or better and DRY below it.
 // While Dry the pistons are out: no Plugged, no Chaste, no Caged, no sealed holes,
@@ -1253,9 +1626,24 @@ AFLP.exoDry = {
   // Half the cap, the same half-coverage point the slick and the Horny grant use.
   get THRESHOLD() { return Math.ceil((AFLP.CUMFLATION_MAX ?? 8) / 2); },
 
+  // A HOMEBREW COPY OF THE SUIT COUNTS, which `hasPiece` is what answers - see the
+  // note on it in `chastityGear` for the measurement and why it lives there rather
+  // than here. This was a private copy of that logic for about an hour on 15 Sept
+  // 2026; it is a shared helper now so the next reader does not make it a third.
+  //
+  // CALLED PLAINLY, not `AFLP.chastityGear?.hasPiece?.(...)`. An optional call on a
+  // missing function returns undefined, which reads as false - and the catch below
+  // would have swallowed it just as quietly. A creature silently never being in an
+  // exoskeleton is exactly the failure this project keeps producing, so the catch
+  // WARNS rather than only returning the safe answer.
+  //
+  // GOES STALE IF: `hasPiece` moves off `chastityGear`.
   wearing(actor) {
-    try { return (AFLP.chastityGear?.worn?.(actor) ?? []).some(g => g.key === this.GEAR); }
-    catch (e) { return false; }
+    try { return AFLP.chastityGear.hasPiece(actor, this.GEAR); }
+    catch (e) {
+      console.warn("AFLP | exoDry.wearing could not ask chastityGear.hasPiece - reading as NOT suited", e);
+      return false;
+    }
   },
   coat(actor) {
     try { return Number(actor?.getFlag?.(AFLP.FLAG_SCOPE, "cumflation")?.bodyCoat) || 0; }
@@ -1605,7 +1993,7 @@ AFLP.cumBottle = {
 // THE BULL'S GRIP: what this creature's Greater beat adds to the DC of getting
 // away from them.
 //
-// Ardis, 26 Aug 2026. The Bull card's Greater beat used to read "+2 circumstance
+// 26 Aug 2026. The Bull card's Greater beat used to read "+2 circumstance
 // bonus to Sexual Advance checks against a creature you have grabbed", and THERE
 // IS NO SEXUAL ADVANCE CHECK - Carnal Press rolls no dice at all, it marks
 // Arousal. The bonus was unreadable by anything and had been since it shipped.
@@ -1646,8 +2034,8 @@ AFLP.knot = {
     // `fortDC` is already a snapshot of the grip taken at the moment it closed -
     // that is what the flag is - and there is exactly one reader (the Knotted
     // branch of Struggle Escape, which prints it for the GM to adjudicate a Pull
-    // Free against). Ardis, 26 Aug 2026: the bonus "would apply to escape from
-    // knotted as you outlined".
+    // Free against). The bonus applies to escape from a knot as well (26 Aug
+    // 2026).
     //
     // KNOWN AND ACCEPTED: a knot tied before its owner reached Greater keeps the
     // DC it was tied at. So does a knot tied before this change shipped.
@@ -1805,7 +2193,7 @@ AFLP.cumflationTier = (actor) => {
 // BOTH SYSTEMS as of 10 Aug 2026. This was DH-only for a while, deliberately -
 // PF2e's card said escapes "automatically succeed" and named no cost, so
 // charging PF2e the coat would have been the code doing something the card did
-// not say. Ardis reworded the PF2e card to state the same rule, so the gate came
+// not say. The PF2e card was reworded to state the same rule, so the gate came
 // off. If either card ever diverges again, this is the line to put back.
 AFLP.cumSlutSlipFree = async (actor) => {
   if (!actor) return false;
@@ -1832,9 +2220,9 @@ AFLP.slickTier = (actor) => {
 
 // A slick body is harder to hold: +1 to Escape at half chest coat, +2 at full.
 //
-// Ardis, 29 Aug 2026: "The slick from chest and tits coat should apply to Escape
-// in general not just from Stuck Submitting, and instead of lowering the DC it
-// should grant a circumstance bonus of 1 and 2 for tier 4 and 8." It used to
+// Since 29 Aug 2026 the slick from the chest and tits coat applies to Escape in
+// general, not just from Stuck Submitting, and grants a circumstance bonus of 1
+// and 2 at tiers 4 and 8 instead of lowering the DC. It used to
 // subtract 2 per tier from `stuckSubmitting.escapeDC` - the wrong side of the
 // roll, and reachable only from AFLR's own hold.
 //
@@ -1852,8 +2240,8 @@ AFLP.slickTier = (actor) => {
 // PF2e Escape action, or given the `action:escape` roll option. Then drop the
 // hand-added number from that roll and let the rule element do it.
 //
-// Ardis, 29 Aug 2026: "should apply the slick circumstance bonus to all escape
-// attempt rolls. swallowed included." Every AFLR escape roll takes it:
+// The slick circumstance bonus applies to all escape attempt rolls, Swallowed
+// included (29 Aug 2026). Every AFLR escape roll takes it:
 // stuckSubmitting.attemptEscape, swallowed.attemptEscape, and the four Struggle
 // Escape variants in macro/aflp-struggle-snuggle.js.
 //
@@ -1889,6 +2277,48 @@ AFLP.slickEscapeModifiers = (actor) => {
 // AFLP.milk.isLactating, which gates the numeric milk POOL (PF2e/5e only).
 AFLP.isLactating = (actor) => {
   try { return AFLP.system?.isLactating?.(actor) === true; } catch (e) { return false; }
+};
+
+// ── Can this body carry? ─────────────────────────────────────────────────────
+// The four Ass fertility cards all say the same sentence, and it is the rule:
+//
+//   "A load finished in your ass triggers a Brood Roll, the same as a Pussy
+//    would. A womb forms in your gut to carry it; if you already have one, the
+//    two connect and you carry in the one womb rather than two."
+//
+// The guide journal agrees - "when a cock cums inside a hole that can bear young
+// (usually a pussy)". USUALLY. So the question a reader has to ask is "can this
+// body bear young", never "does this body have a pussy".
+//
+// This existed as an unnamed inline IIFE (`_assBreeds`) inside one function in
+// macro/aflp-cum.js, so the ENGINE bred a breeding ass while the SHEET, which had
+// no way to ask the question, gated its Pregnancy section on flags.world.pussy
+// and hid the result. Measured 18 Sept 2026 in pf2e-dev: two rigs carrying the
+// IDENTICAL pregnancy record, the pussy one showed the table, the Advance button
+// and the Add button; the ass-breeder one showed nothing at all. State written,
+// UI silent.
+//
+// ONE WOMB, NOT TWO - the cards are explicit - so callers get a single boolean
+// and the sheet keeps a single Pregnancy section. Do not split it per hole.
+//
+// STALE IF: a fifth Ass fertility subtype is added to AFLP.anatomyFeatures, or
+// another base part gains fertility subtypes. Either is then missing from here.
+AFLP.ASS_BREEDING_KEYS = ["ass-fertile", "ass-breeder", "ass-clutch", "ass-litter"];
+
+/** True when this actor's ass triggers a Brood Roll (any of the four Ass fertility subtypes). */
+AFLP.hasBreedingAss = function (actor) {
+  try {
+    const af = actor?.getFlag?.(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {};
+    return AFLP.ASS_BREEDING_KEYS.some(k => af[k] === true);
+  } catch (e) { return false; }
+};
+
+/** True when this actor can bear young at all: a pussy, or a breeding ass. */
+AFLP.canCarry = function (actor) {
+  try {
+    if (actor?.getFlag?.(AFLP.FLAG_SCOPE, "pussy") === true) return true;
+    return AFLP.hasBreedingAss(actor);
+  } catch (e) { return false; }
 };
 
 // Tits size (0 = no tits) is the CONTAINER: how big the tits are, on the creature
@@ -1940,8 +2370,8 @@ AFLP.titsSize = (actor) => {
     // only route to 8.
     if (af["tits-heavy"]) size += 1;
     // Tits (Itty Bitty), 27 Aug 2026 - the mirror of Tits (Heavy), and the tits
-    // answer to Cock (Micro). Ardis: "it reduces the size of tits by 1, floor 1 so
-    // they dont get removed by setting to 0."
+    // answer to Cock (Micro). It reduces tits size by 1, floored at 1, so the tits
+    // are never removed by reaching 0.
     //
     // THE FLOOR IS NOT TIDINESS. `titsSize` returns 0 for "this creature has no
     // tits" (the guard at the top), exactly as `cockSizeOf` returns 0 for "no
@@ -1956,10 +2386,10 @@ AFLP.titsSize = (actor) => {
 
     // ── HYPER OVERRIDES EVERYTHING, AND IT IS THE LAST WORD ON PURPOSE ──────
     //
-    // Ardis, 27 Aug 2026, rewriting the card: "Your tits size is 8, the maximum,
+    // The card, rewritten 27 Aug 2026: "Your tits size is 8, the maximum,
     // OVERRIDING ALL OTHER EFFECTS THAT LOWER OR RAISE IT. Nothing else can raise
-    // it past 6." He asked for a guard that holds for lowering effects added
-    // later, not just for Itty Bitty.
+    // it past 6." The guard has to hold for lowering effects added later, not
+    // just for Itty Bitty.
     //
     // This USED to be an early return above the modifiers, which was correct only
     // because of where it sat. A lowering effect added ABOVE it - the natural
@@ -2199,7 +2629,7 @@ AFLP.swallowed = {
   // DEFAULTS TO 0. Being inside a creature is not arousing by itself - a mimic
   // has to actively press, and only a swallower whose fiction is aphrodisiac
   // rather than digestive should set it. Design decision 13 Aug 2026; the
-  // Swallowed card carried the opposite claim and Ardis removed it, so a default
+  // Swallowed card carried the opposite claim and it was removed, so a default
   // of 1 here would put the code back in disagreement with the card.
   //
   // OWNERSHIP. Records which of Exposed and Restrained it actually granted, so
@@ -2254,7 +2684,7 @@ AFLP.swallowed = {
       if (Number.isFinite(m)) mods.push(m);
     }
     const best = mods.length ? Math.max(...mods) : 0;
-    // Ardis, 29 Aug 2026: "swallowed included." A bare Roll with no roll options,
+    // Swallowed included (29 Aug 2026). A bare Roll with no roll options,
     // so the coat card's rule element cannot see it and there is no double count.
     const slick = AFLP.slickEscapeBonus?.(target) ?? 0;
     const roll = await new Roll(`1d20 + ${best}${slick ? ` + ${slick}` : ""}`).evaluate();
@@ -2563,9 +2993,26 @@ AFLP.EFFECT_INTENTS = {
       && (AFLP.getKinkTier?.(actor, "size-difference") ?? 0) >= 2
       && AFLP.cumflationTier(actor) >= 4,
   },
-  // Throat (Deepthroat): "when a cock fills your throat you fall Prone and your
-  // speed becomes 0 until the cock is removed." This intent is the speed half;
-  // ui/aflp-deepthroat.js owns the Prone half and drives both.
+  // RETIRED 11 Sept 2026, KEPT ONLY SO IT CAN BE CLEARED.
+  //
+  // Throat (Deepthroat) used to pin a speed with this intent. It now applies the
+  // GRABBED condition instead - Grabbed already makes the speed 0 - because the
+  // card's literal "Speed 0" is true on PF2e and
+  // FALSE on Starfinder, which floors a speed at 5 feet. Grabbed brings
+  // Immobilized and reads the same on both.
+  //
+  // `ui/aflp-deepthroat.js` no longer applies this, but it calls
+  // `effects.ensure(actor, "deepthroat-pinned", false)` on every path so a
+  // carrier applied by an older version is swept off the first time the rule
+  // touches that actor. DELETING THIS ENTRY WOULD STRAND THOSE CARRIERS -
+  // `effects.ensure` returns early when the intent is unknown, so the removal
+  // would silently stop happening and a -1000 speed modifier would live forever
+  // on anyone mid-pin at upgrade.
+  //
+  // Safe to delete once no actor in any world carries the carrier. Nothing
+  // applies it, so that set only shrinks.
+  //
+  // The original reasoning, kept because it is the measurement:
   //
   // NO `when` PREDICATE, on purpose. effects.sync() only evaluates intents that
   // declare one, so this intent is reachable only through effects.ensure() from
@@ -3045,7 +3492,7 @@ AFLP.shedSizeDifferenceKink = async (actor) => {
 //     Cock (Hemipenis)   +1 Cum Shot, +3 Loads
 //     everything else    +1 Cum Shot, +1 Load
 //
-// Set by Ardis 17 Aug 2026, replacing AFLP.CUM_SUBTYPE_MOD, which was an uneven
+// Set 17 Aug 2026, replacing AFLP.CUM_SUBTYPE_MOD, which was an uneven
 // per-subtype table (girthy 1, breeder 1, ovidepositor 2, knot 1, hemipenis 1,
 // litter 1) that touched Cum Shot only and left nine subtypes worth nothing.
 // The point of the flat rule is that a player can read a sheet without doing
@@ -3055,16 +3502,16 @@ AFLP.shedSizeDifferenceKink = async (actor) => {
 // The old code reached the same result by ACCIDENT: it stripped `cock-` or
 // `pussy-` off the key before the lookup, so Pussy (Breeder) and Pussy (Litter)
 // silently fed a Cum Shot table meant for cocks. That was reported as a bug on
-// 17 Aug and Ardis kept the behaviour as the rule: "probably best if they at
-// least share the base cock type parity for cum shot and loads values, though
-// they won't have hemi or multi of course." So it is now intentional, scoped,
+// 17 Aug and the behaviour was kept as the rule: pussy subtypes share the base
+// cock type's parity for Cum Shot and Loads, though they never get hemi or
+// multi. So it is now intentional, scoped,
 // and gated on actually having the part.
 //
 // For a pussy-only creature these numbers are nearly inert today: the climax
 // deposits nothing and running dry only changes a flavour line. They would
 // start to matter if squirting ever deposited. That is why the base Pussy card
-// deliberately does NOT print them - Ardis, 17 Aug: "redundant data for the user
-// to know, it does nothing for them".
+// deliberately does NOT print them - it is redundant data that does nothing for
+// the user.
 AFLP.SUBTYPE_LOADS = { "cock-slime": 6, "cock-hemipenis": 3 };
 AFLP.SUBTYPE_LOADS_DEFAULT = 1;
 
@@ -3129,9 +3576,9 @@ AFLP.cumPerShot = (actor) => {
   // 2026 - "troop", "horde" and "swarm" appear zero times across both guides),
   // so a GM reading a troop's sheet could not reconcile the numbers on it.
   //
-  // Ardis, 17 Aug: "i actually dont want reservoir to be multiplied at all
-  // because it is entirely not user facing... make a goblin troop read cum shot
-  // and loads on the sheet just like a regular goblin."
+  // The reservoir is not multiplied at all, because it is not user facing (17
+  // Aug): a goblin troop reads Cum Shot and Loads on the sheet just like a
+  // regular goblin.
   //
   // A troop is now a troop because it carries Cock (Multipenis), which fills
   // every hole at once and spends one Load per hole, and because its stat block
@@ -3161,9 +3608,9 @@ AFLP.cumPerShot = (actor) => {
     }
     if (it.getFlag?.(MOD, "oneCockRing")) oneRing = true;
   }
-  // CAPPED AT 24, and the number is the content's. Ardis, 20 Aug 2026: "the cap
-  // should be 24 as per the table in the journal which shows cum shot for a
-  // gargantuan creature as 24." Both guides carry that table - Tiny-Medium 1,
+  // CAPPED AT 24, and the number is the content's (20 Aug 2026): the journal's
+  // table shows Cum Shot for a Gargantuan creature as 24. Both guides carry that
+  // table - Tiny-Medium 1,
   // Large 4, Huge 12, Gargantuan 24 - and say "while some creatures can fire Cum
   // Shots as large as 24". AFLP.BASE_CUM_BY_SIZE already matches it exactly; what
   // was missing was a ceiling on the TOTAL, so piercings, the cumShotBonus flag
@@ -3219,10 +3666,9 @@ AFLP.cumfinityAnal = (actor, tokenId = null, opts = {}) => {
 //                   Diet OVERWRITES it at daily preparations. Nothing else
 //                   should write here - anything that does is erased by that
 //                   feat the next time the character rests.
-//   coomer.bonus    THE GM'S FIELD, edited on the sheet. Ardis, 5 Sept 2026:
-//                   "on top of anything else ... persistent ... in case the GM
-//                   wants to apply a homebrew item they made or do a quick
-//                   manual edit". NO AUTOMATION MAY WRITE HERE. It is the one
+//   coomer.bonus    THE GM'S FIELD, edited on the sheet. On top of anything
+//                   else and persistent, for a homebrew item the GM made or a
+//                   quick manual edit. NO AUTOMATION MAY WRITE HERE. It is the one
 //                   number a human owns.
 //   coomer.trained  Size training's permanent gains (Slick pussy / ass, +1 each).
 //                   Its own store precisely so Pineapple Diet cannot overwrite
@@ -3285,7 +3731,7 @@ AFLP.effectiveLoads = (actor) => {
   //   DH card:   "You permanently gain Bonus Loads 3. Your Bonus Loads rises to 10."
   //
   // Both say BONUS Loads, and Bonus Loads add (see the Bonus Loads card), so
-  // this is a bonus and not an override - Ardis's ruling, 5 Sept. Mastery
+  // this is a bonus and not an override (ruled 5 Sept). Mastery
   // REPLACES Greater's 3 rather than stacking with it: the PF2e card restates
   // the total and the DH card says "rises to".
   //
@@ -3332,7 +3778,7 @@ AFLP.actorLevel = (actor) => {
 // and gear push it higher" (DH). A player character therefore starts at the flat
 // baseline and earns the rest.
 //
-// Ardis's ruling, 5 Sept 2026, with the exception that makes the feat matter:
+// Ruled 5 Sept 2026, with the exception that makes the feat matter:
 // **Pineapple Diet is what ties a PC's Loads to their level**, applied at daily
 // preparations. Without it, levelling up never moves a PC's Loads.
 //
@@ -3428,8 +3874,8 @@ AFLP.importConditionItem = async (item, { toast = true } = {}) => {
   const seen = Number(AFLP.cond?.value?.(actor, key)) || 0;
   if (!dual && seen > 0) return null;   // the item IS the store here; the drag already worked
 
-  // The value. A PF2e card carries it in a counter badge and Ardis asked for
-  // that to survive the import. A Daggerheart card carries NO badge - measured,
+  // The value. A PF2e card carries it in a counter badge, and that survives the
+  // import. A Daggerheart card carries NO badge - measured,
   // 0 of 10 do - so a drag means one more, and dragging twice means two.
   const badge = Number(item?.system?.badge?.value);
   const before = dual ? dual.total(actor) : seen;
@@ -3465,9 +3911,9 @@ AFLP.importConditionItem = async (item, { toast = true } = {}) => {
 };
 
 // `AFLP.spotlightNotes` lived here until 30 Aug 2026 and is DELETED. Its only
-// consumer was the sheet's "On your Spotlight" panel, which Ardis removed the same
-// day: *"we shouldn't have that on the sheet. even for player characters it doesn't
-// belong in an AFLR sheet."* Deleted rather than left orphaned - a documented
+// consumer was the sheet's "On your Spotlight" panel, removed the same day - a
+// Spotlight reminder does not belong on an AFLR sheet, even for player
+// characters. Deleted rather than left orphaned - a documented
 // helper with no caller is the exact shape this project's founding audit was about.
 // The Spotlight remains manual and unautomated, which was always the ruling.
 
@@ -3559,7 +4005,7 @@ AFLP.tokenDistance = (a, b) => {
 //
 // A BAND'S NUMBER IS SQUARES, converted here by the scene's grid distance.
 // AFLP.dhRanges() reads `{melee:1, veryClose:3, close:10, far:20, veryFar:30}`
-// live off the daggerheart system, and per Ardis on 19 Aug 2026 the SYSTEM is
+// live off the daggerheart system, and since 19 Aug 2026 the SYSTEM is
 // the authority rather than the core rules' optional-grid guidance
 // (Melee 1, Very Close 3, Close 6, Far 12, Very Far 13+), which the system
 // matches only to Very Close. On a 5ft grid the system gives Close 50ft,
@@ -3580,8 +4026,8 @@ AFLP.withinRange = (a, b, ranges = {}) => {
   let limit = ranges[sys];
   if (typeof limit === "string") {
     // A band's `distance` is a count of SQUARES, so it is multiplied by the
-    // scene's own grid distance to reach scene units. Ardis settled this on
-    // 19 Aug 2026: follow the daggerheart system's live CONFIG rather than the
+    // scene's own grid distance to reach scene units. Settled 19 Aug 2026:
+    // follow the daggerheart system's live CONFIG rather than the
     // core rules' optional-grid guidance, so AFLR agrees with whatever else the
     // user's table is running. The two disagree from Close onward - system
     // 1/3/10/20/30 against rulebook 1/3/6/12/13+ - and that divergence is the
@@ -4468,8 +4914,8 @@ Object.assign(window.AFLP, {
       if (!actor) return;
       // Dual-store keys: absolute set through the door. `_setTotal` is the single
       // write both doors funnel through, so the cap and the floor are applied
-      // once and in one place. Ardis, 19 Aug 2026: "temp and permanent can be
-      // managed via the status editor menu" - that editor lands here.
+      // once and in one place. Temp and permanent are managed through the status
+      // editor menu (19 Aug 2026) - that editor lands here.
       const door = this._door(slug);
       if (door) {
         const live = this._live(actor, tokenId);
@@ -4770,8 +5216,8 @@ Object.assign(window.AFLP, {
   //   hole: the cum destination key ("vaginal"|"anal"|"oral"|"facial"|null),
   //   bottomFills: where the BOTTOM's own load goes in this same fiction, if the
   //     bottom has a cock and climaxes. `hole` answers the question for the top;
-  //     this answers it for the other side. Authored per position by Ardis,
-  //     16 Aug 2026; 59 floor, 17 coat-top, 5 coat-self, 2 oral.
+  //     this answers it for the other side. Authored per position 16 Aug 2026;
+  //     59 floor, 17 coat-top, 5 coat-self, 2 oral.
   //       "floor"      the ground - from behind, or no contact
   //       "coat-top"   a bodyCoat on the TOP - face to face, under or over them
   //       "coat-self"  a bodyCoat on the BOTTOM - folded, aimed at themselves
@@ -4919,7 +5365,7 @@ Object.assign(window.AFLP, {
     //
     // KNOWN DISAGREEMENT, NOT FIXED HERE: `amp-cock-ride` is the other
     // receiverIsTop position and carries penile:TRUE, so its COCK chip credits
-    // the wrong side. Flagged for Ardis rather than changed silently.
+    // the wrong side. Flagged for a ruling rather than changed silently.
     { id:"beast-ride-pussy",    uuid:"Compendium.ardisfoxxs-lewd-pf2e.aflp-lewd-items.Item.VQ5oMEIwPJkHjHEY", receiverIsTop:true, desc:"The rider mounts the beast from above and fucks its pussy, hands braced on its flanks.", label:(p)=>`Beast Ride`,            logPhrase:(a,t,p)=>`${t} climbs astride ${a} and fucks them`,                      hole:"vaginal", positionTrait:"quadruped", penile:false },
     { id:"beast-ride-anal",     uuid:null, receiverIsTop:true, desc:"The rider mounts the beast from above and takes its ass, gripping its haunches for leverage.", label:(p)=>`Beast Ride (Anal)`, logPhrase:(a,t,p)=>`${t} climbs astride ${a} and takes their ass`,                 hole:"anal",    positionTrait:"quadruped", penile:false },
 
@@ -5446,7 +5892,7 @@ Object.assign(window.AFLP, {
     // The mirror of Heavy, and the second SHRINKING subtype in the module after
     // `cock-micro`. -1 tits size with a floor of 1, because 0 is the reserved
     // value for "this creature has no tits" - see AFLP.titsSize. Added 27 Aug
-    // 2026 at Ardis's request. `uuid: null` like every other tits row: these
+    // 2026. `uuid: null` like every other tits row: these
     // resolve by aflrKey through the built content index, so a new card needs no
     // id written here and none is invented.
     "tits-itty-bitty":   { name: "Itty Bitty",    uuid: null, parent: "tits" },
@@ -5457,9 +5903,8 @@ Object.assign(window.AFLP, {
 
     // Chest: the base every body has, and the one the chest coat sits on. Tits
     // OVERRIDE it - a creature with tits reads the Tits card, which carries the
-    // same Coated paragraph. It has no subtypes by design (Ardis, 29 Aug 2026:
-    // "I don't plan on making special chest anatomy types besides that base one"),
-    // so it exists to give the sheet's Chest Coat row an anatomy to hang on and to
+    // same Coated paragraph. It has no subtypes by design (29 Aug 2026) - there
+    // are no special chest anatomy types beyond the base one - so it exists to give the sheet's Chest Coat row an anatomy to hang on and to
     // give a flat-chested creature a card that states the coat rule.
     // `uuid: null` like tits / throat / ass - these resolve by aflrKey through the
     // built content index, so the card needs no id written here.
@@ -5730,8 +6175,8 @@ Object.assign(window.AFLP, {
       }
     }
 
-    // Same rule for the chest: every body has one, tits or not. Ardis, 29 Aug
-    // 2026: "Chest should seed true at creation like ass and throat."
+    // Same rule for the chest: every body has one, tits or not, so Chest seeds
+    // true at creation like ass and throat (29 Aug 2026).
     //
     // The sheet does NOT depend on this seed - it shows the Chest Coat row unless
     // the key is explicitly false - so this exists so the anatomy editor starts
@@ -6035,10 +6480,10 @@ AFLP._macroRefsResolve = function (command) {
 // WHY A DECORATOR RATHER THAN FIVE EDITED BODIES: this changes WHEN a write runs
 // and nothing about WHERE it goes. Every store keeps its own path - Foundry-native
 // statuses, condition ITEMS, the `aflpConditions` flag bag and the dual-store
-// doors are all reached by exactly the code that reached them before. Ardis,
-// 23 Aug 2026: "we do use both foundry native effect conditions and flag based
-// effect conditions where its useful to have one or the other or both... don't
-// break anything that works." A queue cannot break a store it never inspects.
+// doors are all reached by exactly the code that reached them before. AFLR uses
+// both Foundry-native effect conditions and flag-based ones, each where it is
+// useful and sometimes both, and nothing that works may be broken by this. A
+// queue cannot break a store it never inspects.
 //
 // The chain lives on the client that actually WRITES: a caller who fails
 // `canWrite` is passed straight through, so its own method forwards to the GM and
@@ -6265,10 +6710,10 @@ AFLP.hornyTotal = (actor) => {
 // the per-system branch lives in ONE place.
 //
 // THE PERMANENT BUCKET IS A FLOOR THAT SURVIVES A REST, and it is SOURCED.
-// Ardis, 19 Aug 2026: "certain effects give floors like 'your horny can't be
-// reduced below 1' and some grant horny when certain items are equipped such as
-// bondage on a bondage princess, which persists as 'permanent' and doesn't get
-// cleared on rest." A single number could not do that: Bondage Princess is a
+// Some effects give floors like "your Horny can't be reduced below 1", and some
+// grant Horny while certain items are equipped - bondage on a Bondage Princess -
+// which persists as permanent and is not cleared on rest (19 Aug 2026). A single
+// number could not do that: Bondage Princess is a
 // WHILE clause ("While affected by a Bondage or restraining Carnal effect, gain
 // a Horny token") that has to come back off when the rope does, and Aphrodisiac
 // Junkie Mastery's permanent 3 must not be clobbered by it. `sources` keys each

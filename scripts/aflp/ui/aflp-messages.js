@@ -236,7 +236,11 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
   // Column titles are the sheet's labels: the two COATS read "Facial Coat" and
   // "Chest Coat" there, so a GM editing the ladders sees the same words they see
   // on a character. 29 Aug 2026.
-  static COL_TITLES = { vaginal: "Pussy", anal: "Anal", oral: "Oral", facial: "Facial Coat", tits: "Tits", bodyCoat: "Chest Coat", onahole: "Nipples" };
+  // "Breeding Ass" is the SECOND ladder the anal pool can read - the one a gut
+  // that carries gets - so it sits beside Anal rather than replacing it, the same
+  // way Tits sits beside Chest Coat. A key with no title here is title-cased from
+  // the key, which would have read "AnalBreeding". 18 Sept 2026.
+  static COL_TITLES = { vaginal: "Pussy", anal: "Anal", analBreeding: "Breeding Ass", oral: "Oral", facial: "Facial Coat", tits: "Tits", bodyCoat: "Chest Coat", onahole: "Nipples" };
   _holeKeys() { return Object.keys(AFLP.CF_HOLE_WORDS ?? {}); }
   _colTitle(h) { return CumflationLabelsApp.COL_TITLES[h] ?? (h.charAt(0).toUpperCase() + h.slice(1)); }
 
@@ -273,7 +277,10 @@ class CumflationLabelsApp extends foundry.applications.api.ApplicationV2 {
       .aflp-cf-f button { padding: 4px 14px; font-size: 11px; cursor: pointer; }
       .aflp-cf-t th { font-size:9px; color:#888; text-align:left; padding:0 4px 4px; position: sticky; top: 0; background: #1b1b1d; z-index: 1; }
     </style>
-    <div class="aflp-cf-i">Rename each cumflation label. Blank keeps the default. Overall shows on H-Scene cards; the hole columns show per-hole on the sheet. Chest reads as Tits on an actor with tits, otherwise Chest.</div>
+    <!-- Two columns are the SECOND read of a pool rather than a pool of their own,
+         and a GM editing a column that never appears on their table has no way to
+         tell. Name the condition for each one. AFLP.cfWordHole is the rule. -->
+    <div class="aflp-cf-i">Rename each cumflation label. Blank keeps the default. Overall shows on H-Scene cards; the hole columns show per-hole on the sheet. Chest reads as Tits on an actor with tits, otherwise Chest. Anal reads as Breeding Ass on an actor whose ass can carry - Fertile, Breeder, Clutch or Litter - otherwise Anal.</div>
     <div class="aflp-cf-t">
       <table style="border-collapse:collapse;width:100%">
         <thead><tr>

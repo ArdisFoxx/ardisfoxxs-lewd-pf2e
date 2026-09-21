@@ -350,20 +350,19 @@
 
     // THE BULL'S GRIP, and the two rulings that shape where this line sits.
     //
-    // Ardis, 26 Aug 2026: the Bull card's Greater beat promised "+2 to Sexual
+    // Until 26 Aug 2026 the Bull card's Greater beat promised "+2 to Sexual
     // Advance checks against a creature you have grabbed" and there is no Sexual
     // Advance check - Carnal Press rolls nothing. It is now "+2 to your Fortitude
     // DC against Escape attempts by creatures you have grabbed", which is this.
     //
     // 1. AFTER THE REDUCE, NOT INSIDE IT. `escapeTargetActor` is picked by RAW
     //    Fortitude above, so a Bull who is not already the highest sets nothing
-    //    and the group DC does not move. Ardis: "the bull in a group should not
-    //    contribute a group bonus - its ok for them to contribute nothing unless
-    //    they're already the highest. adding a silent group bonus is not a good
-    //    idea." Folding it into the reduce is the version that does that, and it
+    //    and the group DC does not move. That is intended: a Bull in a group
+    //    contributes no group bonus, and contributes nothing unless already the
+    //    highest - a silent group bonus would be wrong. Folding it into the reduce is the version that does that, and it
     //    is one edit away from happening by accident.
-    // 2. `escapeDC` ONLY. Ardis: "its nothing to do with the other struggle
-    //    variants because they don't pertain to escaping a Bull's grip." The Will
+    // 2. `escapeDC` ONLY. The other struggle variants have nothing to do with
+    //    this, because they do not pertain to escaping a Bull's grip. The Will
     //    and Perception DCs below read the same actor, so leaving them alone is
     //    what NOT touching them means - no gate required.
     const escapeBull    = AFLP.bullGripDC?.(escapeTargetActor) ?? 0;
@@ -408,8 +407,8 @@
       escapeVariantId = escResult;
     }
 
-    // THE SLICK, ON ALL FOUR VARIANTS. Ardis, 29 Aug 2026: the chest coat's
-    // circumstance bonus applies to "all escape attempt rolls" - so it rides every
+    // THE SLICK, ON ALL FOUR VARIANTS (29 Aug 2026). The chest coat's
+    // circumstance bonus applies to all escape attempt rolls, so it rides every
     // Struggle Escape, not only the Athletics one. Empty array when the creature is
     // not slick, or off PF2e, so the call sites need no branch.
     //
@@ -819,7 +818,7 @@
     //
     // So the player watched their character get hit, get told to run the cum macro
     // by hand, and only THEN get pulled into a scene they had already climaxed
-    // outside of. That is the bug Ardis reported.
+    // outside of. That was the bug.
     //
     // The gangbang macro already carries this rule in its own words - "Open the
     // scene FIRST, then apply arousal - so a target whose arousal maxes resolves

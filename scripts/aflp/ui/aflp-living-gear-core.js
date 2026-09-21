@@ -1,14 +1,11 @@
 // ===============================
 // AFLP Living Gear - CORE ENGINE (no tables, no system knowledge)
 // ===============================
-// Split out of `aflp-living-gear.js` on 27 August 2026, on Ardis's instruction:
+// Split out of `aflp-living-gear.js` on 27 August 2026. Each system's tables
+// live in their own file, because one table shared between PF2e and Daggerheart
+// conflated the two and nearly every defect traced back to that.
 //
-//   "it might be better to separate the tables in files that pertain to each
-//    system if it means you're going to get confused by conflating pf2e things
-//    with dh things... 90% of your blockages are from failed assumptions and
-//    trying to force pf2e and dh to share one table."
-//
-// He was describing a measured failure, not a preference. The single shared
+// That was a measured failure, not a preference. The single shared
 // table produced, in one week: `gemstone-plug` (DH) sealing nothing because the
 // row was keyed to PF2e's `gemstone-buttplug`; `living-femboy-cage` (DH) nearly
 // granted a Denied floor its card never promises, because PF2e's
@@ -46,7 +43,63 @@ window.AFLP_LivingGearCore = {
     for (const key of Object.keys(this.GRANTS)) {
       if (AFLP.itemHasKey?.(item, key)) return key;
     }
+    // A GM'S OWN ITEM CARRYING A ROW OF ITS OWN. Same shape as
+    // `chastityGear._homebrewRow` and the same reason: the table is a fixed list
+    // of AFLR's pieces, and a homebrew item is in it by definition never. Its key
+    // is its own - `homebrew:<id>` - so it is never mistaken for an AFLR piece by
+    // the curse tables, the audits or anything else keyed by `aflrKey`.
+    if (this._homebrewGrant(item)) return `homebrew:${item.id}`;
     return null;
+  },
+
+  // ── A GM'S OWN GRANT ROW ────────────────────────────────────────────────────
+  //
+  // Written by the homebrew item panel when a preset is attached, cleared when it
+  // is removed. Shaped like a `GRANTS` row so everything below reads it unchanged.
+  //
+  // CONDITIONS ONLY, AND THAT IS A DECISION RATHER THAN AN OMISSION. Measured on
+  // PF2e, 15 Sept 2026: of the three rows in that table, one is `companions`
+  // (Chastity Harness of the Throat Sleeve Slave FITS four other AFLR items onto
+  // the wearer) and one carries `anatomy` (Living Cock Cage grants ass-cumfinity,
+  // which outlives the item). Copying either would make a homebrew item spawn AFLR
+  // gear, or permanently alter a body, off the back of "copy a preset" - and both
+  // are the piece's IDENTITY rather than its rules, which is the line this feature
+  // already draws by never lending the `aflrKey`. The panel says so on the line.
+  //
+  // `denied` IS REFUSED HERE, and not for tidiness: `_revoke` writes the dual store
+  // under `living-gear:<key>`, and `chastityGear._deniedSource` produces the SAME
+  // string for the same homebrew item. Two writers on one source id is safe only
+  // while they agree, and the panel lets a GM set a floor and attach a piece
+  // independently. The chastity row owns Denied for homebrew items; nothing else
+  // may write it. `horny` has no such second owner and is allowed.
+  //
+  // GOES STALE IF: a `GRANTS` row gains a field that should ride along, or
+  // `chastityGear` stops owning the homebrew floor.
+  _homebrewGrant(item) {
+    const g = item?.getFlag?.("ardisfoxxs-lewd-pf2e", "homebrewGrant") ?? null;
+    if (!g) return null;
+    const out = {};
+    for (const field of ["conditions", "conditionsIfCock", "conditionsIfPussy"]) {
+      const src = g[field];
+      if (!src || typeof src !== "object") continue;
+      const clean = {};
+      for (const [slug, raw] of Object.entries(src)) {
+        if (slug === "denied") continue;
+        const n = Number(raw) || 0;
+        if (n > 0) clean[slug] = n;
+      }
+      if (Object.keys(clean).length) out[field] = clean;
+    }
+    if (typeof g.conditionsUnless === "string" && g.conditionsUnless) out.conditionsUnless = g.conditionsUnless;
+    return Object.keys(out).length ? out : null;
+  },
+
+  // The definition behind a key: this system's table, or the row on the item for
+  // `homebrew:<id>`. Needs the actor because a homebrew def lives on the item.
+  _defFor(key, actor = null) {
+    const k = String(key ?? "");
+    if (!k.startsWith("homebrew:")) return this.GRANTS[k] ?? null;
+    return this._homebrewGrant(actor?.items?.get(k.slice("homebrew:".length)) ?? null);
   },
 
   // Is this piece counting right now? `_active` reads all three equip shapes -
@@ -123,7 +176,7 @@ window.AFLP_LivingGearCore = {
   },
 
   async _grant(actor, key) {
-    const def = this.GRANTS[key];
+    const def = this._defFor(key, actor);
     if (!actor || !def) return;
     const owned = foundry.utils.deepClone(actor.getFlag(AFLP.FLAG_SCOPE, this.FLAG_OWN) ?? {});
     if (owned[key]) return;                      // already granted, do not double
@@ -193,9 +246,22 @@ window.AFLP_LivingGearCore = {
   // "the piece came off", so it refuses while any copy is still worn; a gated row
   // needs the opposite, to take back what it gave WITHOUT the gear moving. The
   // caller re-grants immediately, so the creature is never left stripped.
+  // REVOKE MUST NOT REQUIRE THE DEFINITION. It used to bail on `!def`, which was
+  // harmless while every def was a fixed table row that could not disappear. A
+  // homebrew row CAN: removing the attached preset deletes it from the item, and
+  // then the def is gone while the grant is still standing on the wearer - so
+  // bailing here would strand the conditions with nothing left to take them off.
+  //
+  // This is the same shape as the Denied floor bug found on 14 Sept: a branch that
+  // only fires while the thing still declares itself cannot clean up after the
+  // declaration is withdrawn. **The record is the only witness left**, so the
+  // record is what this works from, and `def` is now consulted only where it adds
+  // something the record does not carry.
+  //
+  // GOES STALE IF: `_grant` stops writing `record.granted`.
   async _revoke(actor, key, { force = false } = {}) {
-    const def = this.GRANTS[key];
-    if (!actor || !def) return;
+    const def = this._defFor(key, actor);
+    if (!actor) return;
     const owned = foundry.utils.deepClone(actor.getFlag(AFLP.FLAG_SCOPE, this.FLAG_OWN) ?? {});
     const record = owned[key];
     if (!record) return;                          // we never granted it
@@ -203,7 +269,7 @@ window.AFLP_LivingGearCore = {
     // Another copy still on and counting? Then the grant stays.
     if (!force && actor.items?.some(i => this._isGrantItem(i) === key && this._isOn(i))) return;
 
-    if (def.anatomy?.length) {
+    if (def?.anatomy?.length) {
       const af = foundry.utils.deepClone(actor.getFlag(AFLP.FLAG_SCOPE, "anatomyFeatures") ?? {});
       const del = {};
       for (const sub of def.anatomy) {
@@ -222,7 +288,7 @@ window.AFLP_LivingGearCore = {
     // or one taken away that this never gave. `record.granted` is written by
     // `_grant`; the `def.conditions` fallback is for ownership records written
     // before 28 Aug 2026, and can go once no such record is in play.
-    for (const [slug, value] of Object.entries(record.granted ?? def.conditions ?? {})) {
+    for (const [slug, value] of Object.entries(record.granted ?? def?.conditions ?? {})) {
       const dual = this._dualStore(slug);
       if (dual) {
         // WITHDRAWING THE FLOOR IS NOT THE WHOLE JOB. `setSustained(..., 0)`
@@ -236,13 +302,33 @@ window.AFLP_LivingGearCore = {
         // and nothing in the bag distinguishes it afterwards. The record is the
         // only witness.
         //
-        // Guarded the same way as the plain-condition branch below: restore only
-        // when the total is still exactly the floor we lent. If something else
-        // moved it in the meantime, that is not ours to reason about.
-        const prev   = Number(record.conditions?.[slug]) || 0;
-        const before = dual.total(actor);
+        // THE GUARD USED TO BE `before === value` AND IT ATE THE WEARER'S TOKENS.
+        //
+        // It meant "restore only when the total is still exactly the floor we
+        // lent", which is true ONLY when the wearer had nothing of their own. The
+        // moment their own EXCEEDS the floor - the absorbed case this record exists
+        // for - the test is false, the restore is skipped, and `setSustained(0)` has
+        // already dropped the total.
+        //
+        // MEASURED 15 Sept 2026 in dh-test, on a homebrew copy AND on a real Living
+        // Tail Plug as the control, so this is shipped gear and not the homebrew
+        // path: wearer earns Horny 2, the plug lends a floor of 1, total reads 2
+        // while worn (correct - 1 is absorbed), and taking the plug off reads 1.
+        // **A Daggerheart player loses a Horny token to a piece that never lent it.**
+        // Its record said so plainly the whole time: `conditions {horny: 2}` - what
+        // they had - beside `granted {horny: 1}` - what it lent.
+        //
+        // `raiseTo` NEVER LOWERS, so it needs no guard at all: if something else
+        // raised the value higher in the meantime, restoring to the recorded
+        // previous is a no-op, which is exactly the "not ours to reason about"
+        // behaviour the old guard was reaching for. `chastityGear._syncDeniedFloorNow`
+        // already hands `__own` back this way, with no such test - the two owners of
+        // this arithmetic now agree.
+        //
+        // GOES STALE IF: `raiseTo` ever lowers.
+        const prev = Number(record.conditions?.[slug]) || 0;
         await dual.setSustained(actor, `living-gear:${key}`, 0);
-        if (prev > 0 && before === value) await dual.raiseTo(actor, prev);
+        if (prev > 0) await dual.raiseTo(actor, prev);
         continue;
       }
       const now  = Number(AFLP.cond?.value?.(actor, slug)) || 0;
@@ -282,7 +368,26 @@ window.AFLP_LivingGearCore = {
     // correct it only on the next sync.
     try { await AFLP.exoDry?.sync?.(actor); } catch (e) { /* non-fatal */ }
     const owned = actor.getFlag(AFLP.FLAG_SCOPE, this.FLAG_OWN) ?? {};
-    for (const key of Object.keys(this.GRANTS)) {
+    // THE TABLE'S KEYS ARE NOT THE WHOLE LIST ANY MORE.
+    //
+    // Two extra sources, and the second is the one that is easy to miss:
+    //
+    //   the actor's items   a GM's own item carrying a `homebrewGrant` row. Its
+    //                       key exists nowhere but on that item.
+    //   the RECORD          a homebrew row that has since been REMOVED. Nothing on
+    //                       the actor declares it any more, so a walk over items
+    //                       alone would never revoke it and the conditions would
+    //                       stand forever. The record is the only witness left -
+    //                       exactly the leg the Denied floor was missing on 14
+    //                       Sept, in the same situation, for the same reason.
+    //
+    // GOES STALE IF: the ownership record stops being keyed by the same string
+    // `_isGrantItem` returns.
+    const keys = new Set(Object.keys(this.GRANTS));
+    for (const i of (actor.items ?? [])) if (this._homebrewGrant(i)) keys.add(`homebrew:${i.id}`);
+    for (const k of Object.keys(owned)) if (String(k).startsWith("homebrew:")) keys.add(k);
+
+    for (const key of keys) {
       const on = actor.items?.some(i => this._isGrantItem(i) === key && this._isOn(i));
       if (!on) { await this._revoke(actor, key); continue; }
 
@@ -301,14 +406,18 @@ window.AFLP_LivingGearCore = {
       // revoked and re-granted. `_revoke` gives back exactly `record.granted`, so
       // the round trip returns the creature to where it was before re-applying.
       const rec = owned[key];
-      if (rec && this.GRANTS[key]?.conditionsUnless) {
+      // `_defFor`, not `this.GRANTS[key]` - a homebrew row carries its own
+      // `conditionsUnless` (a copied Living Exoskeleton brings `exoskeleton-dry`
+      // with it), and reading the table here would leave that row ungated.
+      const def = this._defFor(key, actor);
+      if (rec && def?.conditionsUnless) {
         // Compared ORDER-INSENSITIVELY. `_conditionsFor` assembles its object by
         // spreading then Object.assign, so a plain JSON compare would treat the same
         // three conditions in a different insertion order as a change and revoke and
         // re-grant on every sync - churn nobody would see until something read the
         // record mid-flight.
         const norm = (o) => Object.entries(o ?? {}).map(([k, v]) => `${k}=${v}`).sort().join(",");
-        if (norm(this._conditionsFor(actor, this.GRANTS[key])) !== norm(rec.granted)) {
+        if (norm(this._conditionsFor(actor, def)) !== norm(rec.granted)) {
           // FORCED, because the piece is still on - see `_revoke`. MEASURED 29 Aug
           // 2026: without it the plain call hit its still-worn guard, returned
           // without deleting the record, and `_grant`'s "already granted" early

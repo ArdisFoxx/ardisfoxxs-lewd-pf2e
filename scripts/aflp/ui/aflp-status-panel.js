@@ -131,7 +131,14 @@
     // and the chest coat on a body with tits. Everything else is still Cumflated*.
     if (hole === "facial") return `${ASSETS}CoatedFacial${n}.webp`;
     if (hole === "bodyCoat") return `${ASSETS}${hasTits ? "CoatedTits" : "CoatedChest"}${n}.webp`;
-    const part = { anal: "Anal", oral: "Oral", vaginal: "Vaginal",
+    // This is called with the WORD hole (see AFLP.cfWordHole), so it has to know
+    // every ladder key, not just the pool keys. `analBreeding` reuses the anal art
+    // deliberately - there is no separate set on disk and inventing a filename
+    // here would render as a hidden icon via the onerror handler, which looks like
+    // nothing rather than like a mistake. An unmapped key falls through to
+    // `Cumflated${n}.webp`, the generic OVERALL set, which is a real file and so
+    // fails silently in exactly the same way.
+    const part = { anal: "Anal", analBreeding: "Anal", oral: "Oral", vaginal: "Vaginal",
                    bodyCoat: "BodyCoat", tits: "Tits", onahole: "Tits" }[hole] ?? "";
     return `${ASSETS}Cumflated${part}${n}.webp`;
   };
@@ -292,7 +299,7 @@
     // first that resolves in the running world.
     //
     // Without them this row had NO tooltip and NO click on Daggerheart, which is
-    // how Ardis found it on 17 Aug 2026. With no ckey it fell back to
+    // how it was found on 17 Aug 2026. With no ckey it fell back to
     // AFLP.conditions.defeated.uuid - the canonical PATHFINDER uuid, in
     // aflp-lewd-items, a pack a Daggerheart world does not load - so _uuidFor
     // resolved nothing, the row got no data-uuid, and a row without one is both
@@ -419,10 +426,9 @@
       ckey: "dubious-consent",
       icon: { cond: "dubious-consent" }, value: a => AFLP.cond.value(a, "effect-dubious-consent") },
     { key: "masturbating", label: "Masturbating", color: "#e88ac0", glyph: "\u264B", band: 3,
-      // PF2E ONLY from 4 Sept 2026, same ruling. Ardis: "the GM will probably just
-      // give them Vulnerable if they think they would be... and the person will
-      // already be weak to a press because masturbating will naturally drive up
-      // their arousal and horny tokens." The DH card was empty, DH registered no
+      // PF2E ONLY from 4 Sept 2026, same ruling. On DH the GM gives Vulnerable if
+      // they think it fits, and the creature is already weak to a press because
+      // masturbating naturally drives up its Arousal and Horny tokens. The DH card was empty, DH registered no
       // status for it, and this row never read the condition anyway - its value is
       // the SCENE state below, which is why setting it by hand did nothing.
       icon: { cond: "masturbating" }, uuidFrom: { cond: "masturbating" },
@@ -512,11 +518,10 @@
       icon: { cond: "swallowed" }, value: a => AFLP.cond.has(a, "swallowed") },
 
     // Buffs
-    // PF2E ONLY from 4 Sept 2026, by Ardis's ruling: "afterglow is more like, in
-    // dh at least, a rule attached to what happens when you climax. so its not
-    // really a condition." On Daggerheart the on-climax outcome IS the Horny or
-    // Defeat token, and naming that outcome as a second thing was "putting a hat
-    // on a hat". PF2e KEEPS IT - there it is a real item carrying a +1 status
+    // PF2E ONLY from 4 Sept 2026. On Daggerheart, Afterglow is a rule attached
+    // to what happens when you climax rather than a condition: the on-climax
+    // outcome IS the Horny or Defeat token, and naming that outcome as a second
+    // thing was putting a hat on a hat. PF2e KEEPS IT - there it is a real item carrying a +1 status
     // bonus, which is a condition by any reading.
     // The DH adapter has treated applyCondition("afterglow") as a no-op since
     // June, so nothing on DH ever set this row; it simply showed a switch that
@@ -533,9 +538,8 @@
     // MEASURED, not guessed. `CONFIG.statusEffects` in dh-test carries 29 of our
     // conditions; this list carried 22 of them. A creature could be Dizzy - and
     // Dizzy makes every Carnal Press auto-land - with nothing on the panel saying
-    // so. Ardis, 4 Sept: "the status panel and the status manager need to have ALL
-    // AFLR/AFLP conditions in it, otherwise users will think that we are shipping
-    // it broken."
+    // so. The status panel and the status manager carry ALL AFLR/AFLP conditions
+    // (4 Sept 2026) - anything less reads to a user as shipping it broken.
     //
     // Coverage runs ONE WAY: every condition needs a row, not every row is a
     // condition. The 10 derived rows above (hypno-slave, cumdump-femboy, egg-host
@@ -582,8 +586,8 @@
 
   // ── TOOLTIP TEXT: ONE HAND-WRITTEN LINE PER ROW ───────────────────────────
   //
-  // Ardis, 4 Sept 2026: "i want a blanket rule of a desc text that i write
-  // manually for each one. clicking it goes to the card."
+  // Blanket rule, 4 Sept 2026: every row has a hand-written description, and
+  // clicking it goes to the card.
   //
   // The panel prefers `desc` over the linked card (see the pointerover handler),
   // so once every row has one the hover is a consistent short line and the CARD
@@ -1205,8 +1209,13 @@
       for (const def of CF_ROW_HOLES) {
         const tier = Math.max(0, Math.min(CF_MAX, Number(cf[def.hole] ?? 0)));
         if (tier <= 0) continue;
-        // The chest pool reads two ways: tits ladder for a tits-having actor.
-        const wordHole = (def.hole === "bodyCoat" && hasTits) ? "tits" : def.hole;
+        // A pool can read more than one ladder: tits ladder for a tits-having
+        // actor's chest coat, breeding ladder for a gut that carries.
+        // AFLP.cfWordHole owns that rule - this and the sheet each used to carry
+        // their own copy of the tits half, which is how a second branch drifts.
+        // The ROW stays keyed on the pool (`def.hole`), so the card link, the
+        // fallback prose and the mechanic line are unchanged; only the WORD moves.
+        const wordHole = AFLP.cfWordHole?.(actor, def.hole) ?? def.hole;
         const w = AFLP.cumflationWordForTier?.(tier, wordHole);
         const label = w?.word ?? `${def.label} ${tier}`;
         const uuid = def.coat ? (AFLP.coatItems?.[def.single] ?? null)
@@ -1905,8 +1914,8 @@
         if (moved < 4) {
           // TOGGLE, NOT OPEN. Clicking the handle again used to stack a second
           // and third "Manage Conditions" dialog on top of the first, because
-          // nothing checked whether one was already up - reported by Ardis,
-          // 4 Sept 2026. A second click now closes the one that is open.
+          // nothing checked whether one was already up (4 Sept 2026). A second
+          // click now closes the one that is open.
           //
           // Matched by TITLE rather than by a handle we keep, because the dialog
           // is awaited inside _openConditionManager and never handed back here.

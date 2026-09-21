@@ -137,10 +137,9 @@
     // a flipped condition does not read as present via the dual-read item path).
     // ── TIMED EFFECTS ARE MIRRORED, NOT REPLACED ───────────────────────────
     //
-    // Ardis, 20 Aug 2026: "probably easier to have effects that have durations to
-    // not be deleted with the flag import. the effect and duration is clean, we
-    // can just have the flag mirror those effects so we get the best of both flag
-    // and effect."
+    // Design, 20 Aug 2026: effects that carry a duration are NOT deleted by the
+    // flag import. The effect and its duration stay clean, and the flag mirrors
+    // the effect - the best of both the flag and the effect.
     //
     // The flag migration deleted the pack item for every `_FLAG_CONDS` key, which
     // is right for a key whose card says `unlimited` and WRONG for one that
